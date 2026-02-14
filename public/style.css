@@ -1,0 +1,68 @@
+/* Additional custom styles if needed, mostly utilizing Tailwind */
+body {
+    background-color: #f9fafb;
+}
+
+/* Smooth fade in for modal */
+#bookingModal.show {
+    opacity: 1;
+}
+
+#bookingModal.show #modalContent {
+    transform: scale(100%);
+}
+
+.slot-btn {
+    transition: all 0.2s ease;
+}
+
+.slot-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.slot-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+/* Calendar Styles */
+.calendar-day {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    cursor: default;
+    transition: all 0.2s;
+}
+
+.calendar-day.active-wednesday {
+    color: #000;
+    font-weight: 700;
+    cursor: pointer;
+    background-color: #f0f9ff;
+    /* Light blue bg to invite click */
+}
+
+.calendar-day.active-wednesday:hover {
+    background-color: #0ea5e9;
+    /* medical-500 */
+    color: white;
+}
+
+.calendar-day.selected {
+    background-color: #0c4a6e !important;
+    /* medical-900 */
+    color: white !important;
+}
+
+.calendar-day.disabled-day {
+    color: #d1d5db;
+    /* gray-300 */
+}
+
+.calendar-day.empty {
+    background: transparent;
+    pointer-events: none;
+}
