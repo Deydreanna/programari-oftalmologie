@@ -138,9 +138,19 @@ document.addEventListener('DOMContentLoaded', () => {
         element.classList.add('selected');
         selectedDate = dateStr;
 
+        // UI Transition
+        const dateSelection = document.getElementById('date-selection');
+        dateSelection.classList.add('minimized');
+
         // UI Updates
         selectedDateDisplay.textContent = `(${dateStr})`;
+
+        // Show slots with animation
         slotsSection.classList.remove('hidden');
+        setTimeout(() => {
+            slotsSection.classList.add('active');
+        }, 50);
+
         dateError.classList.add('hidden');
 
         await fetchSlots(dateStr);

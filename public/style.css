@@ -37,6 +37,53 @@ body {
     transition: all 0.2s;
 }
 
+/* Transition for Minimized Calendar */
+#date-selection.minimized {
+    width: 25%;
+    /* Shrink slightly less than 15% for better visibility on mobile/tablet */
+    transform: scale(0.85);
+    /* Smoothly scale down */
+}
+
+#date-selection.minimized #calendar-title,
+#date-selection.minimized #calendar-subtitle {
+    opacity: 0;
+    pointer-events: none;
+    height: 0;
+    margin: 0;
+}
+
+#date-selection.minimized #calendar-card {
+    box-shadow: none;
+    border-color: transparent;
+    background-color: transparent;
+}
+
+#date-selection.minimized .calendar-day:not(.selected) {
+    opacity: 0.1;
+    /* Fade out other days */
+}
+
+#date-selection.minimized .active-wednesday:not(.selected) {
+    cursor: pointer;
+    opacity: 0.5;
+}
+
+/* Slots Section Active State */
+#slots-section.active {
+    display: block !important;
+    opacity: 1;
+    transform: translateX(0);
+}
+
+@media (max-width: 1024px) {
+    #date-selection.minimized {
+        width: 100%;
+        transform: scale(0.9);
+        margin-bottom: 20px;
+    }
+}
+
 .calendar-day.active-wednesday {
     color: #000;
     font-weight: 700;
