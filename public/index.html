@@ -154,9 +154,9 @@
         <div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 transform scale-95 transition-transform duration-300"
             id="modalContent">
             <div
-                class="px-10 py-8 border-b border-neutral-100 flex justify-between items-center bg-neutral-50 rounded-t-xl">
-                <h3 class="text-2xl font-bold text-neutral-900">Detalii Programare</h3>
-                <button id="closeModal" class="text-gray-400 hover:text-gray-600 transition-colors">
+                class="px-10 py-8 border-b border-white/10 flex justify-between items-center bg-midnight/30 rounded-t-xl">
+                <h3 class="text-2xl font-bold text-white">Detalii Programare</h3>
+                <button id="closeModal" class="text-slate-400 hover:text-white transition-colors">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
                         </path>
@@ -166,10 +166,10 @@
 
             <form id="bookingForm" class="p-8 space-y-6">
                 <div
-                    class="bg-neutral-50 border border-neutral-100 p-6 rounded-xl mb-10 text-lg text-neutral-900 flex justify-around">
-                    <p><strong>Data:</strong> <span id="modalDate" class="text-emerald-500 font-bold"></span></p>
-                    <p class="border-l border-neutral-200 h-6 self-center"></p>
-                    <p><strong>Ora:</strong> <span id="modalTime" class="text-emerald-500 font-bold"></span></p>
+                    class="bg-white/5 border border-white/10 p-6 rounded-xl mb-10 text-lg text-white flex justify-around">
+                    <p><strong>Data:</strong> <span id="modalDate" class="text-indigo-400 font-bold"></span></p>
+                    <p class="border-l border-white/10 h-6 self-center"></p>
+                    <p><strong>Ora:</strong> <span id="modalTime" class="text-indigo-400 font-bold"></span></p>
                 </div>
 
                 <input type="hidden" id="formDate">
@@ -213,7 +213,7 @@
                     </select>
                 </div>
 
-                <div id="diagnosisSection" class="hidden space-y-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <div id="diagnosisSection" class="hidden space-y-3 p-3 bg-white/5 rounded-lg border border-white/10">
                     <div class="flex items-center gap-2">
                         <input type="checkbox" id="hasDiagnosis" class="w-4 h-4 text-medical-600 rounded">
                         <label for="hasDiagnosis" class="text-sm font-medium text-gray-700">Ați primit un
@@ -253,40 +253,46 @@
     <div id="adminLoginModal"
         class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden flex items-center justify-center z-50 backdrop-blur-sm">
         <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full mx-4 p-6">
-            <h3 class="text-lg font-bold text-gray-800 mb-4">Autentificare Admin</h3>
+            <h3 class="text-lg font-bold text-white mb-4">Autentificare Admin</h3>
             <form id="adminLoginForm" class="space-y-4">
-                <input type="password" id="adminPassword" required class="w-full px-3 py-2 border rounded-md"
+                <input type="password" id="adminPassword" required
+                    class="w-full px-3 py-2 border rounded-md bg-midnight text-white border-white/10"
                     placeholder="Parolă">
                 <button type="submit"
-                    class="w-full bg-gray-800 text-white py-2 rounded-lg font-semibold hover:bg-gray-900">Intră</button>
+                    class="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700 transition-colors">Intră</button>
             </form>
-            <button id="closeAdminLogin" class="mt-4 text-sm text-gray-500 w-full hover:text-gray-700">Anulează</button>
+            <button id="closeAdminLogin"
+                class="mt-4 text-sm text-slate-400 w-full hover:text-white transition-colors">Anulează</button>
         </div>
     </div>
 
     <!-- Admin Dashboard -->
-    <div id="adminDashboard" class="fixed inset-0 bg-gray-50 hidden z-50 overflow-y-auto">
-        <div class="max-w-7xl mx-auto px-4 py-6">
-            <div class="flex justify-between items-center mb-6">
-                <h2 class="text-2xl font-bold text-gray-900">Panou Administrare</h2>
+    <div id="adminDashboard" class="fixed inset-0 bg-midnight hidden z-50 overflow-y-auto">
+        <div class="max-w-7xl mx-auto px-4 py-10">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
+                <h2 class="text-3xl font-black text-white font-outfit">Panou Administrare</h2>
                 <div id="storage-indicator" class="hidden flex flex-col items-end gap-1">
-                    <p class="text-xs font-semibold text-gray-500 uppercase">Spațiu Bază de Date (Atlas M0)</p>
-                    <div class="w-48 bg-gray-200 rounded-full h-2">
-                        <div id="storage-bar" class="bg-indigo-600 h-2 rounded-full" style="width: 0%"></div>
+                    <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Spațiu MongoDB Atlas</p>
+                    <div class="w-48 bg-white/5 rounded-full h-1.5 overflow-hidden">
+                        <div id="storage-bar" class="bg-indigo-500 h-full transition-all duration-1000"
+                            style="width: 0%"></div>
                     </div>
-                    <p id="storage-text" class="text-[10px] text-gray-600">Se încarcă...</p>
+                    <p id="storage-text" class="text-[10px] text-slate-400 font-medium">Se încarcă...</p>
                 </div>
                 <div class="flex gap-2">
-                    <button id="prevAdminDate" class="p-2 bg-white border rounded-lg hover:bg-gray-100">
+                    <button id="prevAdminDate"
+                        class="p-2 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-white">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7">
                             </path>
                         </svg>
                     </button>
-                    <div class="flex items-center px-4 bg-white border rounded-lg font-medium text-gray-700">
+                    <div
+                        class="flex items-center px-6 bg-white/5 border border-white/10 rounded-lg font-bold text-indigo-400">
                         <span id="currentAdminDateDisplay">Azi, 15 Februarie</span>
                     </div>
-                    <button id="nextAdminDate" class="p-2 bg-white border rounded-lg hover:bg-gray-100">
+                    <button id="nextAdminDate"
+                        class="p-2 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-white">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7">
                             </path>
@@ -295,7 +301,7 @@
                 </div>
                 <div class="flex gap-2">
                     <button id="resetDatabaseBtn"
-                        class="px-4 py-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 flex items-center gap-2">
+                        class="px-4 py-2 bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded-lg hover:bg-orange-500/20 transition-colors flex items-center gap-2 text-sm font-bold">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
@@ -304,7 +310,7 @@
                         Resetează Datele
                     </button>
                     <button id="exportExcelBtn"
-                        class="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 flex items-center gap-2">
+                        class="px-4 py-2 bg-green-500/10 text-green-400 border border-green-500/20 rounded-lg hover:bg-green-500/20 transition-colors flex items-center gap-2 text-sm font-bold">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
@@ -313,21 +319,23 @@
                         Export Excel
                     </button>
                     <button id="adminLogout"
-                        class="px-4 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200">Deconectare</button>
+                        class="px-4 py-2 bg-white/5 text-slate-300 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-sm font-bold">Deconectare</button>
                 </div>
             </div>
 
             <!-- Timeline View -->
             <div id="timelineContainer"
-                class="bg-[#F0F4F8] rounded-xl shadow-inner border border-gray-200 h-[calc(100vh-250px)] overflow-hidden flex flex-col">
-                <div class="bg-[#E1E8F0] px-4 py-2 border-b border-gray-300 flex justify-between items-center shrink-0">
-                    <span id="timelineHeaderInfo" class="text-sm font-bold text-gray-700">Spital Rezident -
+                class="bg-white/5 rounded-[2rem] shadow-2xl border border-white/10 h-[calc(100vh-300px)] overflow-hidden flex flex-col">
+                <div class="bg-white/5 px-8 py-4 border-b border-white/10 flex justify-between items-center shrink-0">
+                    <span id="timelineHeaderInfo"
+                        class="text-sm font-black text-indigo-400 uppercase tracking-widest">Spital Rezident -
                         Programări</span>
-                    <span id="timelineHeaderCount" class="text-xs font-semibold text-gray-500 uppercase">(0)
+                    <span id="timelineHeaderCount"
+                        class="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">(0)
                         Programări</span>
                 </div>
 
-                <div class="flex-1 overflow-y-auto relative custom-scrollbar bg-white">
+                <div class="flex-1 overflow-y-auto relative custom-scrollbar bg-transparent">
                     <!-- Hour labels column will be sticky -->
                     <div id="timelineGrid" class="flex flex-col min-h-full">
                         <!-- Slots will be injected here -->
@@ -385,7 +393,7 @@
         <p id="toastMessage" class="text-sm text-gray-600"></p>
     </div>
 
-    <script src="script.js?v=2.4"></script>
+    <script src="script.js?v=2.6"></script>
 </body>
 
 </html>

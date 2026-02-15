@@ -231,33 +231,71 @@ label {
 }
 
 .timeline-hour {
-    width: 70px;
+    width: 80px;
     padding: 12px 8px;
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(255, 255, 255, 0.03);
     color: var(--slate-500);
-    font-size: 12px;
-    font-weight: 800;
+    font-size: 11px;
+    font-weight: 900;
     text-align: center;
     border-right: 1px solid var(--midnight-border);
     display: flex;
     align-items: center;
     justify-content: center;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.timeline-slots {
+    flex: 1;
+    position: relative;
+    background: repeating-linear-gradient(90deg,
+            transparent,
+            transparent 19.9%,
+            rgba(255, 255, 255, 0.02) 20%);
 }
 
 .appointment-card {
     background-color: var(--midnight-light);
     color: var(--slate-50);
     border-left-width: 4px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+    margin: 4px;
+    transition: all 0.2s ease;
+}
+
+.appointment-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
 }
 
 .app-type-prima {
     border-color: var(--indigo-400);
-    background-color: rgba(129, 140, 248, 0.1);
+    background-color: rgba(129, 140, 248, 0.15);
 }
 
 .app-type-control {
     border-color: var(--slate-500);
-    background-color: rgba(100, 116, 139, 0.1);
+    background-color: rgba(100, 116, 139, 0.15);
+}
+
+/* Custom Scrollbar for Admin */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
 }
 
 .view-file-link {
