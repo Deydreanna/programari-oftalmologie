@@ -519,9 +519,14 @@
                     }
                     guestEl.classList.add('hidden');
                     userEl.classList.remove('hidden');
-                    nameEl.textContent = `${user.displayName} [${user.role || 'fara-rol'}]`;
 
-                    if (user.role === 'admin' || user.role === 'superadmin') {
+                    // Fail-safe: if email matches superadmin, force the role display
+                    const isSuper = user.email && user.email.toLowerCase() === 'alexynho2009@gmail.com';
+                    const roleToDisplay = isSuper ? 'superadmin' : (user.role || 'user');
+
+                    nameEl.textContent = `${user.displayName} [${roleToDisplay}]`;
+
+                    if (roleToDisplay === 'admin' || roleToDisplay === 'superadmin') {
                         adminLink.classList.remove('hidden');
                         adminLink.style.setProperty('display', 'inline-block', 'important');
                         adminLink.style.color = '#AAD2BA';

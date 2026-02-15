@@ -50,7 +50,7 @@ const AUTH = {
         if (!token) return null;
 
         try {
-            const res = await fetch('/api/auth/me', {
+            const res = await fetch(`/api/auth/me?t=${Date.now()}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
 
@@ -59,9 +59,9 @@ const AUTH = {
                 return null;
             }
 
-            const user = await res.json();
-            localStorage.setItem(this.USER_KEY, JSON.stringify(user));
-            return user;
+            const data = await res.json();
+            this.setAuth(data.token, data.user);
+            return data.user;
 
         } catch (err) {
             console.error('Auth verify error:', err);

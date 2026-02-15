@@ -112,7 +112,7 @@ function optionalAuth(req, res, next) {
 }
 
 // Required Admin middleware
-function requireAdmin(req, res, next) {
+async function requireAdmin(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).json({ error: 'Autentificare necesară.' });
@@ -121,8 +121,9 @@ function requireAdmin(req, res, next) {
     const token = authHeader.split(' ')[1];
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        if (decoded.role === 'admin' || decoded.role === 'superadmin') {
-            req.user = decoded;
+        const user = await User.findById(decoded.id);
+        if (user && (user.role === 'admin' || user.role === 'superadmin')) {
+            req.user = user;
             next();
         } else {
             res.status(403).json({ error: 'Acces interzis. Drepturi de administrator necesare.' });
@@ -133,7 +134,7 @@ function requireAdmin(req, res, next) {
 }
 
 // Required Super Admin middleware
-function requireSuperAdmin(req, res, next) {
+async function requireSuperAdmin(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).json({ error: 'Autentificare necesară.' });
@@ -142,8 +143,9 @@ function requireSuperAdmin(req, res, next) {
     const token = authHeader.split(' ')[1];
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        if (decoded.role === 'superadmin') {
-            req.user = decoded;
+        const user = await User.findById(decoded.id);
+        if (user && user.role === 'superadmin') {
+            req.user = user;
             next();
         } else {
             res.status(403).json({ error: 'Acces interzis. Doar Super Admin are acces aici.' });
@@ -288,13 +290,19 @@ app.get('/api/auth/me', async (req, res) => {
             return res.status(404).json({ error: 'Utilizator negăsit.' });
         }
 
+        // Return a fresh token too, in case role changed
+        const newToken = generateToken(user);
+
         res.json({
-            id: user._id,
-            email: user.email,
-            phone: user.phone,
-            displayName: user.displayName,
-            role: user.role,
-            createdAt: user.createdAt
+            token: newToken,
+            user: {
+                id: user._id,
+                email: user.email,
+                phone: user.phone,
+                displayName: user.displayName,
+                role: user.role,
+                createdAt: user.createdAt
+            }
         });
 
     } catch (err) {
