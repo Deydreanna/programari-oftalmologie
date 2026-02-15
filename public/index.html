@@ -18,20 +18,21 @@
                         sans: ['Geist Sans', 'Inter', 'sans-serif'],
                     },
                     colors: {
+                        midnight: {
+                            DEFAULT: '#0F0A1F',
+                            light: '#1A1435',
+                        },
                         indigo: {
-                            50: '#EEF2FF',
-                            100: '#E0E7FF',
+                            400: '#818CF8',
                             500: '#6366F1',
                             600: '#4F46E5',
-                            700: '#4338CA',
+                            950: '#1E1B4B',
                         },
                         slate: {
                             50: '#F8FAFC',
                             100: '#F1F5F9',
-                            200: '#E2E8F0',
-                            600: '#475569',
-                            800: '#1E293B',
-                            900: '#0F172A',
+                            300: '#CBD5E1',
+                            500: '#64748B',
                         }
                     }
                 }
@@ -40,7 +41,7 @@
     </script>
 </head>
 
-<body class="bg-white text-slate-900 font-sans antialiased">
+<body class="bg-midnight text-slate-50 font-sans antialiased">
 
     <!-- Header -->
     <header class="bg-white border-b border-slate-50 py-16">
@@ -77,7 +78,7 @@
                         Selectați o zi disponibilă pentru a vedea intervalele de consult.</p>
 
                     <div id="calendar-card"
-                        class="max-w-md mx-auto bg-white p-6 transition-all duration-700 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
+                        class="max-w-md mx-auto bg-midnight-light p-6 transition-all duration-700 rounded-[2rem] border border-white/10 shadow-2xl relative overflow-hidden">
                         <div class="flex justify-between items-center mb-4 calendar-nav">
                             <button id="prevMonth"
                                 class="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600">
@@ -121,11 +122,12 @@
             <!-- Step 2: Select Slot -->
             <section id="slots-section"
                 class="hidden w-full opacity-0 transition-all duration-700 transform translate-x-10">
-                <div class="bg-white p-10 rounded-[2rem] border border-slate-100 shadow-sm">
-                    <h2 class="text-2xl font-bold mb-2 text-slate-900">
+                <div
+                    class="bg-midnight-light/50 backdrop-blur-xl p-10 rounded-[2rem] border border-white/10 shadow-2xl">
+                    <h2 class="text-2xl font-bold mb-2 text-white">
                         Intervale Disponibile</h2>
-                    <p class="text-slate-500 mb-10">Data: <span id="selectedDateDisplay"
-                            class="text-indigo-600 font-bold"></span></p>
+                    <p class="text-slate-300 mb-10">Data: <span id="selectedDateDisplay"
+                            class="text-indigo-400 font-bold"></span></p>
 
                     <div id="slotsGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-4">
                         <!-- Slots dynamic render -->
@@ -376,7 +378,7 @@
         <p id="toastMessage" class="text-sm text-gray-600"></p>
     </div>
 
-    <script src="script.js?v=2.0"></script>
+    <script src="script.js?v=2.1"></script>
 </body>
 
 </html>

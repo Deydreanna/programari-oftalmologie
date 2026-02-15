@@ -1,17 +1,18 @@
-/* Apple Health Style Design System */
+/* Dark Violet Theme Design System */
 :root {
-    --bg-white: #FFFFFF;
+    --midnight: #0F0A1F;
+    --midnight-light: #1A1435;
+    --midnight-border: rgba(255, 255, 255, 0.1);
     --slate-50: #F8FAFC;
-    --slate-100: #F1F5F9;
-    --slate-200: #E2E8F0;
+    --slate-300: #CBD5E1;
     --slate-500: #64748B;
-    --slate-900: #0F172A;
+    --indigo-400: #818CF8;
     --indigo-600: #4F46E5;
 }
 
 body {
-    background-color: var(--bg-white);
-    color: var(--slate-900);
+    background-color: var(--midnight);
+    color: var(--slate-50);
     font-family: 'Geist Sans', 'Inter', system-ui, sans-serif;
     letter-spacing: -0.02em;
 }
@@ -22,7 +23,7 @@ h2,
 h3 {
     font-weight: 900;
     letter-spacing: -0.04em;
-    color: var(--slate-900);
+    color: white;
 }
 
 /* Modal Transitions */
@@ -30,7 +31,8 @@ h3 {
 #adminLoginModal {
     opacity: 0;
     transition: opacity 0.3s ease;
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(12px);
+    background-color: rgba(15, 10, 31, 0.8);
 }
 
 #bookingModal.show,
@@ -45,15 +47,26 @@ h3 {
 
 #modalContent,
 #adminLoginModal>div {
+    background-color: var(--midnight-light);
+    border: 1px solid var(--midnight-border);
     transform: scale(95%);
     transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* Calendar Container Refinements */
 #calendar-card {
-    border: 1px solid var(--slate-100);
+    background-color: var(--midnight-light);
+    border: 1px solid var(--midnight-border);
     border-radius: 2rem;
-    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+#currentMonthYear {
+    color: white !important;
+}
+
+.calendar-days-header div {
+    color: var(--slate-500);
 }
 
 /* Calendar Days with Hover Bubble */
@@ -72,15 +85,11 @@ h3 {
     z-index: 1;
 }
 
-.day-bubble {
-    position: relative;
-}
-
 .day-bubble::before {
     content: '';
     position: absolute;
     inset: 4px;
-    background: var(--slate-100);
+    background: rgba(255, 255, 255, 0.05);
     border-radius: 50%;
     z-index: -1;
     transform: scale(0);
@@ -92,14 +101,14 @@ h3 {
 }
 
 .calendar-day.active-wednesday {
-    color: var(--slate-900) !important;
+    color: white !important;
     font-weight: 800;
     cursor: pointer;
 }
 
 .calendar-day.disabled-day {
     color: var(--slate-500) !important;
-    opacity: 0.4;
+    opacity: 0.6;
 }
 
 .calendar-day.selected {
@@ -107,38 +116,33 @@ h3 {
 }
 
 .calendar-day.selected::before {
-    background: var(--indigo-600) !important;
+    background: var(--indigo-400) !important;
     transform: scale(1) !important;
+    box-shadow: 0 0 15px rgba(129, 140, 248, 0.5);
 }
 
 .availability-dot {
     width: 4px;
     height: 4px;
     border-radius: 50%;
-    background-color: var(--indigo-600);
+    background-color: var(--indigo-400);
     margin-top: 2px;
-    opacity: 0.6;
 }
 
 .calendar-day.selected .availability-dot {
     background-color: white;
 }
 
-/* Transition for Minimized Calendar - Improved Sidebar Mode */
+/* Transition for Minimized Calendar */
 #date-selection.minimized {
     width: 350px !important;
     flex-shrink: 0;
 }
 
 #date-selection.minimized #calendar-card {
-    transform: scale(0.9);
-    transform-origin: top left;
-    margin-top: -1rem;
-}
-
-#date-selection.minimized .calendar-day:not(.selected) {
-    opacity: 0.4;
-    /* Better visibility than 0.05 */
+    background: transparent;
+    border: none;
+    box-shadow: none;
 }
 
 /* Slots Section visibility */
@@ -150,9 +154,9 @@ h3 {
 
 /* Slot Chips */
 .slot-btn {
-    background-color: var(--slate-50);
-    border: 1px solid var(--slate-100);
-    color: var(--slate-900);
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--midnight-border);
+    color: var(--slate-300);
     padding: 12px 16px;
     border-radius: 12px;
     font-weight: 600;
@@ -160,80 +164,77 @@ h3 {
 }
 
 .slot-btn:hover:not(:disabled) {
-    background-color: var(--indigo-600);
+    background-color: var(--indigo-400);
     color: white;
-    border-color: var(--indigo-600);
+    border-color: var(--indigo-400);
     transform: scale(1.05);
+    box-shadow: 0 10px 15px -3px rgba(129, 140, 248, 0.3);
 }
 
 .slot-btn:disabled {
-    opacity: 0.3;
+    opacity: 0.2;
     text-decoration: line-through;
     cursor: not-allowed;
-}
-
-/* Staggered Fade-in Animation for Slots */
-@keyframes staggeredIn {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.slot-animation {
-    animation: staggeredIn 0.4s ease forwards;
-    opacity: 0;
 }
 
 /* Form Styles */
 input,
 select {
-    border: 1px solid var(--slate-200) !important;
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid var(--midnight-border) !important;
+    color: white !important;
     border-radius: 12px !important;
     padding: 12px 16px !important;
-    transition: all 0.2s !important;
 }
 
 input:focus,
 select:focus {
-    border-color: var(--indigo-600) !important;
-    box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1) !important;
-    outline: none !important;
+    border-color: var(--indigo-400) !important;
+    box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.2) !important;
 }
 
-/* Back Button */
-.back-btn {
-    display: none;
-    align-items: center;
-    gap: 8px;
-    color: var(--indigo-600);
-    font-weight: 600;
-    margin-bottom: 2rem;
-    transition: opacity 0.2s;
+label {
+    color: var(--slate-300) !important;
 }
 
-#date-selection.minimized .back-btn {
+/* Timeline Layout Styles (Admin) */
+.timeline-row {
     display: flex;
+    border-bottom: 1px solid var(--midnight-border);
+    min-height: 54px;
 }
 
-/* Admin Specifics */
+.timeline-hour {
+    width: 70px;
+    padding: 12px 8px;
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--slate-500);
+    font-size: 12px;
+    font-weight: 800;
+    text-align: center;
+    border-right: 1px solid var(--midnight-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .appointment-card {
-    border-radius: 12px;
-    border-left: 4px solid var(--indigo-600);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    background-color: var(--midnight-light);
+    color: var(--slate-50);
+    border-left-width: 4px;
 }
 
 .app-type-prima {
-    background-color: #EEF2FF;
-    border-color: var(--indigo-600);
+    border-color: var(--indigo-400);
+    background-color: rgba(129, 140, 248, 0.1);
 }
 
 .app-type-control {
-    background-color: #F8FAFC;
-    border-color: var(--slate-200);
+    border-color: var(--slate-500);
+    background-color: rgba(100, 116, 139, 0.1);
+}
+
+.view-file-link {
+    background-color: var(--indigo-400);
+    color: white;
 }
