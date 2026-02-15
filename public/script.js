@@ -439,6 +439,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let adminActiveDate = new Date();
     adminActiveDate.setHours(0, 0, 0, 0);
 
+    // Ensure admin start date is a Wednesday
+    while (adminActiveDate.getDay() !== 3) {
+        adminActiveDate.setDate(adminActiveDate.getDate() + 1);
+    }
+
     // Toggle Login Modal
     adminLoginBtn.addEventListener('click', () => {
         adminLoginModal.classList.remove('hidden');
@@ -500,13 +505,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     prevAdminDate.onclick = () => {
-        adminActiveDate.setDate(adminActiveDate.getDate() - 1);
+        adminActiveDate.setDate(adminActiveDate.getDate() - 7); // Jump to previous Wednesday
         updateAdminDateDisplay();
         fetchAdminAppointments();
     };
 
     nextAdminDate.onclick = () => {
-        adminActiveDate.setDate(adminActiveDate.getDate() + 1);
+        adminActiveDate.setDate(adminActiveDate.getDate() + 7); // Jump to next Wednesday
         updateAdminDateDisplay();
         fetchAdminAppointments();
     };
@@ -571,11 +576,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderTimeline(appointments) {
         timelineGrid.innerHTML = '';
 
-        // Generate all slots from 08:00 to 13:00 (matching your clinic hours)
+        // Generate slots from 09:00 to 13:40 (matching your clinic hours and 20-min slots)
         const clinicHours = [];
-        for (let hour = 8; hour < 14; hour++) {
-            for (let min = 0; min < 60; min += 5) {
-                if (hour === 13 && min > 0) break; // End at 13:00
+        for (let hour = 9; hour < 14; hour++) {
+            for (let min = 0; min < 60; min += 20) {
+                if (hour === 13 && min > 40) break;
                 const hh = String(hour).padStart(2, '0');
                 const mm = String(min).padStart(2, '0');
                 clinicHours.push(`${hh}:${mm}`);
@@ -596,19 +601,24 @@ document.addEventListener('DOMContentLoaded', () => {
             // Find appointments for this slot
             const appsInSlot = appointments.filter(a => a.time === time);
 
-            appsInSlot.forEach((app, index) => {
+            appsInSlot.forEach((app) => {
                 const card = document.createElement('div');
                 card.className = `appointment-card ${app.type === 'Control' ? 'app-type-control' : 'app-type-prima'}`;
 
-                // Offset if multiple appointments in same slot? (Shouldn't happen with 1 slot/5min logic, but good for safety)
-                if (index > 0) card.style.marginLeft = `${index * 160}px`;
-
                 card.innerHTML = `
-                    <span>➊ ${app.name}</span>
-                    ${app.type === 'Prima Consultație' ? '<span class="app-new-badge">(NOU)</span>' : ''}
-                    ${app.diagnosticFile ? `
-                        <button class="bg-medical-600 text-white rounded px-1 text-[9px] hover:bg-medical-700 view-file-link">DOC</button>
-                    ` : ''}
+                    <div class="flex items-center gap-4 w-full">
+                        <span class="font-black text-gray-800">➊ ${app.name}</span>
+                        ${app.type === 'Prima Consultație' ? '<span class="app-new-badge">(NOU)</span>' : ''}
+                        <span class="text-gray-600">|</span>
+                        <span><strong class="text-[9px] uppercase opacity-60">Tel:</strong> ${app.phone}</span>
+                        <span class="text-gray-600">|</span>
+                        <span><strong class="text-[9px] uppercase opacity-60">CNP:</strong> ${app.cnp}</span>
+                        <span class="text-gray-600">|</span>
+                        <span><strong class="text-[9px] uppercase opacity-60">Tip:</strong> ${app.type}</span>
+                        ${app.diagnosticFile ? `
+                            <button class="ml-auto bg-medical-600 text-white rounded px-2 py-0.5 text-[10px] hover:bg-medical-700 view-file-link shadow-sm">DOC</button>
+                        ` : ''}
+                    </div>
                 `;
 
                 if (app.diagnosticFile) {
@@ -617,10 +627,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         openFileViewer(app.diagnosticFile, app.fileType);
                     };
                 }
-
-                card.onclick = () => {
-                    // Optional: show details
-                };
 
                 slotsArea.appendChild(card);
             });

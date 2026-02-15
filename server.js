@@ -38,18 +38,18 @@ app.use(cors());
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
-// Generate slots: 09:00 - 14:00 (5h), 10-min intervals = 30 slots
+// Generate slots: 09:00 - 14:00 (5h), 20-min intervals = 15 slots
 const generateSlots = () => {
     const slots = [];
     let start = 9 * 60;  // 09:00
-    const end = 14 * 60; // 14:00 (last slot starts at 13:50)
+    const end = 14 * 60; // 14:00 (last slot starts at 13:40)
 
     while (start < end) {
         const hours = Math.floor(start / 60);
         const mins = start % 60;
         const timeStr = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
         slots.push(timeStr);
-        start += 10;
+        start += 20; // 20-minute intervals
     }
     return slots;
 };
