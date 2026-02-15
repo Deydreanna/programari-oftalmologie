@@ -140,6 +140,7 @@ app.get('/api/admin/appointments', async (req, res) => {
             .sort({ date: 1, time: 1 });
         res.json(appointments);
     } catch (err) {
+        console.error('Fetch appointments error:', err);
         res.status(500).json({ error: 'Database error' });
     }
 });

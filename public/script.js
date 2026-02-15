@@ -552,12 +552,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'x-admin-token': token }
             });
 
-            if (res.status === 403) {
-                logout();
-                return;
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || `Server error: ${res.status}`);
             }
 
             const appointments = await res.json();
+            console.log('Fetched appointments:', appointments);
+
+            if (!Array.isArray(appointments)) {
+                throw new Error('Data format error: output is not an array.');
+            }
 
             // Filter appointments for the active date
             const y = adminActiveDate.getFullYear();
@@ -569,7 +574,11 @@ document.addEventListener('DOMContentLoaded', () => {
             renderTimeline(filtered);
             timelineHeaderCount.textContent = `(${filtered.length}) Programări`;
         } catch (err) {
-            timelineGrid.innerHTML = '<div class="p-10 text-center text-red-500">Eroare la încărcare.</div>';
+            console.error('Admin Fetch Error:', err);
+            timelineGrid.innerHTML = `<div class="p-10 text-center text-red-500">
+                Eroare la încărcare.<br>
+                <span class="text-xs opacity-50">${err.message}</span>
+            </div>`;
         }
     }
 
