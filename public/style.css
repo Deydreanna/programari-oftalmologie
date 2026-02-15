@@ -1,8 +1,7 @@
-/* Dark Violet Theme Design System */
 :root {
-    --midnight: #0F0A1F;
-    --midnight-light: #1A1435;
-    --midnight-border: rgba(255, 255, 255, 0.1);
+    --midnight: #0B071A;
+    --midnight-light: #160F2D;
+    --midnight-border: rgba(255, 255, 255, 0.08);
     --slate-50: #F8FAFC;
     --slate-300: #CBD5E1;
     --slate-500: #64748B;
@@ -18,6 +17,10 @@ body {
 }
 
 /* Typography Headings */
+h1 {
+    font-family: 'Outfit', sans-serif;
+}
+
 h1,
 h2,
 h3 {
