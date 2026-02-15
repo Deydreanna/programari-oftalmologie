@@ -35,7 +35,7 @@ const Appointment = mongoose.model('Appointment', appointmentSchema);
 
 // Middleware
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
 // Generate slots: 09:00 - 14:00 (5h), 10-min intervals = 30 slots
@@ -111,6 +111,7 @@ app.post('/api/book', async (req, res) => {
 
         res.json({ success: true, message: 'Programare confirmată!' });
     } catch (err) {
+        console.error('Booking error:', err);
         res.status(500).json({ error: 'Eroare la salvare.' });
     }
 });

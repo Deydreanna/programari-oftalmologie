@@ -23,6 +23,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadingSpinner = document.getElementById('loadingSpinner');
 
     // Diagnosis & File Elements
+    const consultationType = document.getElementById('type');
+    const diagnosisSection = document.getElementById('diagnosisSection');
     const hasDiagnosis = document.getElementById('hasDiagnosis');
     const fileUploadContainer = document.getElementById('fileUploadContainer');
     const diagnosticFileInput = document.getElementById('diagnosticFile');
@@ -78,6 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => {
             bookingModal.classList.add('hidden');
             bookingForm.reset();
+            diagnosisSection.classList.add('hidden');
             fileUploadContainer.classList.add('hidden');
         }, 300);
     }
@@ -245,6 +248,18 @@ document.addEventListener('DOMContentLoaded', () => {
         currentDate.setMonth(currentDate.getMonth() + 1);
         renderCalendar(currentDate);
     };
+
+    // Toggle diagnosis visibility based on Consultation Type
+    consultationType.addEventListener('change', () => {
+        if (consultationType.value === 'Prima Consultație') {
+            diagnosisSection.classList.remove('hidden');
+        } else {
+            diagnosisSection.classList.add('hidden');
+            hasDiagnosis.checked = false;
+            fileUploadContainer.classList.add('hidden');
+            diagnosticFileInput.value = '';
+        }
+    });
 
     hasDiagnosis.addEventListener('change', () => {
         if (hasDiagnosis.checked) {
