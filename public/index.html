@@ -502,24 +502,22 @@
     <script src="script.js?v=6.0"></script>
     <script>
             // Auth state UI on main page
-            (function initAuthUI() {
+            // Auth state UI on main page
+            (async function initAuthUI() {
                 const guestEl = document.getElementById('authGuest');
                 const userEl = document.getElementById('authUser');
                 const nameEl = document.getElementById('authUserName');
                 const logoutBtn = document.getElementById('logoutBtn');
                 const adminLink = document.getElementById('adminLoginBtn');
 
-                if (AUTH.isLoggedIn()) {
-                    const user = AUTH.getUser();
+                // 1. Initial UI based on cache
+                let user = AUTH.getUser();
+                if (AUTH.isLoggedIn() && user) {
                     guestEl.classList.add('hidden');
                     userEl.classList.remove('hidden');
-                    nameEl.textContent = user ? user.displayName : 'Utilizator';
-
-                    // Show admin link if user is admin or superadmin
-                    if (user && (user.role === 'admin' || user.role === 'superadmin')) {
+                    nameEl.textContent = user.displayName;
+                    if (user.role === 'admin' || user.role === 'superadmin') {
                         adminLink.classList.remove('hidden');
-                    } else {
-                        adminLink.classList.add('hidden');
                     }
                 } else {
                     guestEl.classList.remove('hidden');
@@ -527,9 +525,22 @@
                     adminLink.classList.add('hidden');
                 }
 
+                // 2. Verified UI based on server (refreshes roles if they changed)
+                if (AUTH.isLoggedIn()) {
+                    user = await AUTH.verify();
+                    if (user) {
+                        nameEl.textContent = user.displayName;
+                        if (user.role === 'admin' || user.role === 'superadmin') {
+                            adminLink.classList.remove('hidden');
+                        } else {
+                            adminLink.classList.add('hidden');
+                        }
+                    }
+                }
+
                 logoutBtn.addEventListener('click', () => {
                     AUTH.logout();
-                    window.location.reload(); // Reload to reset UI state
+                    window.location.reload();
                 });
             })();
     </script>
