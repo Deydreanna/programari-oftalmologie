@@ -25,6 +25,9 @@ const appointmentSchema = new mongoose.Schema({
     type: String,
     date: String, // String for simplicity (YYYY-MM-DD)
     time: String,
+    hasDiagnosis: { type: Boolean, default: false },
+    diagnosticFile: String, // Base64 data
+    fileType: String,
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -96,7 +99,14 @@ app.post('/api/book', async (req, res) => {
             return res.status(409).json({ error: 'Interval deja rezervat.' });
         }
 
-        const newAppointment = new Appointment({ name, phone, cnp, type, date, time });
+        const { hasDiagnosis, diagnosticFile, fileType } = req.body;
+
+        const newAppointment = new Appointment({
+            name, phone, cnp, type, date, time,
+            hasDiagnosis: !!hasDiagnosis,
+            diagnosticFile,
+            fileType
+        });
         await newAppointment.save();
 
         res.json({ success: true, message: 'Programare confirmată!' });

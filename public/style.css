@@ -39,10 +39,9 @@ body {
 
 /* Transition for Minimized Calendar */
 #date-selection.minimized {
-    width: 25%;
-    /* Shrink slightly less than 15% for better visibility on mobile/tablet */
-    transform: scale(0.85);
-    /* Smoothly scale down */
+    width: 15%;
+    transform: scale(0.8);
+    transform-origin: left top;
 }
 
 #date-selection.minimized #calendar-title,
@@ -81,6 +80,7 @@ body {
         width: 100%;
         transform: scale(0.9);
         margin-bottom: 20px;
+        transform-origin: center top;
     }
 }
 

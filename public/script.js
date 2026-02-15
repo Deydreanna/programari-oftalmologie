@@ -22,6 +22,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const formTime = document.getElementById('formTime');
     const loadingSpinner = document.getElementById('loadingSpinner');
 
+    // Diagnosis & File Elements
+    const hasDiagnosis = document.getElementById('hasDiagnosis');
+    const fileUploadContainer = document.getElementById('fileUploadContainer');
+    const diagnosticFileInput = document.getElementById('diagnosticFile');
+
+    // File Viewer
+    const fileViewerModal = document.getElementById('fileViewerModal');
+    const closeFileViewer = document.getElementById('closeFileViewer');
+    const fileViewerContent = document.getElementById('fileViewerContent');
+    const fileDownloadLink = document.getElementById('fileDownloadLink');
+
     // Toast
     const toast = document.getElementById('toast');
     const toastTitle = document.getElementById('toastTitle');
@@ -67,7 +78,76 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => {
             bookingModal.classList.add('hidden');
             bookingForm.reset();
+            fileUploadContainer.classList.add('hidden');
         }, 300);
+    }
+
+    // --- File Processing ---
+
+    async function processFile(file) {
+        if (!file) return null;
+
+        if (file.type === 'application/pdf') {
+            return {
+                base64: await fileToBase64(file),
+                type: file.type
+            };
+        }
+
+        if (file.type.startsWith('image/')) {
+            const compressedBase64 = await compressImage(file);
+            return {
+                base64: compressedBase64,
+                type: 'image/jpeg'
+            };
+        }
+
+        return null;
+    }
+
+    function fileToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    async function compressImage(file) {
+        const MAX_WIDTH = 1200;
+        const MAX_HEIGHT = 1200;
+        const QUALITY = 0.6;
+
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    let width = img.width;
+                    let height = img.height;
+                    const canvas = document.createElement('canvas');
+                    if (width > height) {
+                        if (width > MAX_WIDTH) {
+                            height *= MAX_WIDTH / width;
+                            width = MAX_WIDTH;
+                        }
+                    } else {
+                        if (height > MAX_HEIGHT) {
+                            width *= MAX_HEIGHT / height;
+                            height = MAX_HEIGHT;
+                        }
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', QUALITY));
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
     }
 
     // --- Calendar Logic ---
@@ -166,6 +246,48 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCalendar(currentDate);
     };
 
+    hasDiagnosis.addEventListener('change', () => {
+        if (hasDiagnosis.checked) {
+            fileUploadContainer.classList.remove('hidden');
+        } else {
+            fileUploadContainer.classList.add('hidden');
+            diagnosticFileInput.value = '';
+        }
+    });
+
+    closeFileViewer.onclick = () => {
+        fileViewerModal.classList.add('hidden');
+        fileViewerContent.innerHTML = '';
+        fileDownloadLink.innerHTML = '';
+    };
+
+    function openFileViewer(base64, type) {
+        fileViewerContent.innerHTML = '';
+        fileDownloadLink.innerHTML = '';
+
+        if (type === 'application/pdf') {
+            fileViewerContent.innerHTML = `
+                <div class="text-center p-10">
+                    <svg class="w-16 h-16 text-red-500 mx-auto mb-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9 2a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V6l-4-4H9z"></path>
+                        <path d="M5 6a2 2 0 012-2h1v10H5V6z"></path>
+                    </svg>
+                    <p class="text-lg font-medium">Document PDF</p>
+                </div>
+            `;
+            fileDownloadLink.innerHTML = `
+                <a href="${base64}" download="diagnostic.pdf" 
+                   class="inline-block bg-medical-600 text-white px-6 py-2 rounded-lg hover:bg-medical-700">
+                   Descarcă PDF
+                </a>
+            `;
+        } else {
+            fileViewerContent.innerHTML = `<img src="${base64}" class="max-w-full h-auto rounded shadow-lg">`;
+        }
+
+        fileViewerModal.classList.remove('hidden');
+    }
+
     // Initial Render
     renderCalendar(currentDate);
 
@@ -239,6 +361,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const date = formDate.value;
         const time = formTime.value;
 
+        // Diagnostic File
+        let fileData = null;
+        if (hasDiagnosis.checked && diagnosticFileInput.files[0]) {
+            fileData = await processFile(diagnosticFileInput.files[0]);
+        }
+
         if (phone.length < 10) {
             showToast('Eroare', 'Numărul de telefon pare invalid.', 'error');
             return;
@@ -257,7 +385,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/api/book', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, phone, cnp, type, date, time })
+                body: JSON.stringify({
+                    name, phone, cnp, type, date, time,
+                    hasDiagnosis: hasDiagnosis.checked,
+                    diagnosticFile: fileData ? fileData.base64 : null,
+                    fileType: fileData ? fileData.type : null
+                })
             });
 
             const data = await res.json();
@@ -381,7 +514,19 @@ document.addEventListener('DOMContentLoaded', () => {
                         ${app.type}
                     </span>
                 </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    ${app.diagnosticFile
+                    ? `<button class="view-file-btn text-medical-600 hover:text-medical-800 font-medium underline">Vezi</button>`
+                    : '<span class="text-gray-300">-</span>'}
+                </td>
             `;
+
+            if (app.diagnosticFile) {
+                row.querySelector('.view-file-btn').onclick = () => {
+                    openFileViewer(app.diagnosticFile, app.fileType);
+                };
+            }
+
             appointmentsTableBody.appendChild(row);
         });
     }
