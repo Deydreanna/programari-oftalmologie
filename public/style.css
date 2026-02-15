@@ -1,43 +1,36 @@
-/* Senior UI/UX Design System */
+/* Apple Health Style Design System */
 :root {
-    --neutral-50: #FAFAFA;
-    --neutral-200: #E5E5E5;
-    --neutral-900: #171717;
-    --emerald-500: #10B981;
-    --emerald-inner-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+    --bg-white: #FFFFFF;
+    --slate-50: #F8FAFC;
+    --slate-100: #F1F5F9;
+    --slate-200: #E2E8F0;
+    --slate-500: #64748B;
+    --slate-900: #0F172A;
+    --indigo-600: #4F46E5;
 }
 
 body {
-    background-color: var(--neutral-50);
-    color: var(--neutral-900);
-    font-family: 'Geist Sans', system-ui, -apple-system, sans-serif;
+    background-color: var(--bg-white);
+    color: var(--slate-900);
+    font-family: 'Geist Sans', 'Inter', system-ui, sans-serif;
     letter-spacing: -0.02em;
 }
 
-.card-lift {
-    border: 1px solid var(--neutral-200);
-    border-radius: 12px;
-    transition: transform 0.4s cubic-bezier(0.2, 1, 0.3, 1), box-shadow 0.4s ease;
-}
-
-.card-lift:hover {
-    transform: scale(1.05);
-    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.05);
-    z-index: 50;
-}
-
+/* Typography Headings */
 h1,
 h2,
-h3,
-.font-serif {
-    font-family: 'Lora', serif;
+h3 {
+    font-weight: 900;
+    letter-spacing: -0.04em;
+    color: var(--slate-900);
 }
 
 /* Modal Transitions */
 #bookingModal,
 #adminLoginModal {
     opacity: 0;
-    transition: opacity 0.3s ease, transform 0.3s ease;
+    transition: opacity 0.3s ease;
+    backdrop-filter: blur(8px);
 }
 
 #bookingModal.show,
@@ -50,89 +43,20 @@ h3,
     transform: scale(100%);
 }
 
+#modalContent,
 #adminLoginModal>div {
     transform: scale(95%);
-    transition: transform 0.3s ease;
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-/* Calendar Refinements */
+/* Calendar Container Refinements */
 #calendar-card {
-    border: 1px solid var(--neutral-200);
+    border: 1px solid var(--slate-100);
+    border-radius: 2rem;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05);
 }
 
-.calendar-day {
-    aspect-ratio: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 8px;
-    cursor: default;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    font-size: 0.95rem;
-    font-weight: 500;
-}
-
-.calendar-day.active-wednesday {
-    color: var(--slate-900);
-    cursor: pointer;
-}
-
-.calendar-day.active-wednesday:hover {
-    color: var(--indigo-600);
-}
-
-.calendar-day.selected {
-    color: white !important;
-}
-
-.calendar-day.disabled-day {
-    color: var(--slate-200);
-}
-
-.calendar-day.empty {
-    background: transparent;
-    pointer-events: none;
-}
-
-/* Slots Grid */
-.slot-btn {
-    border: 1px solid var(--nordic-gray);
-    background: white;
-    color: var(--nordic-text);
-    transition: all 0.2s;
-    border-radius: 4px;
-    font-weight: 400;
-}
-
-.slot-btn:hover:not(:disabled) {
-    border-color: var(--nordic-blue);
-    background-color: #f8fafb;
-    color: var(--nordic-blue);
-    transform: translateY(-1px);
-}
-
-.slot-btn:disabled {
-    opacity: 0.3;
-    pointer-events: none;
-}
-
-/* Modal and Form Elements */
-input,
-select {
-    border: 1px solid var(--nordic-gray) !important;
-    border-radius: 4px !important;
-    background-color: #FFF !important;
-    transition: border-color 0.2s !important;
-}
-
-input:focus,
-select:focus {
-    border-color: var(--nordic-accent) !important;
-    outline: none !important;
-    box-shadow: 0 0 0 2px rgba(123, 140, 125, 0.1) !important;
-}
-
-/* Calendar Days & Dots */
+/* Calendar Days with Hover Bubble */
 .calendar-day {
     aspect-ratio: 1;
     display: flex;
@@ -148,17 +72,42 @@ select:focus {
     z-index: 1;
 }
 
+.day-bubble {
+    position: relative;
+}
+
+.day-bubble::before {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    background: var(--slate-100);
+    border-radius: 50%;
+    z-index: -1;
+    transform: scale(0);
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.day-bubble:hover::before {
+    transform: scale(1);
+}
+
 .calendar-day.active-wednesday {
-    color: var(--slate-900);
+    color: var(--slate-900) !important;
+    font-weight: 800;
     cursor: pointer;
+}
+
+.calendar-day.disabled-day {
+    color: var(--slate-200) !important;
 }
 
 .calendar-day.selected {
     color: white !important;
 }
 
-.calendar-day.disabled-day {
-    color: var(--slate-200);
+.calendar-day.selected::before {
+    background: var(--indigo-600) !important;
+    transform: scale(1) !important;
 }
 
 .availability-dot {
@@ -168,6 +117,33 @@ select:focus {
     background-color: var(--indigo-600);
     margin-top: 2px;
     opacity: 0.6;
+}
+
+.calendar-day.selected .availability-dot {
+    background-color: white;
+}
+
+/* Transition for Minimized Calendar */
+#date-selection.minimized {
+    width: 25% !important;
+}
+
+#date-selection.minimized #calendar-card {
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    background: transparent;
+}
+
+#date-selection.minimized .calendar-day:not(.selected) {
+    opacity: 0.05;
+}
+
+/* Slots Section visibility */
+#slots-section.active {
+    display: block !important;
+    opacity: 1;
+    transform: translateX(0);
 }
 
 /* Slot Chips */
@@ -194,8 +170,68 @@ select:focus {
     cursor: not-allowed;
 }
 
+/* Staggered Fade-in Animation for Slots */
+@keyframes staggeredIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.slot-animation {
+    animation: staggeredIn 0.4s ease forwards;
+    opacity: 0;
+}
+
+/* Form Styles */
+input,
+select {
+    border: 1px solid var(--slate-200) !important;
+    border-radius: 12px !important;
+    padding: 12px 16px !important;
+    transition: all 0.2s !important;
+}
+
+input:focus,
+select:focus {
+    border-color: var(--indigo-600) !important;
+    box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1) !important;
+    outline: none !important;
+}
+
+/* Back Button */
+.back-btn {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    color: var(--indigo-600);
+    font-weight: 600;
+    margin-bottom: 2rem;
+    transition: opacity 0.2s;
+}
+
+#date-selection.minimized .back-btn {
+    display: flex;
+}
+
 /* Admin Specifics */
 .appointment-card {
     border-radius: 12px;
     border-left: 4px solid var(--indigo-600);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.app-type-prima {
+    background-color: #EEF2FF;
+    border-color: var(--indigo-600);
+}
+
+.app-type-control {
+    background-color: #F8FAFC;
+    border-color: var(--slate-200);
 }
