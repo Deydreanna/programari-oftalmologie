@@ -1,11 +1,11 @@
 /* =========================================
    Medical Appointment System — Design System
-   Coolors Palette:
-   #1D1E18 (charcoal)  — text, headings
-   #6B8F71 (sage)      — accent, buttons, links
-   #AAD2BA (mint)      — secondary, borders, hover
-   #D9FFF5 (ice)       — light backgrounds
-   #B9F5D8 (seafoam)   — highlights, calendar
+   Coolors Palette (INVERTED — Dark Mode):
+   #1D1E18 (charcoal)  — primary background
+   #6B8F71 (sage)      — secondary bg, borders
+   #AAD2BA (mint)      — accent buttons, interactive
+   #B9F5D8 (seafoam)   — secondary text, labels
+   #D9FFF5 (ice)       — primary text, headings
    ========================================= */
 
 /* --- Base Typography --- */
@@ -24,36 +24,36 @@ body {
     justify-content: center;
     font-size: 14px;
     font-weight: 800;
-    border: 2px solid #AAD2BA;
-    background: #D9FFF5;
+    border: 2px solid #6B8F71;
+    background: #2A2B23;
     color: #6B8F71;
     transition: all 0.3s ease;
 }
 
 .step-dot.active {
-    background: #6B8F71;
-    border-color: #6B8F71;
-    color: white;
-    box-shadow: 0 0 0 4px rgba(107, 143, 113, 0.2);
+    background: #AAD2BA;
+    border-color: #AAD2BA;
+    color: #1D1E18;
+    box-shadow: 0 0 0 4px rgba(170, 210, 186, 0.2);
 }
 
 .step-dot.completed {
-    background: #1D1E18;
-    border-color: #1D1E18;
-    color: #B9F5D8;
+    background: #6B8F71;
+    border-color: #6B8F71;
+    color: #D9FFF5;
 }
 
 .step-line {
     flex: 1;
     height: 2px;
-    background: #AAD2BA;
+    background: #3A3B32;
     margin: 0 8px;
     border-radius: 1px;
     transition: background 0.3s ease;
 }
 
 .step-line.active {
-    background: #6B8F71;
+    background: #AAD2BA;
 }
 
 /* --- Step Sections --- */
@@ -81,17 +81,17 @@ body {
     width: 42px;
     height: 42px;
     border-radius: 12px;
-    border: 1px solid #AAD2BA;
-    background: white;
-    color: #6B8F71;
+    border: 1px solid #6B8F71;
+    background: #2A2B23;
+    color: #AAD2BA;
     transition: all 0.2s ease;
     cursor: pointer;
 }
 
 .nav-btn:hover {
-    background: #D9FFF5;
-    color: #1D1E18;
-    border-color: #6B8F71;
+    background: #6B8F71;
+    color: #D9FFF5;
+    border-color: #AAD2BA;
 }
 
 .nav-btn:active {
@@ -111,7 +111,7 @@ body {
     border-radius: 12px;
     cursor: default;
     transition: all 0.2s ease;
-    color: #AAD2BA;
+    color: #3A3B32;
 }
 
 .calendar-day.empty {
@@ -119,29 +119,30 @@ body {
 }
 
 .calendar-day.disabled-day {
-    color: #c8e6d0;
+    color: #3A3B32;
     cursor: not-allowed;
 }
 
 .calendar-day.active-wednesday {
-    color: #1D1E18;
+    color: #D9FFF5;
     font-weight: 700;
     cursor: pointer;
-    background: #B9F5D8;
+    background: #6B8F71;
     border: 1.5px solid transparent;
 }
 
 .calendar-day.active-wednesday:hover {
     background: #AAD2BA;
-    border-color: #6B8F71;
+    border-color: #B9F5D8;
+    color: #1D1E18;
     transform: scale(1.08);
 }
 
 .calendar-day.selected {
-    background: #6B8F71 !important;
-    color: white !important;
-    border-color: #6B8F71 !important;
-    box-shadow: 0 4px 12px rgba(107, 143, 113, 0.35);
+    background: #AAD2BA !important;
+    color: #1D1E18 !important;
+    border-color: #B9F5D8 !important;
+    box-shadow: 0 4px 12px rgba(170, 210, 186, 0.3);
     transform: scale(1.08);
 }
 
@@ -153,11 +154,11 @@ body {
     width: 5px;
     height: 5px;
     border-radius: 50%;
-    background: #1D1E18;
+    background: #B9F5D8;
 }
 
 .calendar-day.selected .availability-dot {
-    background: white;
+    background: #1D1E18;
 }
 
 /* --- Form Inputs --- */
@@ -165,7 +166,7 @@ body {
     display: block;
     font-size: 14px;
     font-weight: 600;
-    color: #1D1E18;
+    color: #B9F5D8;
     margin-bottom: 6px;
     text-transform: uppercase;
     letter-spacing: 0.03em;
@@ -175,22 +176,22 @@ body {
     width: 100%;
     padding: 14px 16px;
     font-size: 17px;
-    border: 1.5px solid #AAD2BA;
+    border: 1.5px solid #6B8F71;
     border-radius: 12px;
-    background: #D9FFF5;
-    color: #1D1E18;
+    background: #2A2B23;
+    color: #D9FFF5;
     transition: all 0.2s ease;
     outline: none;
 }
 
 .form-input:focus {
-    border-color: #6B8F71;
-    background: white;
-    box-shadow: 0 0 0 3px rgba(107, 143, 113, 0.15);
+    border-color: #AAD2BA;
+    background: #1D1E18;
+    box-shadow: 0 0 0 3px rgba(170, 210, 186, 0.15);
 }
 
 .form-input::placeholder {
-    color: #AAD2BA;
+    color: #6B8F71;
 }
 
 /* --- Type Selector Buttons --- */
@@ -200,27 +201,27 @@ body {
     justify-content: center;
     gap: 8px;
     padding: 14px 16px;
-    border: 1.5px solid #AAD2BA;
+    border: 1.5px solid #6B8F71;
     border-radius: 12px;
     font-weight: 600;
     font-size: 15px;
-    color: #6B8F71;
-    background: #D9FFF5;
+    color: #AAD2BA;
+    background: #2A2B23;
     cursor: pointer;
     transition: all 0.2s ease;
 }
 
 .type-btn:hover {
-    border-color: #6B8F71;
-    background: #B9F5D8;
-    color: #1D1E18;
+    border-color: #AAD2BA;
+    background: #6B8F71;
+    color: #D9FFF5;
 }
 
 .type-btn.selected {
-    border-color: #6B8F71;
-    background: #B9F5D8;
-    color: #1D1E18;
-    box-shadow: 0 0 0 3px rgba(107, 143, 113, 0.15);
+    border-color: #AAD2BA;
+    background: #6B8F71;
+    color: #D9FFF5;
+    box-shadow: 0 0 0 3px rgba(170, 210, 186, 0.15);
 }
 
 /* --- Drag-and-Drop Zone --- */
@@ -230,9 +231,9 @@ body {
     align-items: center;
     justify-content: center;
     padding: 32px 16px;
-    border: 2px dashed #AAD2BA;
+    border: 2px dashed #6B8F71;
     border-radius: 16px;
-    background: #D9FFF5;
+    background: #2A2B23;
     cursor: pointer;
     transition: all 0.2s ease;
     text-align: center;
@@ -240,8 +241,8 @@ body {
 
 .drop-zone:hover,
 .drop-zone.drag-over {
-    border-color: #6B8F71;
-    background: #B9F5D8;
+    border-color: #AAD2BA;
+    background: #3A3B32;
 }
 
 .drop-zone.drag-over {
@@ -254,9 +255,9 @@ body {
     font-size: 16px;
     font-weight: 700;
     border-radius: 12px;
-    border: 1.5px solid #AAD2BA;
-    background: white;
-    color: #1D1E18;
+    border: 1.5px solid #6B8F71;
+    background: #2A2B23;
+    color: #D9FFF5;
     cursor: pointer;
     transition: all 0.2s ease;
     text-align: center;
@@ -264,11 +265,11 @@ body {
 }
 
 .slot-btn:hover:not(:disabled) {
-    border-color: #6B8F71;
-    background: #B9F5D8;
-    color: #1D1E18;
+    border-color: #AAD2BA;
+    background: #6B8F71;
+    color: #D9FFF5;
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(107, 143, 113, 0.2);
+    box-shadow: 0 4px 12px rgba(107, 143, 113, 0.3);
 }
 
 .slot-btn:active:not(:disabled) {
@@ -276,9 +277,9 @@ body {
 }
 
 .slot-btn:disabled {
-    background: #EDFFF9;
-    color: #AAD2BA;
-    border-color: #D9FFF5;
+    background: #1D1E18;
+    color: #3A3B32;
+    border-color: #2A2B23;
     cursor: not-allowed;
     text-decoration: line-through;
 }
@@ -304,19 +305,19 @@ body {
 /* --- Timeline (Admin) --- */
 .timeline-row {
     display: flex;
-    border-bottom: 1px solid #D9FFF5;
+    border-bottom: 1px solid #2A2B23;
     min-height: 54px;
 }
 
 .timeline-hour {
     width: 80px;
     padding: 14px 8px;
-    background: #D9FFF5;
-    color: #6B8F71;
+    background: #2A2B23;
+    color: #AAD2BA;
     font-size: 13px;
     font-weight: 700;
     text-align: center;
-    border-right: 1px solid #B9F5D8;
+    border-right: 1px solid #3A3B32;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -329,11 +330,11 @@ body {
 }
 
 .appointment-card {
-    background: white;
-    color: #1D1E18;
+    background: #2A2B23;
+    color: #D9FFF5;
     border-left-width: 4px;
     border-radius: 10px;
-    box-shadow: 0 1px 3px rgba(29, 30, 24, 0.06);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
     padding: 10px 14px;
     margin-bottom: 4px;
     transition: all 0.2s ease;
@@ -341,23 +342,23 @@ body {
 }
 
 .appointment-card:hover {
-    box-shadow: 0 4px 12px rgba(29, 30, 24, 0.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     transform: translateY(-1px);
 }
 
 .app-type-prima {
-    border-color: #6B8F71;
-    background: #D9FFF5;
+    border-color: #AAD2BA;
+    background: rgba(107, 143, 113, 0.15);
 }
 
 .app-type-control {
-    border-color: #AAD2BA;
-    background: #EDFFF9;
+    border-color: #6B8F71;
+    background: #2A2B23;
 }
 
 .app-new-badge {
     display: inline-block;
-    background: #B9F5D8;
+    background: #AAD2BA;
     color: #1D1E18;
     font-size: 10px;
     font-weight: 800;
@@ -371,14 +372,14 @@ body {
 .view-file-link {
     font-size: 11px;
     font-weight: 700;
-    color: #6B8F71;
+    color: #AAD2BA;
     cursor: pointer;
     transition: color 0.2s;
     letter-spacing: 0.05em;
 }
 
 .view-file-link:hover {
-    color: #1D1E18;
+    color: #D9FFF5;
     text-decoration: underline;
 }
 
@@ -392,12 +393,12 @@ body {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #AAD2BA;
+    background: #6B8F71;
     border-radius: 10px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #6B8F71;
+    background: #AAD2BA;
 }
 
 /* --- Toast --- */
