@@ -221,17 +221,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
         dateSelection.classList.add('minimized');
 
-        // Brief delay for smoother layout shift
+        // Smoother, slightly longer transition for 'breathable' layout
         setTimeout(() => {
             slotsSection.classList.remove('hidden');
             setTimeout(() => {
                 slotsSection.classList.add('active');
-            }, 50);
-        }, 300);
+                // Scroll to slots for mobile/smaller screens
+                if (window.innerWidth < 1024) {
+                    slotsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }, 100);
+        }, 400);
 
-        // Highlight selected
+        // Highlight selected with Emerald
         document.querySelectorAll('.calendar-day').forEach(d => d.classList.remove('selected'));
         element.classList.add('selected');
+        element.style.backgroundColor = '#10B981'; // Emerald-500
+        element.style.color = 'white';
 
         fetchSlots(date);
     }
@@ -367,9 +373,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         slots.forEach(slot => {
             const btn = document.createElement('button');
-            btn.className = `slot-btn py-3 px-2 rounded border text-sm font-medium transition-all ${slot.available
-                ? 'bg-white border-nordic-100 text-nordic-600 hover:border-nordic-accent hover:text-nordic-accent'
-                : 'bg-nordic-50 border-nordic-100 text-nordic-100 cursor-not-allowed'
+            // Premium Emerald Slot Buttons
+            btn.className = `slot-btn py-4 px-3 rounded-xl border-2 text-base font-bold transition-all duration-300 ${slot.available
+                ? 'bg-white border-neutral-100 text-neutral-800 hover:border-emerald-500 hover:text-emerald-500 hover:scale-105 shadow-sm'
+                : 'bg-neutral-50 border-neutral-50 text-neutral-200 cursor-not-allowed opacity-40'
                 }`;
             btn.textContent = slot.time;
             btn.disabled = !slot.available;

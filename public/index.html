@@ -15,24 +15,23 @@
             theme: {
                 extend: {
                     fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                        serif: ['Lora', 'serif'],
+                        sans: ['Geist Sans', 'Inter', 'sans-serif'],
                     },
                     colors: {
-                        nordic: {
-                            50: '#f4f3ee', // Background
-                            100: '#bcb8b1', // Border/Subtle
-                            500: '#8a817c', // Secondary
-                            600: '#463f3a', // Primary
-                            800: '#463f3a',
-                            accent: '#e0afa0', // CTA/Highlight
+                        emerald: {
+                            50: '#ECFDF5',
+                            100: '#D1FAE5',
+                            500: '#10B981',
+                            600: '#059669',
+                            700: '#047857',
                         },
-                        medical: {
-                            50: '#f4f3ee',
-                            100: '#bcb8b1',
-                            500: '#e0afa0',
-                            600: '#8a817c',
-                            900: '#463f3a',
+                        neutral: {
+                            50: '#FAFAFA',
+                            100: '#F5F5F5',
+                            200: '#E5E5E5',
+                            600: '#525252',
+                            800: '#262626',
+                            900: '#171717',
                         }
                     }
                 }
@@ -41,19 +40,20 @@
     </script>
 </head>
 
-<body class="bg-nordic-50 text-nordic-800 font-sans antialiased">
+<body class="bg-neutral-50 text-neutral-900 font-sans antialiased">
 
     <!-- Header -->
-    <header class="bg-white border-b border-nordic-100 py-12">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-            <h1 class="text-4xl md:text-5xl font-serif font-semibold text-nordic-800 tracking-tight">
+    <header class="bg-white border-b border-neutral-100 py-24">
+        <div class="max-w-7xl mx-auto px-12 text-center">
+            <h1 class="text-6xl md:text-8xl font-black text-neutral-900 tracking-tighter mb-6">
                 Prof. Dr. Balta Florian
             </h1>
-            <p class="mt-4 text-nordic-500 font-sans tracking-widest uppercase text-xs">Oftalmologie & Cercetare</p>
+            <p class="text-neutral-600 opacity-60 font-semibold tracking-[0.2em] uppercase text-sm">Oftalmologie &
+                Cercetare</p>
         </div>
     </header>
 
-    <main class="max-w-5xl mx-auto px-4 py-10">
+    <main class="max-w-7xl mx-auto px-12 py-24">
 
         <!-- Booking Container -->
         <div id="booking-container"
@@ -71,13 +71,15 @@
                         Înapoi la Calendar
                     </button>
                     <h2 id="calendar-title"
-                        class="text-2xl font-serif font-medium mb-2 text-nordic-800 transition-opacity duration-500">
+                        class="text-5xl font-black mb-6 text-neutral-900 transition-opacity duration-500">
                         Programare Nouă</h2>
-                    <p id="calendar-subtitle" class="text-sm text-nordic-500 mb-8 transition-opacity duration-500">
-                        Selectați o zi de miercuri din calendarul de mai jos.</p>
+                    <p id="calendar-subtitle"
+                        class="text-xl text-neutral-600 opacity-60 mb-16 max-w-2xl transition-opacity duration-500">
+                        Selectați o zi de miercuri din calendarul de mai jos pentru a explora intervalele disponibile.
+                    </p>
 
                     <div id="calendar-card"
-                        class="max-w-md mx-auto bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden p-4 transition-all duration-700">
+                        class="max-w-md mx-auto bg-white p-10 transition-all duration-700 card-lift">
                         <div class="flex justify-between items-center mb-4 calendar-nav">
                             <button id="prevMonth"
                                 class="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600">
@@ -121,14 +123,18 @@
             <!-- Step 2: Select Slot -->
             <section id="slots-section"
                 class="hidden w-full opacity-0 transition-all duration-700 transform translate-x-10">
-                <h2 class="text-xl font-serif font-medium mb-6 text-nordic-800 border-b border-nordic-100 pb-4">
-                    Intervale Disponibile <span id="selectedDateDisplay" class="text-nordic-500 ml-2"></span></h2>
+                <div class="bg-white p-12 card-lift">
+                    <h2 class="text-4xl font-black mb-4 text-neutral-900">
+                        Intervale Disponibile</h2>
+                    <p class="text-xl text-neutral-600 opacity-60 mb-12">Data selectată: <span id="selectedDateDisplay"
+                            class="text-emerald-500 font-bold"></span></p>
 
-                <div id="slotsGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                    <!-- Slots will be injected here -->
-                </div>
-                <div id="noSlotsMessage" class="hidden text-center py-10 text-gray-500">
-                    Nu mai sunt locuri libere pentru această dată.
+                    <div id="slotsGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-6">
+                        <!-- Slots will be injected here -->
+                    </div>
+                    <div id="noSlotsMessage" class="hidden text-center py-20 text-neutral-600 opacity-60 text-lg">
+                        Nu mai sunt locuri libere pentru această dată.
+                    </div>
                 </div>
             </section>
         </div>
@@ -141,8 +147,8 @@
         <div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 transform scale-95 transition-transform duration-300"
             id="modalContent">
             <div
-                class="px-8 py-6 border-b border-nordic-100 flex justify-between items-center bg-nordic-50 rounded-t-xl">
-                <h3 class="text-xl font-serif font-medium text-nordic-800">Detalii Programare</h3>
+                class="px-10 py-8 border-b border-neutral-100 flex justify-between items-center bg-neutral-50 rounded-t-xl">
+                <h3 class="text-2xl font-bold text-neutral-900">Detalii Programare</h3>
                 <button id="closeModal" class="text-gray-400 hover:text-gray-600 transition-colors">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
@@ -153,10 +159,10 @@
 
             <form id="bookingForm" class="p-8 space-y-6">
                 <div
-                    class="bg-white border border-nordic-200 p-4 rounded-lg mb-6 text-sm text-nordic-800 flex justify-around">
-                    <p><strong>Data:</strong> <span id="modalDate"></span></p>
-                    <p class="border-l border-nordic-100 h-4 self-center"></p>
-                    <p><strong>Ora:</strong> <span id="modalTime"></span></p>
+                    class="bg-neutral-50 border border-neutral-100 p-6 rounded-xl mb-10 text-lg text-neutral-900 flex justify-around">
+                    <p><strong>Data:</strong> <span id="modalDate" class="text-emerald-500 font-bold"></span></p>
+                    <p class="border-l border-neutral-200 h-6 self-center"></p>
+                    <p><strong>Ora:</strong> <span id="modalTime" class="text-emerald-500 font-bold"></span></p>
                 </div>
 
                 <input type="hidden" id="formDate">
@@ -216,10 +222,9 @@
                     </div>
                 </div>
 
-                <button type="submit"
-                    class="w-full bg-nordic-accent text-white py-4 rounded-lg font-medium hover:opacity-90 transition-all shadow-sm mt-6 flex justify-center items-center gap-2">
+                <button type="submit" class="w-full btn-primary mt-12 flex justify-center items-center gap-3">
                     <span>Confirmă Programarea</span>
-                    <svg id="loadingSpinner" class="animate-spin h-5 w-5 text-white hidden"
+                    <svg id="loadingSpinner" class="animate-spin h-6 w-6 text-white hidden"
                         xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
                         </circle>
