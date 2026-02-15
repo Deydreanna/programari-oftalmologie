@@ -176,14 +176,18 @@ document.addEventListener('DOMContentLoaded', () => {
             dayDiv.textContent = i;
 
             const currentDayDate = new Date(year, month, i);
-
-            // Fix: Use local date components to avoid timezone shift from toISOString()
-            // const formattedDate = currentDayDate.toISOString().split('T')[0];
             const y = currentDayDate.getFullYear();
             const m = String(currentDayDate.getMonth() + 1).padStart(2, '0');
             const d = String(currentDayDate.getDate()).padStart(2, '0');
             const formattedDate = `${y}-${m}-${d}`;
+
             const isWednesday = currentDayDate.getDay() === 3;
+
+            // Availability Restrictions:
+            // 1. February (index 1) to April (index 3) 2026
+            const isValidMonth = year === 2026 && month >= 1 && month <= 3;
+            // 2. Disable April 8th 2026
+            const isExcludedDate = formattedDate === '2026-04-08';
 
             // Allow only future dates (or today)
             const today = new Date();
@@ -192,7 +196,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             dayDiv.className = 'calendar-day';
 
-            if (isWednesday && !isPast) {
+            if (isWednesday && !isPast && isValidMonth && !isExcludedDate) {
                 dayDiv.classList.add('active-wednesday');
                 if (selectedDate === formattedDate) {
                     dayDiv.classList.add('selected');
@@ -251,13 +255,23 @@ document.addEventListener('DOMContentLoaded', () => {
     resetBookingBtn.onclick = resetView;
 
     prevMonthBtn.onclick = () => {
-        currentDate.setMonth(currentDate.getMonth() - 1);
-        renderCalendar(currentDate);
+        const testDate = new Date(currentDate);
+        testDate.setMonth(testDate.getMonth() - 1);
+        // Only allow navigation within 2026 Feb - Apr
+        if (testDate.getFullYear() === 2026 && testDate.getMonth() >= 1) {
+            currentDate.setMonth(currentDate.getMonth() - 1);
+            renderCalendar(currentDate);
+        }
     };
 
     nextMonthBtn.onclick = () => {
-        currentDate.setMonth(currentDate.getMonth() + 1);
-        renderCalendar(currentDate);
+        const testDate = new Date(currentDate);
+        testDate.setMonth(testDate.getMonth() + 1);
+        // Only allow navigation within 2026 Feb - Apr
+        if (testDate.getFullYear() === 2026 && testDate.getMonth() <= 3) {
+            currentDate.setMonth(currentDate.getMonth() + 1);
+            renderCalendar(currentDate);
+        }
     };
 
     // Toggle diagnosis visibility based on Consultation Type
