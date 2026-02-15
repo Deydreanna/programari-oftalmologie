@@ -206,31 +206,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function selectDate(dateStr, element) {
-        // Deselect previous
-        const prevSelected = document.querySelector('.calendar-day.selected');
-        if (prevSelected) prevSelected.classList.remove('selected');
-
-        // Select new
-        element.classList.add('selected');
-        selectedDate = dateStr;
+    function selectDate(date, element) {
+        selectedDate = date;
+        selectedDateDisplay.textContent = new Intl.DateTimeFormat('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(date));
 
         // UI Transition
         const dateSelection = document.getElementById('date-selection');
+        const bookingContainer = document.getElementById('booking-container');
+
         dateSelection.classList.add('minimized');
 
-        // UI Updates
-        selectedDateDisplay.textContent = `(${dateStr})`;
-
-        // Show slots with animation
-        slotsSection.classList.remove('hidden');
+        // Brief delay for smoother layout shift
         setTimeout(() => {
-            slotsSection.classList.add('active');
-        }, 50);
+            slotsSection.classList.remove('hidden');
+            setTimeout(() => {
+                slotsSection.classList.add('active');
+            }, 50);
+        }, 300);
 
-        dateError.classList.add('hidden');
+        // Highlight selected
+        document.querySelectorAll('.calendar-day').forEach(d => d.classList.remove('selected'));
+        element.classList.add('selected');
 
-        await fetchSlots(dateStr);
+        fetchSlots(date);
     }
 
     prevMonthBtn.onclick = () => {
@@ -552,12 +550,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'x-admin-token': token }
             });
 
+            const appointments = await res.json().catch(() => null);
+
             if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                throw new Error(errData.error || `Server error: ${res.status}`);
+                throw new Error(appointments?.error || `Server error: ${res.status}`);
             }
 
-            const appointments = await res.json();
             console.log('Fetched appointments:', appointments);
 
             if (!Array.isArray(appointments)) {
@@ -575,9 +573,9 @@ document.addEventListener('DOMContentLoaded', () => {
             timelineHeaderCount.textContent = `(${filtered.length}) Programări`;
         } catch (err) {
             console.error('Admin Fetch Error:', err);
-            timelineGrid.innerHTML = `<div class="p-10 text-center text-red-500">
+            timelineGrid.innerHTML = `<div class="p-10 text-center text-red-500 font-medium">
                 Eroare la încărcare.<br>
-                <span class="text-xs opacity-50">${err.message}</span>
+                <span class="text-[10px] opacity-50 font-sans tracking-normal uppercase">${err.message}</span>
             </div>`;
         }
     }

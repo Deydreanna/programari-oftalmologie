@@ -1,117 +1,124 @@
-/* Additional custom styles if needed, mostly utilizing Tailwind */
+/* Scandinavian Minimalist Styles */
+:root {
+    --nordic-bg: #FCFBFA;
+    --nordic-text: #2D3436;
+    --nordic-accent: #7B8C7D;
+    --nordic-blue: #3E606F;
+    --nordic-sand: #D1B9A1;
+    --nordic-gray: #E1E5E1;
+}
+
 body {
-    background-color: #f9fafb;
+    background-color: var(--nordic-bg);
+    color: var(--nordic-text);
+    letter-spacing: -0.01em;
 }
 
-/* Smooth fade in for modal */
-#bookingModal.show {
-    opacity: 1;
+h1,
+h2,
+h3,
+.font-serif {
+    font-family: 'Lora', serif;
 }
 
-#bookingModal.show #modalContent {
-    transform: scale(100%);
+/* Calendar Refinements */
+#calendar-card {
+    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.05);
+    border: 1px solid var(--nordic-gray);
+    border-radius: 8px;
 }
 
-.slot-btn {
-    transition: all 0.2s ease;
-}
-
-.slot-btn:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-}
-
-.slot-btn:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
-}
-
-/* Calendar Styles */
 .calendar-day {
     aspect-ratio: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 9999px;
+    border-radius: 4px;
+    /* More rectangular than round */
     cursor: default;
-    transition: all 0.2s;
-}
-
-/* Transition for Minimized Calendar */
-#date-selection.minimized {
-    width: 15%;
-    transform: scale(0.8);
-    transform-origin: left top;
-}
-
-#date-selection.minimized #calendar-title,
-#date-selection.minimized #calendar-subtitle {
-    opacity: 0;
-    pointer-events: none;
-    height: 0;
-    margin: 0;
-}
-
-#date-selection.minimized #calendar-card {
-    box-shadow: none;
-    border-color: transparent;
-    background-color: transparent;
-}
-
-#date-selection.minimized .calendar-day:not(.selected) {
-    opacity: 0.1;
-    /* Fade out other days */
-}
-
-#date-selection.minimized .active-wednesday:not(.selected) {
-    cursor: pointer;
-    opacity: 0.5;
-}
-
-/* Slots Section Active State */
-#slots-section.active {
-    display: block !important;
-    opacity: 1;
-    transform: translateX(0);
-}
-
-@media (max-width: 1024px) {
-    #date-selection.minimized {
-        width: 100%;
-        transform: scale(0.9);
-        margin-bottom: 20px;
-        transform-origin: center top;
-    }
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 0.875rem;
 }
 
 .calendar-day.active-wednesday {
-    color: #000;
-    font-weight: 700;
+    color: var(--nordic-text);
+    font-weight: 500;
     cursor: pointer;
-    background-color: #f0f9ff;
-    /* Light blue bg to invite click */
+    background-color: #FFF;
+    border: 1px solid var(--nordic-gray);
 }
 
 .calendar-day.active-wednesday:hover {
-    background-color: #0ea5e9;
-    /* medical-500 */
+    background-color: var(--nordic-blue);
+    border-color: var(--nordic-blue);
     color: white;
 }
 
 .calendar-day.selected {
-    background-color: #0c4a6e !important;
-    /* medical-900 */
+    background-color: var(--nordic-accent) !important;
+    border-color: var(--nordic-accent) !important;
     color: white !important;
 }
 
 .calendar-day.disabled-day {
-    color: #d1d5db;
-    /* gray-300 */
+    color: #CCC;
 }
 
 .calendar-day.empty {
     background: transparent;
     pointer-events: none;
+}
+
+/* Slots Grid */
+.slot-btn {
+    border: 1px solid var(--nordic-gray);
+    background: white;
+    color: var(--nordic-text);
+    transition: all 0.2s;
+    border-radius: 4px;
+    font-weight: 400;
+}
+
+.slot-btn:hover:not(:disabled) {
+    border-color: var(--nordic-blue);
+    background-color: #f8fafb;
+    color: var(--nordic-blue);
+    transform: translateY(-1px);
+}
+
+.slot-btn:disabled {
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+/* Modal and Form Elements */
+input,
+select {
+    border: 1px solid var(--nordic-gray) !important;
+    border-radius: 4px !important;
+    background-color: #FFF !important;
+    transition: border-color 0.2s !important;
+}
+
+input:focus,
+select:focus {
+    border-color: var(--nordic-accent) !important;
+    outline: none !important;
+    box-shadow: 0 0 0 2px rgba(123, 140, 125, 0.1) !important;
+}
+
+.btn-primary {
+    background-color: var(--nordic-blue);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 4px;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.btn-primary:hover {
+    background-color: #2F4F4F;
+    transform: translateY(-1px);
 }
 
 /* Timeline Custom Styles */
@@ -193,4 +200,24 @@ body {
 .app-new-badge {
     color: #E53E3E;
     font-weight: 900;
+}
+
+/* Transition for Minimized Calendar - Scandi Edition */
+#date-selection.minimized {
+    width: 25% !important;
+}
+
+#date-selection.minimized .calendar-day:not(.selected) {
+    opacity: 0.05;
+}
+
+#date-selection.minimized #calendar-card {
+    border: none;
+    box-shadow: none;
+    background: transparent;
+}
+
+.calendar-nav {
+    border-bottom: 1px solid var(--nordic-gray);
+    padding-bottom: 12px;
 }
