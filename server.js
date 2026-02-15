@@ -4,18 +4,36 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const xlsx = require('xlsx');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback-dev-secret';
+const SALT_ROUNDS = 12;
 
 // Connect to MongoDB
-// NOTE: This is a placeholder. User must set MONGODB_URI env var in Vercel.
-// For local testing: 'mongodb://localhost:27017/appointments' or use the Atlas URI directly.
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/appointments';
 
 mongoose.connect(MONGODB_URI)
     .then(() => console.log('Connected to MongoDB'))
     .catch(err => console.error('MongoDB connection error:', err));
+
+// =====================
+//  SCHEMAS
+// =====================
+
+// User Schema
+const userSchema = new mongoose.Schema({
+    email: { type: String, unique: true, sparse: true, lowercase: true, trim: true },
+    phone: { type: String, unique: true, sparse: true, trim: true },
+    password: String,
+    googleId: String,
+    displayName: String,
+    createdAt: { type: Date, default: Date.now }
+});
+
+const User = mongoose.model('User', userSchema);
 
 // Appointment Schema
 const appointmentSchema = new mongoose.Schema({
@@ -23,40 +41,261 @@ const appointmentSchema = new mongoose.Schema({
     phone: String,
     cnp: String,
     type: String,
-    date: String, // String for simplicity (YYYY-MM-DD)
+    date: String,
     time: String,
     hasDiagnosis: { type: Boolean, default: false },
-    diagnosticFile: String, // Base64 data
+    diagnosticFile: String,
     fileType: String,
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     createdAt: { type: Date, default: Date.now }
 });
 
 const Appointment = mongoose.model('Appointment', appointmentSchema);
 
-// Middleware
+// =====================
+//  MIDDLEWARE
+// =====================
+
 app.use(cors());
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
-// Generate slots: 09:00 - 14:00 (5h), 20-min intervals = 15 slots
+// =====================
+//  VALIDATION HELPERS
+// =====================
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_REGEX = /^(\+?40|0)7\d{8}$/;
+
+function validateEmail(email) {
+    return EMAIL_REGEX.test(email);
+}
+
+function validatePhone(phone) {
+    // Strip spaces and dashes for validation
+    const cleaned = phone.replace(/[\s\-]/g, '');
+    return PHONE_REGEX.test(cleaned);
+}
+
+function cleanPhone(phone) {
+    return phone.replace(/[\s\-]/g, '');
+}
+
+function isEmail(identifier) {
+    return identifier.includes('@');
+}
+
+function generateToken(user) {
+    return jwt.sign(
+        { id: user._id, email: user.email, displayName: user.displayName },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+    );
+}
+
+// Optional auth middleware — attaches user if token present, but doesn't block
+function optionalAuth(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1];
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            req.user = decoded;
+        } catch (err) {
+            // Token invalid/expired — continue without user
+        }
+    }
+    next();
+}
+
+// =====================
+//  AUTH API
+// =====================
+
+// POST /api/auth/signup — Register with email + phone + password
+app.post('/api/auth/signup', async (req, res) => {
+    try {
+        const { email, phone, password, displayName } = req.body;
+
+        // Validate required fields
+        if (!email || !phone || !password) {
+            return res.status(400).json({ error: 'Email, telefon și parola sunt obligatorii.' });
+        }
+
+        if (!displayName || displayName.trim().length < 2) {
+            return res.status(400).json({ error: 'Numele trebuie să aibă cel puțin 2 caractere.' });
+        }
+
+        // Validate email format
+        if (!validateEmail(email)) {
+            return res.status(400).json({ error: 'Format email invalid.' });
+        }
+
+        // Validate phone format
+        if (!validatePhone(phone)) {
+            return res.status(400).json({ error: 'Format telefon invalid. Folosiți formatul 07xx xxx xxx.' });
+        }
+
+        // Validate password strength
+        if (password.length < 6) {
+            return res.status(400).json({ error: 'Parola trebuie să aibă minim 6 caractere.' });
+        }
+
+        const cleanedPhone = cleanPhone(phone);
+
+        // Check if email already exists
+        const existingEmail = await User.findOne({ email: email.toLowerCase() });
+        if (existingEmail) {
+            return res.status(409).json({ error: 'Acest email este deja înregistrat.' });
+        }
+
+        // Check if phone already exists
+        const existingPhone = await User.findOne({ phone: cleanedPhone });
+        if (existingPhone) {
+            return res.status(409).json({ error: 'Acest număr de telefon este deja înregistrat.' });
+        }
+
+        // Hash password
+        const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+
+        // Create user
+        const user = new User({
+            email: email.toLowerCase(),
+            phone: cleanedPhone,
+            password: hashedPassword,
+            displayName: displayName.trim()
+        });
+
+        await user.save();
+
+        // Generate JWT
+        const token = generateToken(user);
+
+        res.status(201).json({
+            success: true,
+            message: 'Cont creat cu succes!',
+            token,
+            user: {
+                id: user._id,
+                email: user.email,
+                phone: user.phone,
+                displayName: user.displayName
+            }
+        });
+
+    } catch (err) {
+        console.error('Signup error:', err);
+        if (err.code === 11000) {
+            return res.status(409).json({ error: 'Email sau telefon deja înregistrat.' });
+        }
+        res.status(500).json({ error: 'Eroare la înregistrare.' });
+    }
+});
+
+// POST /api/auth/login — Login with email OR phone + password
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { identifier, password } = req.body;
+
+        if (!identifier || !password) {
+            return res.status(400).json({ error: 'Introduceți email/telefon și parola.' });
+        }
+
+        // Determine if identifier is email or phone
+        let user;
+        if (isEmail(identifier)) {
+            user = await User.findOne({ email: identifier.toLowerCase().trim() });
+        } else {
+            const cleanedPhone = cleanPhone(identifier);
+            user = await User.findOne({ phone: cleanedPhone });
+        }
+
+        if (!user) {
+            return res.status(401).json({ error: 'Email/telefon sau parolă incorectă.' });
+        }
+
+        if (!user.password) {
+            return res.status(401).json({ error: 'Acest cont folosește autentificare Google. Folosiți butonul Google.' });
+        }
+
+        // Compare password
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(401).json({ error: 'Email/telefon sau parolă incorectă.' });
+        }
+
+        // Generate JWT
+        const token = generateToken(user);
+
+        res.json({
+            success: true,
+            message: 'Autentificare reușită!',
+            token,
+            user: {
+                id: user._id,
+                email: user.email,
+                phone: user.phone,
+                displayName: user.displayName
+            }
+        });
+
+    } catch (err) {
+        console.error('Login error:', err);
+        res.status(500).json({ error: 'Eroare la autentificare.' });
+    }
+});
+
+// GET /api/auth/me — Get current user profile
+app.get('/api/auth/me', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Token lipsă.' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const user = await User.findById(decoded.id).select('-password');
+        if (!user) {
+            return res.status(404).json({ error: 'Utilizator negăsit.' });
+        }
+
+        res.json({
+            id: user._id,
+            email: user.email,
+            phone: user.phone,
+            displayName: user.displayName,
+            createdAt: user.createdAt
+        });
+
+    } catch (err) {
+        if (err.name === 'TokenExpiredError') {
+            return res.status(401).json({ error: 'Sesiune expirată. Autentificați-vă din nou.' });
+        }
+        return res.status(401).json({ error: 'Token invalid.' });
+    }
+});
+
+
+// =====================
+//  SLOTS API
+// =====================
+
 const generateSlots = () => {
     const slots = [];
-    let start = 9 * 60;  // 09:00
-    const end = 14 * 60; // 14:00 (last slot starts at 13:40)
+    let start = 9 * 60;
+    const end = 14 * 60;
 
     while (start < end) {
         const hours = Math.floor(start / 60);
         const mins = start % 60;
         const timeStr = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
         slots.push(timeStr);
-        start += 20; // 20-minute intervals
+        start += 20;
     }
     return slots;
 };
 
-// --- API Endpoints ---
-
-// Get available slots
 app.get('/api/slots', async (req, res) => {
     const { date } = req.query;
     if (!date) return res.status(400).json({ error: 'Date is required' });
@@ -81,8 +320,8 @@ app.get('/api/slots', async (req, res) => {
     }
 });
 
-// Book appointment
-app.post('/api/book', async (req, res) => {
+// Book appointment (auth optional)
+app.post('/api/book', optionalAuth, async (req, res) => {
     const { name, phone, cnp, type, date, time } = req.body;
 
     if (!name || !phone || !cnp || !type || !date || !time) {
@@ -105,7 +344,8 @@ app.post('/api/book', async (req, res) => {
             name, phone, cnp, type, date, time,
             hasDiagnosis: !!hasDiagnosis,
             diagnosticFile,
-            fileType
+            fileType,
+            userId: req.user ? req.user.id : null
         });
         await newAppointment.save();
 
@@ -117,7 +357,9 @@ app.post('/api/book', async (req, res) => {
 });
 
 
-// --- Admin API ---
+// =====================
+//  ADMIN API
+// =====================
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASS || 'admin123';
 const ADMIN_TOKEN = 'secret-admin-token-123';
@@ -151,7 +393,6 @@ app.get('/api/admin/stats', async (req, res) => {
 
     try {
         const stats = await mongoose.connection.db.command({ dbStats: 1 });
-        // storageSize is what Atlas usually shows in the dashboard
         const usedSize = stats.storageSize || stats.dataSize;
 
         res.json({
@@ -178,12 +419,7 @@ app.post('/api/admin/reset', async (req, res) => {
     }
 });
 
-// Export Excel (Manual)
 app.get('/api/admin/export', async (req, res) => {
-    // Basic protection (can be improved with token query param if needed)
-    // const token = req.query.token;
-    // if (token !== ADMIN_TOKEN) return res.status(403).send('Unauthorized');
-
     try {
         const appointments = await Appointment.find().sort({ date: 1, time: 1 }).lean();
 
@@ -215,5 +451,5 @@ app.get('/api/admin/export', async (req, res) => {
 
 
 app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT} (MongoDB Enabled)`);
+    console.log(`Server running on http://localhost:${PORT} (MongoDB + Auth Enabled)`);
 });

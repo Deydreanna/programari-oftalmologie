@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ro">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autentificare — Prof. Dr. Balta Florian</title>
+    <meta name="description" content="Autentifică-te pentru a accesa sistemul de programări oftalmologice.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+                    colors: {
+                        brand: {
+                            900: '#1D1E18', 800: '#2A2B23', 700: '#3A3B32',
+                            600: '#6B8F71', 500: '#7DA383', 400: '#AAD2BA',
+                            300: '#B9F5D8', 200: '#CCFAE5', 100: '#D9FFF5', 50: '#EDFFF9',
+                        },
+                    },
+                    fontSize: { 'base': ['17px', '1.6'] }
+                }
+            }
+        }
+    </script>
+    <style>
+        .auth-card {
+            animation: fadeSlideIn 0.5s ease;
+        }
+
+        @keyframes fadeSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(24px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #6B8F71;
+            pointer-events: none;
+        }
+
+        .input-with-icon {
+            padding-left: 48px !important;
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #6B8F71;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .password-toggle:hover {
+            color: #AAD2BA;
+        }
+
+        .error-shake {
+            animation: shake 0.4s ease;
+        }
+
+        @keyframes shake {
+
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+
+            25% {
+                transform: translateX(-8px);
+            }
+
+            75% {
+                transform: translateX(8px);
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-brand-900 text-brand-100 font-sans antialiased min-h-screen flex flex-col" style="font-size: 17px;">
+
+    <!-- Header -->
+    <header class="bg-brand-800 border-b border-brand-600/20 shadow-lg">
+        <div class="max-w-5xl mx-auto px-6 py-6 text-center">
+            <a href="/" class="inline-block">
+                <h1 class="text-2xl md:text-3xl font-black text-brand-100 tracking-tight">
+                    Prof. Dr. Balta Florian
+                </h1>
+                <p class="text-brand-400/60 text-sm font-medium mt-1">Programări Oftalmologie</p>
+            </a>
+        </div>
+    </header>
+
+    <!-- Main -->
+    <main class="flex-1 flex items-center justify-center px-4 py-12">
+        <div class="w-full max-w-md">
+            <div class="auth-card bg-brand-800 rounded-2xl shadow-2xl border border-brand-600/20 p-8 md:p-10">
+
+                <!-- Title -->
+                <div class="text-center mb-8">
+                    <div class="w-16 h-16 bg-brand-600/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg class="w-8 h-8 text-brand-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                        </svg>
+                    </div>
+                    <h2 class="text-2xl font-bold text-brand-100">Bine ai revenit!</h2>
+                    <p class="text-brand-300/70 text-sm mt-1">Introdu email-ul sau telefonul pentru a continua</p>
+                </div>
+
+                <!-- Error Message -->
+                <div id="errorMessage"
+                    class="hidden mb-4 p-3 bg-red-900/30 border border-red-800/40 rounded-xl text-red-300 text-sm font-medium text-center">
+                </div>
+
+                <!-- Success Message -->
+                <div id="successMessage"
+                    class="hidden mb-4 p-3 bg-brand-600/20 border border-brand-600/30 rounded-xl text-brand-300 text-sm font-medium text-center">
+                </div>
+
+                <!-- Login Form -->
+                <form id="loginForm" class="space-y-5">
+
+                    <!-- Email or Phone -->
+                    <div>
+                        <label for="identifier" class="form-label">Email sau Telefon</label>
+                        <div class="relative">
+                            <span class="input-icon">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207">
+                                    </path>
+                                </svg>
+                            </span>
+                            <input type="text" id="identifier" required class="form-input input-with-icon"
+                                placeholder="email@exemplu.ro sau 07xx xxx xxx" autocomplete="username">
+                        </div>
+                    </div>
+
+                    <!-- Password -->
+                    <div>
+                        <label for="password" class="form-label">Parolă</label>
+                        <div class="relative">
+                            <span class="input-icon">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z">
+                                    </path>
+                                </svg>
+                            </span>
+                            <input type="password" id="password" required class="form-input input-with-icon"
+                                placeholder="Introduceți parola" autocomplete="current-password"
+                                style="padding-right: 48px;">
+                            <button type="button" class="password-toggle" onclick="togglePassword('password', this)">
+                                <svg class="w-5 h-5 eye-open" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z">
+                                    </path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Submit -->
+                    <button type="submit" id="loginBtn"
+                        class="w-full bg-brand-400 text-brand-900 py-4 rounded-xl font-bold text-lg hover:bg-brand-300 active:bg-brand-100 transition-all duration-200 flex justify-center items-center gap-3 shadow-lg shadow-brand-400/20 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <span>Autentifică-te</span>
+                        <svg id="loginSpinner" class="animate-spin h-5 w-5 text-brand-900 hidden"
+                            xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                            </circle>
+                            <path class="opacity-75" fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                            </path>
+                        </svg>
+                    </button>
+                </form>
+
+                <!-- Divider -->
+                <div class="flex items-center gap-4 my-6">
+                    <div class="flex-1 h-px bg-brand-600/30"></div>
+                    <span class="text-brand-400/50 text-xs font-semibold uppercase tracking-wider">sau</span>
+                    <div class="flex-1 h-px bg-brand-600/30"></div>
+                </div>
+
+                <!-- Continue without auth -->
+                <a href="/"
+                    class="block w-full text-center py-3 rounded-xl border border-brand-600/30 text-brand-300 font-semibold hover:bg-brand-700 transition-colors text-sm">
+                    Continuă fără cont →
+                </a>
+
+                <!-- Signup Link -->
+                <p class="text-center text-brand-400/60 text-sm mt-6">
+                    Nu ai cont?
+                    <a href="/signup.html" class="text-brand-300 font-semibold hover:text-brand-100 transition-colors">
+                        Creează un cont
+                    </a>
+                </p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="text-center py-6 text-xs text-brand-400/40 border-t border-brand-600/20 bg-brand-800">
+        © 2026 Prof. Dr. Balta Florian — Toate drepturile rezervate
+    </footer>
+
+    <script src="auth.js"></script>
+    <script>
+        // Redirect if already logged in
+        if (localStorage.getItem('authToken')) {
+            window.location.href = '/';
+        }
+
+        function togglePassword(inputId, btn) {
+            const input = document.getElementById(inputId);
+            input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        const loginForm = document.getElementById('loginForm');
+        const errorMessage = document.getElementById('errorMessage');
+        const successMessage = document.getElementById('successMessage');
+        const loginBtn = document.getElementById('loginBtn');
+        const loginSpinner = document.getElementById('loginSpinner');
+
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorMessage.classList.add('hidden');
+            successMessage.classList.add('hidden');
+
+            const identifier = document.getElementById('identifier').value.trim();
+            const password = document.getElementById('password').value;
+
+            if (!identifier || !password) {
+                showError('Completați toate câmpurile.');
+                return;
+            }
+
+            loginBtn.disabled = true;
+            loginSpinner.classList.remove('hidden');
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ identifier, password })
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    showError(data.error || 'Eroare la autentificare.');
+                    return;
+                }
+
+                // Save token and user data
+                localStorage.setItem('authToken', data.token);
+                localStorage.setItem('authUser', JSON.stringify(data.user));
+
+                successMessage.textContent = 'Autentificare reușită! Redirecționare...';
+                successMessage.classList.remove('hidden');
+
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 800);
+
+            } catch (err) {
+                console.error('Login error:', err);
+                showError('Eroare de conexiune. Încercați din nou.');
+            } finally {
+                loginBtn.disabled = false;
+                loginSpinner.classList.add('hidden');
+            }
+        });
+
+        function showError(msg) {
+            errorMessage.textContent = msg;
+            errorMessage.classList.remove('hidden');
+            errorMessage.classList.add('error-shake');
+            setTimeout(() => errorMessage.classList.remove('error-shake'), 400);
+        }
+    </script>
+</body>
+
+</html>
