@@ -4,37 +4,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Programări Prof. Dr. Balta Florian</title>
+    <title>Programări Prof. Dr. Balta Florian — Oftalmologie</title>
+    <meta name="description"
+        content="Sistem online de programări pentru cabinetul de oftalmologie al Prof. Dr. Balta Florian. Programează-te rapid și simplu.">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="style.css">
-    <link
-        href="https://fonts.googleapis.com/css2?family=Geist+Sans:wght@400;700;900&family=Outfit:wght@400;600;800;900&family=Lora:wght@400;700&display=swap"
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
         rel="stylesheet">
     <script>
         tailwind.config = {
             theme: {
                 extend: {
                     fontFamily: {
-                        sans: ['Geist Sans', 'Inter', 'sans-serif'],
-                        outfit: ['Outfit', 'sans-serif'],
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
                     },
                     colors: {
-                        midnight: {
-                            DEFAULT: '#0F0A1F',
-                            light: '#1A1435',
+                        medical: {
+                            50: '#EFF6FF',
+                            100: '#DBEAFE',
+                            200: '#BFDBFE',
+                            500: '#3B82F6',
+                            600: '#2563EB',
+                            700: '#1D4ED8',
                         },
-                        indigo: {
-                            400: '#818CF8',
-                            500: '#6366F1',
-                            600: '#4F46E5',
-                            950: '#1E1B4B',
-                        },
-                        slate: {
-                            50: '#F8FAFC',
-                            100: '#F1F5F9',
-                            300: '#CBD5E1',
-                            500: '#64748B',
-                        }
+                    },
+                    fontSize: {
+                        'base': ['17px', '1.6'],
                     }
                 }
             }
@@ -42,276 +37,349 @@
     </script>
 </head>
 
-<body class="bg-midnight text-slate-50 font-sans antialiased">
+<body class="bg-gray-50 text-gray-900 font-sans antialiased" style="font-size: 17px;">
 
     <!-- Header -->
-    <header
-        class="bg-gradient-to-br from-[#1E1B4B] via-[#2E1065] to-[#0F0A1F] border-b border-white/5 py-20 relative overflow-hidden">
-        <!-- Decoration element -->
-        <div class="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 blur-[100px] rounded-full -mr-32 -mt-32"></div>
-
-        <div class="max-w-7xl mx-auto px-8 text-center relative z-10">
-            <h1 class="text-5xl md:text-7xl font-black text-white tracking-tight mb-6 font-outfit">
+    <header class="bg-white border-b border-gray-100 shadow-sm">
+        <div class="max-w-5xl mx-auto px-6 py-8 md:py-12 text-center">
+            <div
+                class="inline-flex items-center gap-2 bg-medical-50 text-medical-600 px-4 py-1.5 rounded-full text-sm font-semibold mb-5">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path
+                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V6z">
+                    </path>
+                </svg>
+                Programări Online
+            </div>
+            <h1 class="text-3xl md:text-5xl font-black text-gray-900 tracking-tight mb-3">
                 Prof. Dr. Balta Florian
             </h1>
-            <p
-                class="text-indigo-200/80 font-semibold text-sm tracking-[0.2em] uppercase max-w-2xl mx-auto leading-relaxed">
-                Cabinetul 4, Ambulatoriul INSTITUTUL CLINIC DE URGENTE OFTALMOLOGICE “PROF. DR. MIRCEA OLTEANU”
-                <br> Piața Alexandru Lahovari nr. 1, Sector 1, București
+            <p class="text-gray-500 font-medium text-base max-w-2xl mx-auto leading-relaxed">
+                Cabinetul 4, Ambulatoriul INSTITUTUL CLINIC DE URGENTE OFTALMOLOGICE „PROF. DR. MIRCEA OLTEANU"
+                <br><span class="text-gray-400">Piața Alexandru Lahovari nr. 1, Sector 1, București</span>
             </p>
         </div>
     </header>
 
-    <main class="max-w-6xl mx-auto px-8 py-16">
-
-        <!-- Booking Container -->
-        <div id="booking-container"
-            class="flex flex-col lg:flex-row gap-8 items-start transition-all duration-700 ease-in-out">
-
-            <!-- Step 1: Inline Calendar -->
-            <section id="date-selection" class="w-full transition-all duration-700 ease-in-out origin-top-left">
-                <div class="calendar-wrapper relative">
-                    <!-- Back Button (only visible when minimized) -->
-                    <button id="resetBooking" class="back-btn group">
-                        <svg class="w-4 h-4 transition-transform group-hover:-translate-x-1" fill="none"
-                            stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-                        </svg>
-                        Înapoi la Calendar
-                    </button>
-                    <h2 id="calendar-title"
-                        class="text-3xl font-bold mb-3 text-slate-900 transition-opacity duration-500">
-                        Programare Nouă</h2>
-                    <p id="calendar-subtitle" class="text-slate-500 mb-12 max-w-lg transition-opacity duration-500">
-                        Selectați o zi disponibilă pentru a vedea intervalele de consult.</p>
-
-                    <div id="calendar-card"
-                        class="max-w-md mx-auto bg-midnight-light p-6 transition-all duration-700 rounded-[2rem] border border-white/10 shadow-2xl relative overflow-hidden">
-                        <div class="flex justify-between items-center mb-4 calendar-nav">
-                            <button id="prevMonth"
-                                class="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M15 19l-7-7 7-7">
-                                    </path>
-                                </svg>
-                            </button>
-                            <h3 id="currentMonthYear" class="text-lg font-bold text-gray-800"></h3>
-                            <button id="nextMonth"
-                                class="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M9 5l7 7-7 7">
-                                    </path>
-                                </svg>
-                            </button>
-                        </div>
-
-                        <div
-                            class="grid grid-cols-7 mb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide calendar-days-header">
-                            <div>Dum</div>
-                            <div>Lun</div>
-                            <div>Mar</div>
-                            <div>Mie</div>
-                            <div>Joi</div>
-                            <div>Vin</div>
-                            <div>Sam</div>
-                        </div>
-
-                        <div id="calendarGrid" class="grid grid-cols-7 gap-1 text-sm">
-                            <!-- Days will be generated here -->
-                        </div>
-                    </div>
-
-                    <p id="dateError" class="text-red-500 text-sm mt-4 hidden">Vă rugăm selectați o zi de Miercuri.</p>
+    <!-- Progress Bar -->
+    <div class="bg-white border-b border-gray-100 sticky top-0 z-40">
+        <div class="max-w-3xl mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <!-- Step 1 -->
+                <div class="flex items-center gap-2" id="stepIndicator1">
+                    <div class="step-dot active" id="stepDot1">1</div>
+                    <span class="text-sm font-semibold text-medical-600 hidden sm:inline">Alege Data</span>
                 </div>
-            </section>
-
-            <!-- Step 2: Select Slot -->
-            <section id="slots-section"
-                class="hidden w-full opacity-0 transition-all duration-700 transform translate-x-10">
-                <div
-                    class="bg-midnight-light/50 backdrop-blur-xl p-10 rounded-[2rem] border border-white/10 shadow-2xl">
-                    <h2 class="text-2xl font-bold mb-2 text-white">
-                        Intervale Disponibile</h2>
-                    <p class="text-slate-300 mb-10">Data: <span id="selectedDateDisplay"
-                            class="text-indigo-400 font-bold"></span></p>
-
-                    <div id="slotsGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-4">
-                        <!-- Slots dynamic render -->
-                    </div>
-                    <div id="noSlotsMessage" class="hidden text-center py-16 text-slate-400">
-                        Nu mai sunt locuri libere pentru această dată.
-                    </div>
+                <div class="step-line" id="stepLine1"></div>
+                <!-- Step 2 -->
+                <div class="flex items-center gap-2" id="stepIndicator2">
+                    <div class="step-dot" id="stepDot2">2</div>
+                    <span class="text-sm font-semibold text-gray-400 hidden sm:inline" id="stepLabel2">Alege Ora</span>
                 </div>
-            </section>
-        </div>
-
-    </main>
-
-    <!-- Booking Modal -->
-    <div id="bookingModal"
-        class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden flex items-center justify-center z-50 backdrop-blur-sm opacity-0 transition-opacity duration-300">
-        <div class="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 transform scale-95 transition-transform duration-300"
-            id="modalContent">
-            <div
-                class="px-10 py-8 border-b border-white/10 flex justify-between items-center bg-midnight/30 rounded-t-xl">
-                <h3 class="text-2xl font-bold text-white">Detalii Programare</h3>
-                <button id="closeModal" class="text-slate-400 hover:text-white transition-colors">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
-                        </path>
-                    </svg>
-                </button>
+                <div class="step-line" id="stepLine2"></div>
+                <!-- Step 3 -->
+                <div class="flex items-center gap-2" id="stepIndicator3">
+                    <div class="step-dot" id="stepDot3">3</div>
+                    <span class="text-sm font-semibold text-gray-400 hidden sm:inline" id="stepLabel3">Date
+                        Personale</span>
+                </div>
             </div>
-
-            <form id="bookingForm" class="p-8 space-y-6">
-                <div
-                    class="bg-white/5 border border-white/10 p-6 rounded-xl mb-10 text-lg text-white flex justify-around">
-                    <p><strong>Data:</strong> <span id="modalDate" class="text-indigo-400 font-bold"></span></p>
-                    <p class="border-l border-white/10 h-6 self-center"></p>
-                    <p><strong>Ora:</strong> <span id="modalTime" class="text-indigo-400 font-bold"></span></p>
-                </div>
-
-                <input type="hidden" id="formDate">
-                <input type="hidden" id="formTime">
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Nume</label>
-                    <input type="text" id="lastName" required
-                        class="w-full px-3 py-2 border rounded-md focus:ring-medical-500 focus:border-medical-500"
-                        placeholder="Popescu">
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Prenume</label>
-                    <input type="text" id="firstName" required
-                        class="w-full px-3 py-2 border rounded-md focus:ring-medical-500 focus:border-medical-500"
-                        placeholder="Ion">
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Telefon</label>
-                    <input type="tel" id="phone" required
-                        class="w-full px-3 py-2 border rounded-md focus:ring-medical-500 focus:border-medical-500"
-                        placeholder="07xx xxx xxx">
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">CNP</label>
-                    <input type="text" id="cnp" required maxlength="13"
-                        class="w-full px-3 py-2 border rounded-md focus:ring-medical-500 focus:border-medical-500"
-                        placeholder="1234567890123">
-                </div>
-
-                <div>
-                    <label class="block text-xs font-semibold text-nordic-500 uppercase tracking-wider mb-2">Tip
-                        Consult</label>
-                    <select id="type" required
-                        class="w-full px-4 py-3 border text-nordic-800 rounded-md focus:ring-0 focus:border-nordic-accent bg-white transition-all">
-                        <option value="Control">Control</option>
-                        <option value="Prima Consultație">Prima Consultație</option>
-                    </select>
-                </div>
-
-                <div id="diagnosisSection" class="hidden space-y-3 p-3 bg-white/5 rounded-lg border border-white/10">
-                    <div class="flex items-center gap-2">
-                        <input type="checkbox" id="hasDiagnosis" class="w-4 h-4 text-medical-600 rounded">
-                        <label for="hasDiagnosis" class="text-sm font-medium text-gray-700">Ați primit un
-                            diagnostic?</label>
-                    </div>
-
-                    <div id="fileUploadContainer" class="hidden space-y-2">
-                        <label class="block text-xs font-semibold text-gray-500 uppercase">Încărcați Document/Imagine
-                            (Max 5MB)</label>
-                        <input type="file" id="diagnosticFile" accept=".jpg,.jpeg,.png,.pdf"
-                            class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-medical-50 file:text-medical-700 hover:file:bg-medical-100">
-                        <p class="text-[10px] text-gray-400">Imaginile vor fi compresate automat.</p>
-                    </div>
-                </div>
-
-                <button type="submit" class="w-full btn-primary mt-12 flex justify-center items-center gap-3">
-                    <span>Confirmă Programarea</span>
-                    <svg id="loadingSpinner" class="animate-spin h-6 w-6 text-white hidden"
-                        xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
-                        </circle>
-                        <path class="opacity-75" fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
-                        </path>
-                    </svg>
-                </button>
-            </form>
         </div>
     </div>
 
-    <!-- Admin Login Link -->
-    <footer class="text-center py-6 text-sm text-gray-400">
-        <button id="adminLoginBtn" class="hover:text-gray-600 underline">Administrare</button>
+    <!-- Main Content -->
+    <main class="max-w-5xl mx-auto px-4 md:px-6 py-8 md:py-12">
+
+        <!-- Step 1: Calendar -->
+        <section id="step-calendar" class="step-section active-step">
+            <div class="text-center mb-8">
+                <h2 class="text-2xl md:text-3xl font-bold text-gray-900 mb-2">Selectează Data Programării</h2>
+                <p class="text-gray-500 text-base">Zilele disponibile sunt marcate cu <span
+                        class="text-medical-600 font-bold">albastru</span> (doar miercuri).</p>
+            </div>
+            <div class="max-w-lg mx-auto">
+                <div id="calendar-card" class="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+                    <div class="flex items-center justify-between px-6 py-5 bg-gray-50 border-b border-gray-100">
+                        <button id="prevMonth" class="nav-btn" aria-label="Luna anterioară">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M15 19l-7-7 7-7"></path>
+                            </svg>
+                        </button>
+                        <h3 id="currentMonthYear" class="text-lg font-bold text-gray-900"></h3>
+                        <button id="nextMonth" class="nav-btn" aria-label="Luna următoare">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7">
+                                </path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="px-6 pt-4 pb-2 grid grid-cols-7 text-center">
+                        <span class="text-xs font-bold text-gray-400 uppercase py-2">Du</span>
+                        <span class="text-xs font-bold text-gray-400 uppercase py-2">Lu</span>
+                        <span class="text-xs font-bold text-gray-400 uppercase py-2">Ma</span>
+                        <span class="text-xs font-bold text-medical-600 uppercase py-2">Mi</span>
+                        <span class="text-xs font-bold text-gray-400 uppercase py-2">Jo</span>
+                        <span class="text-xs font-bold text-gray-400 uppercase py-2">Vi</span>
+                        <span class="text-xs font-bold text-gray-400 uppercase py-2">Sâ</span>
+                    </div>
+                    <div id="calendarGrid" class="px-6 pb-6 grid grid-cols-7 gap-1 text-center">
+                        <!-- Days rendered by JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Step 2: Time Slots -->
+        <section id="step-slots" class="step-section hidden">
+            <div class="text-center mb-8">
+                <h2 class="text-2xl md:text-3xl font-bold text-gray-900 mb-2">Selectează Intervalul Orar</h2>
+                <p class="text-gray-500 text-base">Data selectată: <span id="selectedDateDisplay"
+                        class="text-medical-600 font-bold"></span></p>
+            </div>
+            <div class="max-w-2xl mx-auto">
+                <div class="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 md:p-8">
+                    <div id="slotsGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                        <!-- Slots rendered by JS -->
+                    </div>
+                    <div id="noSlotsMessage" class="hidden text-center py-12">
+                        <svg class="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <p class="text-gray-500 font-medium text-lg">Nu mai sunt locuri libere pentru această dată.</p>
+                    </div>
+                </div>
+                <button id="backToCalendar"
+                    class="mt-6 flex items-center gap-2 text-medical-600 font-semibold hover:text-medical-700 transition-colors mx-auto">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7">
+                        </path>
+                    </svg>
+                    Înapoi la Calendar
+                </button>
+            </div>
+        </section>
+
+        <!-- Step 3: Booking Form -->
+        <section id="step-form" class="step-section hidden">
+            <div class="text-center mb-8">
+                <h2 class="text-2xl md:text-3xl font-bold text-gray-900 mb-2">Completează Datele Personale</h2>
+                <p class="text-gray-500 text-base">
+                    <span id="formSummaryDate" class="text-medical-600 font-bold"></span> la ora
+                    <span id="formSummaryTime" class="text-medical-600 font-bold"></span>
+                </p>
+            </div>
+            <div class="max-w-lg mx-auto">
+                <form id="bookingForm"
+                    class="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 md:p-8 space-y-5">
+                    <input type="hidden" id="formDate">
+                    <input type="hidden" id="formTime">
+
+                    <!-- Name Fields -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label for="lastName" class="form-label">Nume <span class="text-red-500">*</span></label>
+                            <input type="text" id="lastName" required class="form-input" placeholder="Ex: Popescu">
+                        </div>
+                        <div>
+                            <label for="firstName" class="form-label">Prenume <span
+                                    class="text-red-500">*</span></label>
+                            <input type="text" id="firstName" required class="form-input" placeholder="Ex: Ion">
+                        </div>
+                    </div>
+
+                    <!-- Phone -->
+                    <div>
+                        <label for="phone" class="form-label">Telefon <span class="text-red-500">*</span></label>
+                        <input type="tel" id="phone" required class="form-input" placeholder="07xx xxx xxx">
+                    </div>
+
+                    <!-- CNP -->
+                    <div>
+                        <label for="cnp" class="form-label">CNP <span class="text-red-500">*</span></label>
+                        <input type="text" id="cnp" required maxlength="13" class="form-input"
+                            placeholder="1234567890123">
+                        <p class="text-xs text-gray-400 mt-1">Codul Numeric Personal — 13 cifre</p>
+                    </div>
+
+                    <!-- Type -->
+                    <div>
+                        <label for="type" class="form-label">Tip Consult <span class="text-red-500">*</span></label>
+                        <div class="grid grid-cols-2 gap-3" id="typeSelector">
+                            <button type="button" class="type-btn selected" data-value="Control">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                Control
+                            </button>
+                            <button type="button" class="type-btn" data-value="Prima Consultație">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                                </svg>
+                                Prima Consultație
+                            </button>
+                        </div>
+                        <input type="hidden" id="type" value="Control">
+                    </div>
+
+                    <!-- Diagnosis Section (shown for Prima Consultație) -->
+                    <div id="diagnosisSection" class="hidden space-y-4">
+                        <div class="flex items-center gap-3 p-4 bg-medical-50 rounded-xl border border-medical-100">
+                            <input type="checkbox" id="hasDiagnosis"
+                                class="w-5 h-5 text-medical-600 rounded border-gray-300 focus:ring-medical-500">
+                            <label for="hasDiagnosis" class="font-medium text-gray-700">Aveți un diagnostic
+                                anterior?</label>
+                        </div>
+
+                        <!-- Drag-and-Drop Upload Zone -->
+                        <div id="fileUploadContainer" class="hidden">
+                            <label class="form-label">Încărcați Document Medical (Max 5MB)</label>
+                            <div id="dropZone" class="drop-zone">
+                                <svg class="w-12 h-12 text-gray-300 mb-3" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12">
+                                    </path>
+                                </svg>
+                                <p class="text-gray-500 font-medium">Trage fișierul aici sau <span
+                                        class="text-medical-600 font-bold cursor-pointer">alege manual</span></p>
+                                <p class="text-xs text-gray-400 mt-1">JPG, PNG sau PDF — max 5MB</p>
+                                <input type="file" id="diagnosticFile" accept=".jpg,.jpeg,.png,.pdf" class="hidden">
+                            </div>
+                            <div id="filePreview"
+                                class="hidden mt-3 p-3 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3">
+                                <svg class="w-6 h-6 text-green-600 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd"
+                                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                        clip-rule="evenodd"></path>
+                                </svg>
+                                <span id="fileName" class="text-sm font-medium text-green-800 truncate"></span>
+                                <button type="button" id="removeFile" class="ml-auto text-red-400 hover:text-red-600">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- GDPR -->
+                    <div class="p-4 bg-gray-50 rounded-xl border border-gray-200">
+                        <div class="flex items-start gap-3">
+                            <input type="checkbox" id="gdprConsent" required
+                                class="w-5 h-5 mt-0.5 text-medical-600 rounded border-gray-300 focus:ring-medical-500">
+                            <label for="gdprConsent" class="text-sm text-gray-600 leading-relaxed">
+                                Sunt de acord cu <strong>prelucrarea datelor personale</strong> în conformitate cu
+                                Regulamentul (UE) 2016/679 (GDPR). Datele vor fi folosite exclusiv pentru gestionarea
+                                programărilor medicale. <span class="text-red-500">*</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Submit -->
+                    <button type="submit" id="submitBtn"
+                        class="w-full bg-medical-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-medical-700 active:bg-medical-800 transition-all duration-200 flex justify-center items-center gap-3 shadow-lg shadow-medical-600/20 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <span>Confirmă Programarea</span>
+                        <svg id="loadingSpinner" class="animate-spin h-6 w-6 text-white hidden"
+                            xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                            </circle>
+                            <path class="opacity-75" fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                            </path>
+                        </svg>
+                    </button>
+
+                    <button type="button" id="backToSlots"
+                        class="w-full flex items-center justify-center gap-2 text-medical-600 font-semibold hover:text-medical-700 transition-colors text-base py-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7">
+                            </path>
+                        </svg>
+                        Înapoi la Intervale Orare
+                    </button>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer with Admin Link -->
+    <footer class="text-center py-8 text-sm border-t border-gray-100 bg-white">
+        <p class="text-gray-400 mb-2">© 2026 Prof. Dr. Balta Florian — Toate drepturile rezervate</p>
+        <button id="adminLoginBtn"
+            class="text-gray-400 hover:text-medical-600 transition-colors font-medium">Administrare</button>
     </footer>
 
     <!-- Admin Login Modal -->
     <div id="adminLoginModal"
-        class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden flex items-center justify-center z-50 backdrop-blur-sm">
-        <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full mx-4 p-6">
-            <h3 class="text-lg font-bold text-white mb-4">Autentificare Admin</h3>
+        class="fixed inset-0 bg-gray-900/50 hidden flex items-center justify-center z-50 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full mx-4 p-8">
+            <div class="text-center mb-6">
+                <div class="w-14 h-14 bg-medical-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg class="w-7 h-7 text-medical-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z">
+                        </path>
+                    </svg>
+                </div>
+                <h3 class="text-xl font-bold text-gray-900">Autentificare Admin</h3>
+            </div>
             <form id="adminLoginForm" class="space-y-4">
-                <input type="password" id="adminPassword" required
-                    class="w-full px-3 py-2 border rounded-md bg-midnight text-white border-white/10"
-                    placeholder="Parolă">
+                <input type="password" id="adminPassword" required class="form-input" placeholder="Introduceți parola">
                 <button type="submit"
-                    class="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold hover:bg-indigo-700 transition-colors">Intră</button>
+                    class="w-full bg-medical-600 text-white py-3 rounded-xl font-bold hover:bg-medical-700 transition-colors">Intră</button>
             </form>
             <button id="closeAdminLogin"
-                class="mt-4 text-sm text-slate-400 w-full hover:text-white transition-colors">Anulează</button>
+                class="mt-4 text-sm text-gray-400 w-full hover:text-gray-600 transition-colors font-medium">Anulează</button>
         </div>
     </div>
 
     <!-- Admin Dashboard -->
-    <div id="adminDashboard" class="fixed inset-0 bg-midnight hidden z-50 overflow-y-auto">
-        <div class="max-w-7xl mx-auto px-4 py-10">
-            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
-                <h2 class="text-3xl font-black text-white font-outfit">Panou Administrare</h2>
-                <div id="storage-indicator" class="hidden flex flex-col items-end gap-1">
-                    <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Spațiu MongoDB Atlas</p>
-                    <div class="w-48 bg-white/5 rounded-full h-1.5 overflow-hidden">
-                        <div id="storage-bar" class="bg-indigo-500 h-full transition-all duration-1000"
-                            style="width: 0%"></div>
+    <div id="adminDashboard" class="fixed inset-0 bg-gray-50 hidden z-50 overflow-y-auto">
+        <div class="max-w-7xl mx-auto px-4 md:px-8 py-6 md:py-10">
+            <!-- Admin Header -->
+            <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-8">
+                <div>
+                    <h2 class="text-2xl md:text-3xl font-black text-gray-900">Panou Administrare</h2>
+                    <div id="storage-indicator" class="hidden mt-2">
+                        <div class="flex items-center gap-3">
+                            <div class="w-32 bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                                <div id="storage-bar" class="bg-medical-500 h-full transition-all duration-1000"
+                                    style="width: 0%"></div>
+                            </div>
+                            <p id="storage-text" class="text-xs text-gray-500 font-medium">Se încarcă...</p>
+                        </div>
                     </div>
-                    <p id="storage-text" class="text-[10px] text-slate-400 font-medium">Se încarcă...</p>
                 </div>
-                <div class="flex gap-2">
-                    <button id="prevAdminDate"
-                        class="p-2 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-white">
+
+                <!-- Date Navigation -->
+                <div class="flex items-center gap-2">
+                    <button id="prevAdminDate" class="nav-btn">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7">
                             </path>
                         </svg>
                     </button>
-                    <div
-                        class="flex items-center px-6 bg-white/5 border border-white/10 rounded-lg font-bold text-indigo-400">
+                    <div class="px-5 py-2.5 bg-white border border-gray-200 rounded-xl font-bold text-gray-900 text-sm">
                         <span id="currentAdminDateDisplay">Azi, 15 Februarie</span>
                     </div>
-                    <button id="nextAdminDate"
-                        class="p-2 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-white">
+                    <button id="nextAdminDate" class="nav-btn">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7">
                             </path>
                         </svg>
                     </button>
                 </div>
-                <div class="flex gap-2">
-                    <button id="resetDatabaseBtn"
-                        class="px-4 py-2 bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded-lg hover:bg-orange-500/20 transition-colors flex items-center gap-2 text-sm font-bold">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
-                            </path>
-                        </svg>
-                        Resetează Datele
-                    </button>
+
+                <!-- Action Buttons -->
+                <div class="flex flex-wrap gap-2">
                     <button id="exportExcelBtn"
-                        class="px-4 py-2 bg-green-500/10 text-green-400 border border-green-500/20 rounded-lg hover:bg-green-500/20 transition-colors flex items-center gap-2 text-sm font-bold">
+                        class="admin-action-btn bg-green-50 text-green-700 border-green-200 hover:bg-green-100">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
@@ -319,82 +387,67 @@
                         </svg>
                         Export Excel
                     </button>
+                    <button id="resetDatabaseBtn"
+                        class="admin-action-btn bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
+                            </path>
+                        </svg>
+                        Resetează
+                    </button>
                     <button id="adminLogout"
-                        class="px-4 py-2 bg-white/5 text-slate-300 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-sm font-bold">Deconectare</button>
+                        class="admin-action-btn bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200">Deconectare</button>
+                    <button id="closeDashboard"
+                        class="admin-action-btn bg-white text-gray-500 border-gray-200 hover:bg-gray-50">Înapoi</button>
                 </div>
             </div>
 
             <!-- Timeline View -->
             <div id="timelineContainer"
-                class="bg-white/5 rounded-[2rem] shadow-2xl border border-white/10 h-[calc(100vh-300px)] overflow-hidden flex flex-col">
-                <div class="bg-white/5 px-8 py-4 border-b border-white/10 flex justify-between items-center shrink-0">
-                    <span id="timelineHeaderInfo"
-                        class="text-sm font-black text-indigo-400 uppercase tracking-widest">Spital Rezident -
-                        Programări</span>
+                class="bg-white rounded-2xl shadow-lg border border-gray-100 h-[calc(100vh-220px)] overflow-hidden flex flex-col">
+                <div class="bg-gray-50 px-6 py-3 border-b border-gray-100 flex justify-between items-center shrink-0">
+                    <span id="timelineHeaderInfo" class="text-sm font-bold text-gray-900">Programări Zilnice</span>
                     <span id="timelineHeaderCount"
-                        class="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">(0)
+                        class="text-xs font-semibold text-gray-500 bg-gray-100 px-3 py-1 rounded-full">(0)
                         Programări</span>
                 </div>
-
-                <div class="flex-1 overflow-y-auto relative custom-scrollbar bg-transparent">
-                    <!-- Hour labels column will be sticky -->
+                <div class="flex-1 overflow-y-auto relative custom-scrollbar">
                     <div id="timelineGrid" class="flex flex-col min-h-full">
-                        <!-- Slots will be injected here -->
+                        <!-- Timeline rows rendered by JS -->
                     </div>
                 </div>
             </div>
 
-            <div id="adminTableContainer" class="hidden mt-6 bg-white rounded-xl shadow overflow-hidden">
-                <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Ora</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Nume Pacient</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Telefon</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Tip</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Sursă</th>
-                        </tr>
-                    </thead>
-                    <tbody id="appointmentsTableBody" class="bg-white divide-y divide-gray-200">
-                    </tbody>
-                </table>
-            </div>
-            <button id="closeDashboard" class="mt-6 text-gray-500 hover:text-gray-700">Înapoi la site</button>
+            <!-- Hidden admin table (kept for compatibility) -->
+            <div id="adminTableContainer" class="hidden"></div>
         </div>
     </div>
 
     <!-- File Viewer Modal -->
     <div id="fileViewerModal"
-        class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden flex items-center justify-center z-[60] backdrop-blur-sm">
-        <div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full mx-4 p-4 relative">
-            <button id="closeFileViewer" class="absolute -top-10 right-0 text-white hover:text-gray-300">
+        class="fixed inset-0 bg-gray-900/75 hidden flex items-center justify-center z-[60] backdrop-blur-sm">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full mx-4 p-6 relative">
+            <button id="closeFileViewer"
+                class="absolute -top-12 right-0 text-white hover:text-gray-300 transition-colors">
                 <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
                     </path>
                 </svg>
             </button>
-            <div id="fileViewerContent" class="max-h-[80vh] overflow-auto flex justify-center">
-                <!-- Content injected here -->
-            </div>
-            <div id="fileDownloadLink" class="mt-4 text-center">
-                <!-- Download link for PDF injected here -->
-            </div>
+            <div id="fileViewerContent" class="max-h-[80vh] overflow-auto flex justify-center"></div>
+            <div id="fileDownloadLink" class="mt-4 text-center"></div>
         </div>
     </div>
 
     <!-- Notification Toast -->
     <div id="toast"
-        class="fixed bottom-5 right-5 bg-white shadow-lg rounded-lg p-4 transform translate-y-20 opacity-0 transition-all duration-300 max-w-sm z-50 border-l-4">
-        <h4 id="toastTitle" class="font-bold">Notificare</h4>
-        <p id="toastMessage" class="text-sm text-gray-600"></p>
+        class="fixed bottom-5 right-5 bg-white shadow-xl rounded-xl p-5 transform translate-y-20 opacity-0 transition-all duration-300 max-w-sm z-50 border-l-4">
+        <h4 id="toastTitle" class="font-bold text-gray-900"></h4>
+        <p id="toastMessage" class="text-sm text-gray-600 mt-1"></p>
     </div>
 
-    <script src="script.js?v=2.6"></script>
+    <script src="script.js?v=3.0"></script>
 </body>
 
 </html>

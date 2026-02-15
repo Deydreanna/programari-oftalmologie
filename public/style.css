@@ -1,286 +1,383 @@
-:root {
-    --midnight: #0B071A;
-    --midnight-light: #160F2D;
-    --midnight-border: rgba(255, 255, 255, 0.08);
-    --slate-50: #F8FAFC;
-    --slate-300: #CBD5E1;
-    --slate-500: #64748B;
-    --indigo-400: #818CF8;
-    --indigo-600: #4F46E5;
-}
+/* =========================================
+   Medical Appointment System — Design System
+   Clean White + Medical Blue
+   ========================================= */
 
+/* --- Base Typography --- */
 body {
-    background-color: var(--midnight);
-    color: var(--slate-50);
-    font-family: 'Geist Sans', 'Inter', system-ui, sans-serif;
-    letter-spacing: -0.02em;
+    font-size: 17px;
+    line-height: 1.6;
 }
 
-/* Typography Headings */
-h1 {
-    font-family: 'Outfit', sans-serif;
+/* --- Step Progress Indicator --- */
+.step-dot {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 800;
+    border: 2px solid #E5E7EB;
+    background: #F9FAFB;
+    color: #9CA3AF;
+    transition: all 0.3s ease;
 }
 
-h1,
-h2,
-h3 {
-    font-weight: 900;
-    letter-spacing: -0.04em;
-    color: #FFFFFF !important;
-    opacity: 1 !important;
+.step-dot.active {
+    background: #2563EB;
+    border-color: #2563EB;
+    color: white;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15);
 }
 
-/* Modal Transitions */
-#bookingModal,
-#adminLoginModal {
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    backdrop-filter: blur(12px);
-    background-color: rgba(15, 10, 31, 0.8);
+.step-dot.completed {
+    background: #22C55E;
+    border-color: #22C55E;
+    color: white;
 }
 
-#bookingModal.show,
-#adminLoginModal.show {
-    opacity: 1;
+.step-line {
+    flex: 1;
+    height: 2px;
+    background: #E5E7EB;
+    margin: 0 8px;
+    border-radius: 1px;
+    transition: background 0.3s ease;
 }
 
-#bookingModal.show #modalContent,
-#adminLoginModal.show>div {
-    transform: scale(100%);
+.step-line.active {
+    background: #2563EB;
 }
 
-#modalContent,
-#adminLoginModal>div {
-    background-color: var(--midnight-light);
-    border: 1px solid var(--midnight-border);
-    transform: scale(95%);
-    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+/* --- Step Sections --- */
+.step-section {
+    animation: fadeSlideIn 0.4s ease;
 }
 
-/* Calendar Container Refinements */
-#calendar-card {
-    background-color: var(--midnight-light);
-    border: 1px solid var(--midnight-border);
-    border-radius: 2rem;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+@keyframes fadeSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
-#currentMonthYear {
-    color: white !important;
+/* --- Navigation Buttons --- */
+.nav-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    border: 1px solid #E5E7EB;
+    background: white;
+    color: #6B7280;
+    transition: all 0.2s ease;
+    cursor: pointer;
 }
 
-.calendar-days-header div {
-    color: var(--slate-500);
+.nav-btn:hover {
+    background: #F3F4F6;
+    color: #111827;
+    border-color: #D1D5DB;
 }
 
-/* Calendar Days with Hover Bubble */
+.nav-btn:active {
+    transform: scale(0.95);
+}
+
+/* --- Calendar Days --- */
 .calendar-day {
+    position: relative;
+    width: 100%;
     aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 15px;
+    border-radius: 12px;
+    cursor: default;
+    transition: all 0.2s ease;
+    color: #9CA3AF;
+}
+
+.calendar-day.empty {
+    visibility: hidden;
+}
+
+.calendar-day.disabled-day {
+    color: #D1D5DB;
+    cursor: not-allowed;
+}
+
+.calendar-day.active-wednesday {
+    color: #2563EB;
+    font-weight: 700;
+    cursor: pointer;
+    background: #EFF6FF;
+    border: 1.5px solid transparent;
+}
+
+.calendar-day.active-wednesday:hover {
+    background: #DBEAFE;
+    border-color: #93C5FD;
+    transform: scale(1.08);
+}
+
+.calendar-day.selected {
+    background: #2563EB !important;
+    color: white !important;
+    border-color: #2563EB !important;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    transform: scale(1.08);
+}
+
+.availability-dot {
+    position: absolute;
+    bottom: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #22C55E;
+}
+
+.calendar-day.selected .availability-dot {
+    background: white;
+}
+
+/* --- Form Inputs --- */
+.form-label {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: #4B5563;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.form-input {
+    width: 100%;
+    padding: 14px 16px;
+    font-size: 17px;
+    border: 1.5px solid #E5E7EB;
+    border-radius: 12px;
+    background: #F9FAFB;
+    color: #111827;
+    transition: all 0.2s ease;
+    outline: none;
+}
+
+.form-input:focus {
+    border-color: #3B82F6;
+    background: white;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.form-input::placeholder {
+    color: #9CA3AF;
+}
+
+/* --- Type Selector Buttons --- */
+.type-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px 16px;
+    border: 1.5px solid #E5E7EB;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 15px;
+    color: #6B7280;
+    background: #F9FAFB;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.type-btn:hover {
+    border-color: #93C5FD;
+    background: #EFF6FF;
+    color: #2563EB;
+}
+
+.type-btn.selected {
+    border-color: #2563EB;
+    background: #EFF6FF;
+    color: #2563EB;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* --- Drag-and-Drop Zone --- */
+.drop-zone {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    border-radius: 50%;
-    cursor: default;
-    transition: all 0.2s ease;
-    font-size: 0.95rem;
-    font-weight: 500;
-    position: relative;
-    z-index: 1;
-}
-
-.day-bubble::before {
-    content: '';
-    position: absolute;
-    inset: 4px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 50%;
-    z-index: -1;
-    transform: scale(0);
-    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.day-bubble:hover::before {
-    transform: scale(1);
-}
-
-.calendar-day.active-wednesday {
-    color: white !important;
-    font-weight: 800;
+    padding: 32px 16px;
+    border: 2px dashed #D1D5DB;
+    border-radius: 16px;
+    background: #F9FAFB;
     cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
 }
 
-.calendar-day.disabled-day {
-    color: var(--slate-500) !important;
-    opacity: 0.6;
+.drop-zone:hover,
+.drop-zone.drag-over {
+    border-color: #3B82F6;
+    background: #EFF6FF;
 }
 
-.calendar-day.selected {
-    color: white !important;
+.drop-zone.drag-over {
+    transform: scale(1.01);
 }
 
-.calendar-day.selected::before {
-    background: var(--indigo-400) !important;
-    transform: scale(1) !important;
-    box-shadow: 0 0 15px rgba(129, 140, 248, 0.5);
-}
-
-.availability-dot {
-    width: 4px;
-    height: 4px;
-    border-radius: 50%;
-    background-color: var(--indigo-400);
-    margin-top: 2px;
-}
-
-.calendar-day.selected .availability-dot {
-    background-color: white;
-}
-
-/* Transition for Minimized Calendar */
-#date-selection.minimized {
-    width: 350px !important;
-    flex-shrink: 0;
-}
-
-#date-selection.minimized #calendar-card {
-    background: transparent;
-    border: none;
-    box-shadow: none;
-    transform: scale(0.9);
-    transform-origin: top left;
-}
-
-#date-selection.minimized .calendar-day:not(.selected) {
-    opacity: 0.3;
-}
-
-#date-selection.minimized #calendar-title,
-#date-selection.minimized #calendar-subtitle {
-    opacity: 0.2;
-}
-
-/* Slots Section visibility */
-#slots-section.active {
-    display: block !important;
-    opacity: 1;
-    transform: translateX(0);
-}
-
-/* Slot Chips */
+/* --- Slot Buttons --- */
 .slot-btn {
-    background-color: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--midnight-border);
-    color: var(--slate-300);
-    padding: 12px 16px;
+    padding: 16px 12px;
+    font-size: 16px;
+    font-weight: 700;
     border-radius: 12px;
-    font-weight: 600;
-    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    border: 1.5px solid #E5E7EB;
+    background: white;
+    color: #111827;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+    animation: fadeSlideIn 0.3s ease backwards;
 }
 
 .slot-btn:hover:not(:disabled) {
-    background-color: var(--indigo-400);
-    color: white;
-    border-color: var(--indigo-400);
-    transform: scale(1.05);
-    box-shadow: 0 10px 15px -3px rgba(129, 140, 248, 0.3);
+    border-color: #3B82F6;
+    background: #EFF6FF;
+    color: #2563EB;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+}
+
+.slot-btn:active:not(:disabled) {
+    transform: translateY(0);
 }
 
 .slot-btn:disabled {
-    opacity: 0.2;
-    text-decoration: line-through;
+    background: #F3F4F6;
+    color: #D1D5DB;
+    border-color: #F3F4F6;
     cursor: not-allowed;
+    text-decoration: line-through;
 }
 
-/* Form Styles */
-input,
-select {
-    background-color: var(--midnight-light) !important;
-    border: 1px solid var(--midnight-border) !important;
-    color: white !important;
-    border-radius: 12px !important;
-    padding: 12px 16px !important;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 1rem center;
-    background-size: 1.5em;
+/* --- Admin Action Buttons --- */
+.admin-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 10px;
+    border: 1px solid;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
 }
 
-select option {
-    background-color: var(--midnight-light);
-    color: white;
+.admin-action-btn:active {
+    transform: scale(0.97);
 }
 
-input:focus,
-select:focus {
-    border-color: var(--indigo-400) !important;
-    box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.2) !important;
-    outline: none !important;
-}
-
-label {
-    color: var(--slate-300) !important;
-}
-
-/* Timeline Layout Styles (Admin) */
+/* --- Timeline (Admin) --- */
 .timeline-row {
     display: flex;
-    border-bottom: 1px solid var(--midnight-border);
+    border-bottom: 1px solid #F3F4F6;
     min-height: 54px;
 }
 
 .timeline-hour {
     width: 80px;
-    padding: 12px 8px;
-    background: rgba(255, 255, 255, 0.03);
-    color: var(--slate-500);
-    font-size: 11px;
-    font-weight: 900;
+    padding: 14px 8px;
+    background: #F9FAFB;
+    color: #6B7280;
+    font-size: 13px;
+    font-weight: 700;
     text-align: center;
-    border-right: 1px solid var(--midnight-border);
+    border-right: 1px solid #F3F4F6;
     display: flex;
     align-items: center;
     justify-content: center;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
 }
 
 .timeline-slots {
     flex: 1;
     position: relative;
-    background: repeating-linear-gradient(90deg,
-            transparent,
-            transparent 19.9%,
-            rgba(255, 255, 255, 0.02) 20%);
+    padding: 4px;
 }
 
 .appointment-card {
-    background-color: var(--midnight-light);
-    color: var(--slate-50);
+    background: white;
+    color: #111827;
     border-left-width: 4px;
-    border-radius: 8px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
-    margin: 4px;
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    padding: 10px 14px;
+    margin-bottom: 4px;
     transition: all 0.2s ease;
+    font-size: 14px;
 }
 
 .appointment-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
 }
 
 .app-type-prima {
-    border-color: var(--indigo-400);
-    background-color: rgba(129, 140, 248, 0.15);
+    border-color: #3B82F6;
+    background: #EFF6FF;
 }
 
 .app-type-control {
-    border-color: var(--slate-500);
-    background-color: rgba(100, 116, 139, 0.15);
+    border-color: #6B7280;
+    background: #F9FAFB;
 }
 
-/* Custom Scrollbar for Admin */
+.app-new-badge {
+    display: inline-block;
+    background: #DBEAFE;
+    color: #2563EB;
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* --- View File Link --- */
+.view-file-link {
+    font-size: 11px;
+    font-weight: 700;
+    color: #3B82F6;
+    cursor: pointer;
+    transition: color 0.2s;
+    letter-spacing: 0.05em;
+}
+
+.view-file-link:hover {
+    color: #1D4ED8;
+    text-decoration: underline;
+}
+
+/* --- Custom Scrollbar --- */
 .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
 }
@@ -290,15 +387,33 @@ label {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: #D1D5DB;
     border-radius: 10px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: #9CA3AF;
 }
 
-.view-file-link {
-    background-color: var(--indigo-400);
-    color: white;
+/* --- Toast --- */
+#toast {
+    border-radius: 14px;
+}
+
+/* --- Responsive Mobile Cards for Admin --- */
+@media (max-width: 640px) {
+    .appointment-card .flex {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+
+    .appointment-card .flex>span.text-gray-600 {
+        display: none;
+    }
+
+    .timeline-hour {
+        width: 60px;
+        font-size: 12px;
+    }
 }
