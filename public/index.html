@@ -514,16 +514,18 @@
                         guestEl.classList.remove('hidden');
                         userEl.classList.add('hidden');
                         adminLink.classList.add('hidden');
+                        adminLink.style.display = 'none';
                         return;
                     }
                     guestEl.classList.add('hidden');
                     userEl.classList.remove('hidden');
-                    nameEl.textContent = user.displayName;
+                    nameEl.textContent = `${user.displayName} [${user.role || 'fara-rol'}]`;
 
                     if (user.role === 'admin' || user.role === 'superadmin') {
                         adminLink.classList.remove('hidden');
-                        adminLink.style.display = 'inline-block';
+                        adminLink.style.setProperty('display', 'inline-block', 'important');
                         adminLink.style.color = '#AAD2BA';
+                        adminLink.style.fontWeight = 'bold';
                     } else {
                         adminLink.classList.add('hidden');
                         adminLink.style.display = 'none';
