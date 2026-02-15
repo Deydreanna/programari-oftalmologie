@@ -251,6 +251,23 @@
                     <p id="storage-text" class="text-[10px] text-gray-600">Se încarcă...</p>
                 </div>
                 <div class="flex gap-2">
+                    <button id="prevAdminDate" class="p-2 bg-white border rounded-lg hover:bg-gray-100">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7">
+                            </path>
+                        </svg>
+                    </button>
+                    <div class="flex items-center px-4 bg-white border rounded-lg font-medium text-gray-700">
+                        <span id="currentAdminDateDisplay">Azi, 15 Februarie</span>
+                    </div>
+                    <button id="nextAdminDate" class="p-2 bg-white border rounded-lg hover:bg-gray-100">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7">
+                            </path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="flex gap-2">
                     <button id="resetDatabaseBtn"
                         class="px-4 py-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 flex items-center gap-2">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -274,28 +291,41 @@
                 </div>
             </div>
 
-            <div class="bg-white rounded-xl shadow overflow-hidden">
+            <!-- Timeline View -->
+            <div id="timelineContainer"
+                class="bg-[#F0F4F8] rounded-xl shadow-inner border border-gray-200 h-[calc(100vh-250px)] overflow-hidden flex flex-col">
+                <div class="bg-[#E1E8F0] px-4 py-2 border-b border-gray-300 flex justify-between items-center shrink-0">
+                    <span id="timelineHeaderInfo" class="text-sm font-bold text-gray-700">Spital Rezident -
+                        Programări</span>
+                    <span id="timelineHeaderCount" class="text-xs font-semibold text-gray-500 uppercase">(0)
+                        Programări</span>
+                </div>
+
+                <div class="flex-1 overflow-y-auto relative custom-scrollbar bg-[#FFF9E6]">
+                    <!-- Hour labels column will be sticky -->
+                    <div id="timelineGrid" class="flex flex-col min-h-full">
+                        <!-- Slots will be injected here -->
+                    </div>
+                </div>
+            </div>
+
+            <div id="adminTableContainer" class="hidden mt-6 bg-white rounded-xl shadow overflow-hidden">
                 <table class="min-w-full divide-y divide-gray-200">
                     <thead class="bg-gray-50">
                         <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Data</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 Ora</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 Nume Pacient</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                CNP</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 Telefon</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 Tip</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Document</th>
+                                Sursă</th>
                         </tr>
                     </thead>
                     <tbody id="appointmentsTableBody" class="bg-white divide-y divide-gray-200">
-                        <!-- Rows will be injected here -->
                     </tbody>
                 </table>
             </div>

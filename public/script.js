@@ -430,7 +430,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeDashboard = document.getElementById('closeDashboard');
     const adminLogout = document.getElementById('adminLogout');
     const exportExcelBtn = document.getElementById('exportExcelBtn');
-    const appointmentsTableBody = document.getElementById('appointmentsTableBody');
+    const timelineGrid = document.getElementById('timelineGrid');
+    const currentAdminDateDisplay = document.getElementById('currentAdminDateDisplay');
+    const prevAdminDate = document.getElementById('prevAdminDate');
+    const nextAdminDate = document.getElementById('nextAdminDate');
+    const timelineHeaderCount = document.getElementById('timelineHeaderCount');
+
+    let adminActiveDate = new Date();
+    adminActiveDate.setHours(0, 0, 0, 0);
 
     // Toggle Login Modal
     adminLoginBtn.addEventListener('click', () => {
@@ -477,9 +484,32 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         adminDashboard.classList.remove('hidden');
+        updateAdminDateDisplay();
         fetchAdminAppointments();
         fetchAdminStats();
     }
+
+    function updateAdminDateDisplay() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const isToday = adminActiveDate.getTime() === today.getTime();
+        const dateStr = new Intl.DateTimeFormat('ro-RO', { day: 'numeric', month: 'long' }).format(adminActiveDate);
+
+        currentAdminDateDisplay.textContent = (isToday ? 'Azi, ' : '') + dateStr;
+    }
+
+    prevAdminDate.onclick = () => {
+        adminActiveDate.setDate(adminActiveDate.getDate() - 1);
+        updateAdminDateDisplay();
+        fetchAdminAppointments();
+    };
+
+    nextAdminDate.onclick = () => {
+        adminActiveDate.setDate(adminActiveDate.getDate() + 1);
+        updateAdminDateDisplay();
+        fetchAdminAppointments();
+    };
 
     async function fetchAdminStats() {
         const token = localStorage.getItem('adminToken');
@@ -510,7 +540,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchAdminAppointments() {
         const token = localStorage.getItem('adminToken');
-        appointmentsTableBody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center">Se încarcă...</td></tr>';
+        timelineGrid.innerHTML = '<div class="p-10 text-center text-gray-500">Se încarcă programările...</div>';
 
         try {
             const res = await fetch('/api/admin/appointments', {
@@ -523,48 +553,81 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const appointments = await res.json();
-            renderAdminAppointments(appointments);
+
+            // Filter appointments for the active date
+            const y = adminActiveDate.getFullYear();
+            const m = String(adminActiveDate.getMonth() + 1).padStart(2, '0');
+            const d = String(adminActiveDate.getDate()).padStart(2, '0');
+            const formattedActiveDate = `${y}-${m}-${d}`;
+
+            const filtered = appointments.filter(app => app.date === formattedActiveDate);
+            renderTimeline(filtered);
+            timelineHeaderCount.textContent = `(${filtered.length}) Programări`;
         } catch (err) {
-            appointmentsTableBody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-red-500">Eroare la încărcare.</td></tr>';
+            timelineGrid.innerHTML = '<div class="p-10 text-center text-red-500">Eroare la încărcare.</div>';
         }
     }
 
-    function renderAdminAppointments(appointments) {
-        appointmentsTableBody.innerHTML = '';
+    function renderTimeline(appointments) {
+        timelineGrid.innerHTML = '';
 
-        if (appointments.length === 0) {
-            appointmentsTableBody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-gray-500">Nu există programări.</td></tr>';
-            return;
+        // Generate all slots from 08:00 to 13:00 (matching your clinic hours)
+        const clinicHours = [];
+        for (let hour = 8; hour < 14; hour++) {
+            for (let min = 0; min < 60; min += 5) {
+                if (hour === 13 && min > 0) break; // End at 13:00
+                const hh = String(hour).padStart(2, '0');
+                const mm = String(min).padStart(2, '0');
+                clinicHours.push(`${hh}:${mm}`);
+            }
         }
 
-        appointments.forEach(app => {
-            const row = document.createElement('tr');
-            row.className = 'hover:bg-gray-50';
-            row.innerHTML = `
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${app.date}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">${app.time}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${app.name}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">${app.cnp || '-'}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${app.phone}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${app.type === 'Control' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}">
-                        ${app.type}
-                    </span>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    ${app.diagnosticFile
-                    ? `<button class="view-file-btn text-medical-600 hover:text-medical-800 font-medium underline">Vezi</button>`
-                    : '<span class="text-gray-300">-</span>'}
-                </td>
-            `;
+        clinicHours.forEach(time => {
+            const row = document.createElement('div');
+            row.className = 'timeline-row';
 
-            if (app.diagnosticFile) {
-                row.querySelector('.view-file-btn').onclick = () => {
-                    openFileViewer(app.diagnosticFile, app.fileType);
+            const hourLabel = document.createElement('div');
+            hourLabel.className = 'timeline-hour';
+            hourLabel.textContent = time;
+
+            const slotsArea = document.createElement('div');
+            slotsArea.className = 'timeline-slots';
+
+            // Find appointments for this slot
+            const appsInSlot = appointments.filter(a => a.time === time);
+
+            appsInSlot.forEach((app, index) => {
+                const card = document.createElement('div');
+                card.className = `appointment-card ${app.type === 'Control' ? 'app-type-control' : 'app-type-prima'}`;
+
+                // Offset if multiple appointments in same slot? (Shouldn't happen with 1 slot/5min logic, but good for safety)
+                if (index > 0) card.style.marginLeft = `${index * 160}px`;
+
+                card.innerHTML = `
+                    <span>➊ ${app.name}</span>
+                    ${app.type === 'Prima Consultație' ? '<span class="app-new-badge">(NOU)</span>' : ''}
+                    ${app.diagnosticFile ? `
+                        <button class="bg-medical-600 text-white rounded px-1 text-[9px] hover:bg-medical-700 view-file-link">DOC</button>
+                    ` : ''}
+                `;
+
+                if (app.diagnosticFile) {
+                    card.querySelector('.view-file-link').onclick = (e) => {
+                        e.stopPropagation();
+                        openFileViewer(app.diagnosticFile, app.fileType);
+                    };
+                }
+
+                card.onclick = () => {
+                    // Optional: show details
                 };
-            }
 
-            appointmentsTableBody.appendChild(row);
+                slotsArea.appendChild(card);
+            });
+
+            row.appendChild(hourLabel);
+            row.appendChild(slotsArea);
+            timelineGrid.appendChild(row);
         });
     }
 
