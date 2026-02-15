@@ -150,10 +150,13 @@ app.get('/api/admin/stats', async (req, res) => {
 
     try {
         const stats = await mongoose.connection.db.command({ dbStats: 1 });
+        // storageSize is what Atlas usually shows in the dashboard
+        const usedSize = stats.storageSize || stats.dataSize;
+
         res.json({
-            usedSizeMB: (stats.dataSize / (1024 * 1024)).toFixed(2),
+            usedSizeMB: (usedSize / (1024 * 1024)).toFixed(3),
             totalSizeMB: 512,
-            percentUsed: ((stats.dataSize / (512 * 1024 * 1024)) * 100).toFixed(2)
+            percentUsed: ((usedSize / (512 * 1024 * 1024)) * 100).toFixed(2)
         });
     } catch (err) {
         console.error('Stats error:', err);
