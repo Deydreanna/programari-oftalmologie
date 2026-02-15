@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const prevMonthBtn = document.getElementById('prevMonth');
     const nextMonthBtn = document.getElementById('nextMonth');
     const dateError = document.getElementById('dateError');
+    const resetBookingBtn = document.getElementById('resetBooking');
 
     // Modal & Form
     const bookingModal = document.getElementById('bookingModal');
@@ -230,6 +231,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
         fetchSlots(date);
     }
+
+    function resetView() {
+        const dateSelection = document.getElementById('date-selection');
+        dateSelection.classList.remove('minimized');
+        slotsSection.classList.remove('active');
+        setTimeout(() => {
+            slotsSection.classList.add('hidden');
+        }, 300);
+
+        // Deselect
+        document.querySelectorAll('.calendar-day').forEach(d => d.classList.remove('selected'));
+        selectedDate = null;
+
+        // Scroll to top (Position 0)
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    resetBookingBtn.onclick = resetView;
 
     prevMonthBtn.onclick = () => {
         currentDate.setMonth(currentDate.getMonth() - 1);

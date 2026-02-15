@@ -61,7 +61,15 @@
 
             <!-- Step 1: Inline Calendar -->
             <section id="date-selection" class="w-full transition-all duration-700 ease-in-out origin-top-left">
-                <div class="calendar-wrapper">
+                <div class="calendar-wrapper relative">
+                    <!-- Back Button (only visible when minimized) -->
+                    <button id="resetBooking" class="back-btn group">
+                        <svg class="w-4 h-4 transition-transform group-hover:-translate-x-1" fill="none"
+                            stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                        </svg>
+                        Înapoi la Calendar
+                    </button>
                     <h2 id="calendar-title"
                         class="text-2xl font-serif font-medium mb-2 text-nordic-800 transition-opacity duration-500">
                         Programare Nouă</h2>
