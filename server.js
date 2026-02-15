@@ -122,8 +122,11 @@ async function requireAdmin(req, res, next) {
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         const user = await User.findById(decoded.id);
-        if (user && (user.role === 'admin' || user.role === 'superadmin')) {
-            req.user = user;
+
+        const isSuperEmail = decoded.email && decoded.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+
+        if (user && (user.role === 'admin' || user.role === 'superadmin' || isSuperEmail)) {
+            req.user = user || decoded; // Fallback to decoded if user find fails but email matches
             next();
         } else {
             res.status(403).json({ error: 'Acces interzis. Drepturi de administrator necesare.' });
@@ -144,8 +147,11 @@ async function requireSuperAdmin(req, res, next) {
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         const user = await User.findById(decoded.id);
-        if (user && user.role === 'superadmin') {
-            req.user = user;
+
+        const isSuperEmail = decoded.email && decoded.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+
+        if ((user && user.role === 'superadmin') || isSuperEmail) {
+            req.user = user || decoded;
             next();
         } else {
             res.status(403).json({ error: 'Acces interzis. Doar Super Admin are acces aici.' });
