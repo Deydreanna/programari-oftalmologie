@@ -98,7 +98,8 @@ h3 {
 }
 
 .calendar-day.disabled-day {
-    color: var(--slate-200) !important;
+    color: var(--slate-500) !important;
+    opacity: 0.4;
 }
 
 .calendar-day.selected {
@@ -123,20 +124,21 @@ h3 {
     background-color: white;
 }
 
-/* Transition for Minimized Calendar */
+/* Transition for Minimized Calendar - Improved Sidebar Mode */
 #date-selection.minimized {
-    width: 25% !important;
+    width: 350px !important;
+    flex-shrink: 0;
 }
 
 #date-selection.minimized #calendar-card {
-    border: none;
-    box-shadow: none;
-    padding: 0;
-    background: transparent;
+    transform: scale(0.9);
+    transform-origin: top left;
+    margin-top: -1rem;
 }
 
 #date-selection.minimized .calendar-day:not(.selected) {
-    opacity: 0.05;
+    opacity: 0.4;
+    /* Better visibility than 0.05 */
 }
 
 /* Slots Section visibility */
