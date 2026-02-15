@@ -351,32 +351,10 @@
     <footer class="text-center py-8 text-sm border-t border-brand-600/20 bg-brand-800">
         <p class="text-brand-400/50 mb-2">© 2026 Prof. Dr. Balta Florian — Toate drepturile rezervate</p>
         <button id="adminLoginBtn"
-            class="text-brand-400/50 hover:text-brand-300 transition-colors font-medium">Administrare</button>
+            class="hidden text-brand-400/50 hover:text-brand-300 transition-colors font-medium">Administrare</button>
     </footer>
 
-    <!-- Admin Login Modal -->
-    <div id="adminLoginModal"
-        class="fixed inset-0 bg-brand-900/70 hidden flex items-center justify-center z-50 backdrop-blur-sm">
-        <div class="bg-brand-800 rounded-2xl shadow-2xl max-w-sm w-full mx-4 p-8 border border-brand-600/20">
-            <div class="text-center mb-6">
-                <div class="w-14 h-14 bg-brand-600/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg class="w-7 h-7 text-brand-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z">
-                        </path>
-                    </svg>
-                </div>
-                <h3 class="text-xl font-bold text-brand-100">Autentificare Admin</h3>
-            </div>
-            <form id="adminLoginForm" class="space-y-4">
-                <input type="password" id="adminPassword" required class="form-input" placeholder="Introduceți parola">
-                <button type="submit"
-                    class="w-full bg-brand-400 text-brand-900 py-3 rounded-xl font-bold hover:bg-brand-300 transition-colors">Intră</button>
-            </form>
-            <button id="closeAdminLogin"
-                class="mt-4 text-sm text-brand-400/50 w-full hover:text-brand-100 transition-colors font-medium">Anulează</button>
-        </div>
-    </div>
+    <!-- Admin Login Modal REMOVED - Using account role instead -->
 
     <!-- Admin Dashboard -->
     <div id="adminDashboard" class="fixed inset-0 bg-brand-900 hidden z-50 overflow-y-auto">
@@ -418,6 +396,14 @@
 
                 <!-- Action Buttons -->
                 <div class="flex flex-wrap gap-2">
+                    <button id="manageUsersBtn"
+                        class="hidden admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0-10a6 6 0 0110.143 4.143M18 10a4 4 0 110-8" />
+                        </svg>
+                        Gestionare Utilizatori
+                    </button>
                     <button id="exportExcelBtn"
                         class="admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -436,8 +422,6 @@
                         </svg>
                         Resetează
                     </button>
-                    <button id="adminLogout"
-                        class="admin-action-btn bg-brand-700 text-brand-300 border-brand-600/30 hover:bg-brand-600/20">Deconectare</button>
                     <button id="closeDashboard"
                         class="admin-action-btn bg-brand-800 text-brand-400 border-brand-600/30 hover:bg-brand-700">Înapoi</button>
                 </div>
@@ -460,7 +444,34 @@
                 </div>
             </div>
 
-            <div id="adminTableContainer" class="hidden"></div>
+            <!-- User Management View -->
+            <div id="userManagerContainer"
+                class="hidden bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 h-[calc(100vh-220px)] overflow-hidden flex flex-col">
+                <div
+                    class="bg-brand-700 px-6 py-3 border-b border-brand-600/20 flex justify-between items-center shrink-0">
+                    <span class="text-sm font-bold text-brand-100">Gestionare Utilizatori (Admins)</span>
+                    <button id="backToTimeline"
+                        class="text-xs text-brand-400 font-bold hover:text-brand-100 transition-colors">Înapoi la
+                        Programări</button>
+                </div>
+                <div class="flex-1 overflow-y-auto custom-scrollbar p-6">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead>
+                                <tr class="text-brand-400 border-b border-brand-600/20">
+                                    <th class="pb-3 font-semibold">Nume</th>
+                                    <th class="pb-3 font-semibold">Email</th>
+                                    <th class="pb-3 font-semibold">Telefon</th>
+                                    <th class="pb-3 font-semibold text-center">Admin</th>
+                                </tr>
+                            </thead>
+                            <tbody id="userTableBody" class="text-brand-100">
+                                <!-- Users rendered by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -496,21 +507,29 @@
                 const userEl = document.getElementById('authUser');
                 const nameEl = document.getElementById('authUserName');
                 const logoutBtn = document.getElementById('logoutBtn');
+                const adminLink = document.getElementById('adminLoginBtn');
 
                 if (AUTH.isLoggedIn()) {
                     const user = AUTH.getUser();
                     guestEl.classList.add('hidden');
                     userEl.classList.remove('hidden');
                     nameEl.textContent = user ? user.displayName : 'Utilizator';
+
+                    // Show admin link if user is admin or superadmin
+                    if (user && (user.role === 'admin' || user.role === 'superadmin')) {
+                        adminLink.classList.remove('hidden');
+                    } else {
+                        adminLink.classList.add('hidden');
+                    }
                 } else {
                     guestEl.classList.remove('hidden');
                     userEl.classList.add('hidden');
+                    adminLink.classList.add('hidden');
                 }
 
                 logoutBtn.addEventListener('click', () => {
                     AUTH.logout();
-                    guestEl.classList.remove('hidden');
-                    userEl.classList.add('hidden');
+                    window.location.reload(); // Reload to reset UI state
                 });
             })();
     </script>

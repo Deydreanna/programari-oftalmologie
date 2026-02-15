@@ -12,6 +12,9 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-dev-secret';
 const SALT_ROUNDS = 12;
 
+// The Super Admin Email
+const SUPER_ADMIN_EMAIL = 'alexynho2009@gmail.com';
+
 // Connect to MongoDB
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/appointments';
 
@@ -30,6 +33,7 @@ const userSchema = new mongoose.Schema({
     password: String,
     googleId: String,
     displayName: String,
+    role: { type: String, enum: ['user', 'admin', 'superadmin'], default: 'user' },
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -72,7 +76,6 @@ function validateEmail(email) {
 }
 
 function validatePhone(phone) {
-    // Strip spaces and dashes for validation
     const cleaned = phone.replace(/[\s\-]/g, '');
     return PHONE_REGEX.test(cleaned);
 }
@@ -87,13 +90,13 @@ function isEmail(identifier) {
 
 function generateToken(user) {
     return jwt.sign(
-        { id: user._id, email: user.email, displayName: user.displayName },
+        { id: user._id, email: user.email, displayName: user.displayName, role: user.role },
         JWT_SECRET,
         { expiresIn: '24h' }
     );
 }
 
-// Optional auth middleware — attaches user if token present, but doesn't block
+// Optional auth middleware
 function optionalAuth(req, res, next) {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -102,22 +105,62 @@ function optionalAuth(req, res, next) {
             const decoded = jwt.verify(token, JWT_SECRET);
             req.user = decoded;
         } catch (err) {
-            // Token invalid/expired — continue without user
+            // Token invalid
         }
     }
     next();
+}
+
+// Required Admin middleware
+function requireAdmin(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Autentificare necesară.' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded.role === 'admin' || decoded.role === 'superadmin') {
+            req.user = decoded;
+            next();
+        } else {
+            res.status(403).json({ error: 'Acces interzis. Drepturi de administrator necesare.' });
+        }
+    } catch (err) {
+        res.status(401).json({ error: 'Sesiune invalidă sau expirată.' });
+    }
+}
+
+// Required Super Admin middleware
+function requireSuperAdmin(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Autentificare necesară.' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded.role === 'superadmin') {
+            req.user = decoded;
+            next();
+        } else {
+            res.status(403).json({ error: 'Acces interzis. Doar Super Admin are acces aici.' });
+        }
+    } catch (err) {
+        res.status(401).json({ error: 'Sesiune invalidă sau expirată.' });
+    }
 }
 
 // =====================
 //  AUTH API
 // =====================
 
-// POST /api/auth/signup — Register with email + phone + password
 app.post('/api/auth/signup', async (req, res) => {
     try {
         const { email, phone, password, displayName } = req.body;
 
-        // Validate required fields
         if (!email || !phone || !password) {
             return res.status(400).json({ error: 'Email, telefon și parola sunt obligatorii.' });
         }
@@ -126,49 +169,44 @@ app.post('/api/auth/signup', async (req, res) => {
             return res.status(400).json({ error: 'Numele trebuie să aibă cel puțin 2 caractere.' });
         }
 
-        // Validate email format
         if (!validateEmail(email)) {
             return res.status(400).json({ error: 'Format email invalid.' });
         }
 
-        // Validate phone format
         if (!validatePhone(phone)) {
             return res.status(400).json({ error: 'Format telefon invalid. Folosiți formatul 07xx xxx xxx.' });
         }
 
-        // Validate password strength
         if (password.length < 6) {
             return res.status(400).json({ error: 'Parola trebuie să aibă minim 6 caractere.' });
         }
 
         const cleanedPhone = cleanPhone(phone);
 
-        // Check if email already exists
         const existingEmail = await User.findOne({ email: email.toLowerCase() });
         if (existingEmail) {
             return res.status(409).json({ error: 'Acest email este deja înregistrat.' });
         }
 
-        // Check if phone already exists
         const existingPhone = await User.findOne({ phone: cleanedPhone });
         if (existingPhone) {
             return res.status(409).json({ error: 'Acest număr de telefon este deja înregistrat.' });
         }
 
-        // Hash password
         const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
-        // Create user
+        // Assign superadmin role if it's the target email
+        const role = email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() ? 'superadmin' : 'user';
+
         const user = new User({
             email: email.toLowerCase(),
             phone: cleanedPhone,
             password: hashedPassword,
-            displayName: displayName.trim()
+            displayName: displayName.trim(),
+            role: role
         });
 
         await user.save();
-
-        // Generate JWT
         const token = generateToken(user);
 
         res.status(201).json({
@@ -179,20 +217,17 @@ app.post('/api/auth/signup', async (req, res) => {
                 id: user._id,
                 email: user.email,
                 phone: user.phone,
-                displayName: user.displayName
+                displayName: user.displayName,
+                role: user.role
             }
         });
 
     } catch (err) {
         console.error('Signup error:', err);
-        if (err.code === 11000) {
-            return res.status(409).json({ error: 'Email sau telefon deja înregistrat.' });
-        }
         res.status(500).json({ error: 'Eroare la înregistrare.' });
     }
 });
 
-// POST /api/auth/login — Login with email OR phone + password
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { identifier, password } = req.body;
@@ -201,7 +236,6 @@ app.post('/api/auth/login', async (req, res) => {
             return res.status(400).json({ error: 'Introduceți email/telefon și parola.' });
         }
 
-        // Determine if identifier is email or phone
         let user;
         if (isEmail(identifier)) {
             user = await User.findOne({ email: identifier.toLowerCase().trim() });
@@ -214,17 +248,11 @@ app.post('/api/auth/login', async (req, res) => {
             return res.status(401).json({ error: 'Email/telefon sau parolă incorectă.' });
         }
 
-        if (!user.password) {
-            return res.status(401).json({ error: 'Acest cont folosește autentificare Google. Folosiți butonul Google.' });
-        }
-
-        // Compare password
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             return res.status(401).json({ error: 'Email/telefon sau parolă incorectă.' });
         }
 
-        // Generate JWT
         const token = generateToken(user);
 
         res.json({
@@ -235,7 +263,8 @@ app.post('/api/auth/login', async (req, res) => {
                 id: user._id,
                 email: user.email,
                 phone: user.phone,
-                displayName: user.displayName
+                displayName: user.displayName,
+                role: user.role
             }
         });
 
@@ -245,7 +274,6 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// GET /api/auth/me — Get current user profile
 app.get('/api/auth/me', async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -265,14 +293,12 @@ app.get('/api/auth/me', async (req, res) => {
             email: user.email,
             phone: user.phone,
             displayName: user.displayName,
+            role: user.role,
             createdAt: user.createdAt
         });
 
     } catch (err) {
-        if (err.name === 'TokenExpiredError') {
-            return res.status(401).json({ error: 'Sesiune expirată. Autentificați-vă din nou.' });
-        }
-        return res.status(401).json({ error: 'Token invalid.' });
+        return res.status(401).json({ error: 'Sesiune invalidă.' });
     }
 });
 
@@ -285,7 +311,6 @@ const generateSlots = () => {
     const slots = [];
     let start = 9 * 60;
     const end = 14 * 60;
-
     while (start < end) {
         const hours = Math.floor(start / 60);
         const mins = start % 60;
@@ -299,47 +324,36 @@ const generateSlots = () => {
 app.get('/api/slots', async (req, res) => {
     const { date } = req.query;
     if (!date) return res.status(400).json({ error: 'Date is required' });
-
     const day = new Date(date).getDay();
     if (day !== 3) return res.status(400).json({ error: 'Appointments are only available on Wednesdays.' });
-
     const allSlots = generateSlots();
-
     try {
         const existingAppointments = await Appointment.find({ date });
         const bookedTimes = existingAppointments.map(a => a.time);
-
         const availableSlots = allSlots.map(time => ({
             time,
             available: !bookedTimes.includes(time)
         }));
-
         res.json(availableSlots);
     } catch (err) {
         res.status(500).json({ error: 'Database error' });
     }
 });
 
-// Book appointment (auth optional)
 app.post('/api/book', optionalAuth, async (req, res) => {
     const { name, phone, cnp, type, date, time } = req.body;
-
     if (!name || !phone || !cnp || !type || !date || !time) {
         return res.status(400).json({ error: 'Toate câmpurile sunt obligatorii.' });
     }
-
     if (!/^\d{13}$/.test(cnp)) {
         return res.status(400).json({ error: 'CNP invalid (13 cifre).' });
     }
-
     try {
         const existing = await Appointment.findOne({ date, time });
         if (existing) {
             return res.status(409).json({ error: 'Interval deja rezervat.' });
         }
-
         const { hasDiagnosis, diagnosticFile, fileType } = req.body;
-
         const newAppointment = new Appointment({
             name, phone, cnp, type, date, time,
             hasDiagnosis: !!hasDiagnosis,
@@ -348,10 +362,8 @@ app.post('/api/book', optionalAuth, async (req, res) => {
             userId: req.user ? req.user.id : null
         });
         await newAppointment.save();
-
         res.json({ success: true, message: 'Programare confirmată!' });
     } catch (err) {
-        console.error('Booking error:', err);
         res.status(500).json({ error: 'Eroare la salvare.' });
     }
 });
@@ -361,95 +373,117 @@ app.post('/api/book', optionalAuth, async (req, res) => {
 //  ADMIN API
 // =====================
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASS || 'admin123';
-const ADMIN_TOKEN = 'secret-admin-token-123';
-
-app.post('/api/admin/login', (req, res) => {
-    const { password } = req.body;
-    if (password === ADMIN_PASSWORD) {
-        res.json({ success: true, token: ADMIN_TOKEN });
-    } else {
-        res.status(401).json({ error: 'Parolă incorectă' });
-    }
-});
-
-app.get('/api/admin/appointments', async (req, res) => {
-    const token = req.headers['x-admin-token'];
-    if (token !== ADMIN_TOKEN) return res.status(403).json({ error: 'Unauthorized' });
-
+// List appointments - Use JWT auth now
+app.get('/api/admin/appointments', requireAdmin, async (req, res) => {
     try {
-        const appointments = await Appointment.find()
-            .sort({ date: 1, time: 1 });
+        const appointments = await Appointment.find().sort({ date: 1, time: 1 });
         res.json(appointments);
     } catch (err) {
-        console.error('Fetch appointments error:', err);
         res.status(500).json({ error: 'Database error' });
     }
 });
 
-app.get('/api/admin/stats', async (req, res) => {
-    const token = req.headers['x-admin-token'];
-    if (token !== ADMIN_TOKEN) return res.status(403).json({ error: 'Unauthorized' });
-
+app.get('/api/admin/stats', requireAdmin, async (req, res) => {
     try {
         const stats = await mongoose.connection.db.command({ dbStats: 1 });
         const usedSize = stats.storageSize || stats.dataSize;
-
         res.json({
             usedSizeMB: (usedSize / (1024 * 1024)).toFixed(3),
             totalSizeMB: 512,
             percentUsed: ((usedSize / (512 * 1024 * 1024)) * 100).toFixed(2)
         });
     } catch (err) {
-        console.error('Stats error:', err);
         res.status(500).json({ error: 'Could not fetch stats' });
     }
 });
 
-app.post('/api/admin/reset', async (req, res) => {
-    const token = req.headers['x-admin-token'];
-    if (token !== ADMIN_TOKEN) return res.status(403).json({ error: 'Unauthorized' });
-
+app.post('/api/admin/reset', requireAdmin, async (req, res) => {
     try {
         await Appointment.deleteMany({});
         res.json({ success: true, message: 'Baza de date a fost resetată.' });
     } catch (err) {
-        console.error('Reset error:', err);
         res.status(500).json({ error: 'Eroare la resetarea bazei de date.' });
     }
 });
 
 app.get('/api/admin/export', async (req, res) => {
     try {
-        const appointments = await Appointment.find().sort({ date: 1, time: 1 }).lean();
+        const token = req.query.token;
+        if (!token) return res.status(401).send('Token lipsă.');
 
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            if (decoded.role !== 'admin' && decoded.role !== 'superadmin') {
+                return res.status(403).send('Acces interzis.');
+            }
+        } catch (err) {
+            return res.status(401).send('Token invalid sau expirat.');
+        }
+
+        const appointments = await Appointment.find().sort({ date: 1, time: 1 }).lean();
         const data = appointments.map(a => ({
-            Data: a.date,
-            Ora: a.time,
-            Nume: a.name,
-            Telefon: a.phone,
-            CNP: a.cnp,
-            Tip: a.type,
+            Data: a.date, Ora: a.time, Nume: a.name, Telefon: a.phone, CNP: a.cnp, Tip: a.type,
             Creat: a.createdAt ? a.createdAt.toISOString().split('T')[0] : ''
         }));
-
         const wb = xlsx.utils.book_new();
         const ws = xlsx.utils.json_to_sheet(data);
         xlsx.utils.book_append_sheet(wb, ws, "Programari");
-
         const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
-
         res.setHeader('Content-Disposition', 'attachment; filename="programari.xlsx"');
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.send(buf);
-
     } catch (err) {
-        console.error(err);
         res.status(500).send('Eroare la generarea Excel.');
+    }
+});
+
+// =====================
+//  USER MANAGEMENT (SUPER ADMIN)
+// =====================
+
+// List all users
+app.get('/api/admin/users', requireSuperAdmin, async (req, res) => {
+    try {
+        const users = await User.find().select('-password').sort({ createdAt: -1 });
+        res.json(users);
+    } catch (err) {
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+// Toggle Admin role
+app.post('/api/admin/users/role', requireSuperAdmin, async (req, res) => {
+    try {
+        const { userId, role } = req.body;
+
+        if (!userId || !role) {
+            return res.status(400).json({ error: 'UserId și Rolul sunt necesare.' });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Utilizator negăsit.' });
+        }
+
+        // Prevent changing superadmin role via this endpoint
+        if (user.role === 'superadmin' || user.email === SUPER_ADMIN_EMAIL) {
+            return res.status(403).json({ error: 'Rolul de Super Admin nu poate fi schimbat.' });
+        }
+
+        if (!['user', 'admin'].includes(role)) {
+            return res.status(400).json({ error: 'Rol invalid.' });
+        }
+
+        user.role = role;
+        await user.save();
+
+        res.json({ success: true, message: `Rolul utilizatorului ${user.displayName} a fost actualizat la ${role}.` });
+    } catch (err) {
+        res.status(500).json({ error: 'Database error' });
     }
 });
 
 
 app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT} (MongoDB + Auth Enabled)`);
+    console.log(`Server running on http://localhost:${PORT} (MongoDB + Auth + RBAC Enabled)`);
 });

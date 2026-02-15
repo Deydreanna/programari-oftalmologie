@@ -559,22 +559,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ========================
-    // Admin Logic
+    // Admin Logic (Role-Based)
     // ========================
 
     const adminLoginBtn = document.getElementById('adminLoginBtn');
-    const adminLoginModal = document.getElementById('adminLoginModal');
-    const closeAdminLogin = document.getElementById('closeAdminLogin');
-    const adminLoginForm = document.getElementById('adminLoginForm');
     const adminDashboard = document.getElementById('adminDashboard');
     const closeDashboard = document.getElementById('closeDashboard');
-    const adminLogout = document.getElementById('adminLogout');
     const exportExcelBtn = document.getElementById('exportExcelBtn');
     const timelineGrid = document.getElementById('timelineGrid');
     const currentAdminDateDisplay = document.getElementById('currentAdminDateDisplay');
     const prevAdminDate = document.getElementById('prevAdminDate');
     const nextAdminDate = document.getElementById('nextAdminDate');
     const timelineHeaderCount = document.getElementById('timelineHeaderCount');
+    const manageUsersBtn = document.getElementById('manageUsersBtn');
+    const userManagerContainer = document.getElementById('userManagerContainer');
+    const timelineContainer = document.getElementById('timelineContainer');
+    const backToTimeline = document.getElementById('backToTimeline');
+    const userTableBody = document.getElementById('userTableBody');
 
     let adminActiveDate = new Date();
     adminActiveDate.setHours(0, 0, 0, 0);
@@ -583,49 +584,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     adminLoginBtn.addEventListener('click', () => {
-        adminLoginModal.classList.remove('hidden');
-    });
-
-    closeAdminLogin.addEventListener('click', () => {
-        adminLoginModal.classList.add('hidden');
-    });
-
-    adminLoginForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const password = document.getElementById('adminPassword').value;
-
-        try {
-            const res = await fetch('/api/admin/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                localStorage.setItem('adminToken', data.token);
-                adminLoginModal.classList.add('hidden');
-                document.getElementById('adminPassword').value = '';
-                showToast('Autentificare reușită', 'Bine ai venit!');
-                openDashboard();
-            } else {
-                showToast('Eroare', 'Parolă incorectă', 'error');
-            }
-        } catch (err) {
-            showToast('Eroare', 'Eroare de conexiune', 'error');
+        const user = AUTH.getUser();
+        if (user && (user.role === 'admin' || user.role === 'superadmin')) {
+            openDashboard();
+        } else {
+            showToast('Acces interzis', 'Nu aveți drepturi de administrator.', 'error');
         }
     });
 
     function openDashboard() {
-        const token = localStorage.getItem('adminToken');
-        if (!token) {
-            showToast('Acces interzis', 'Te rugăm să te autentifici.', 'error');
-            return;
-        }
         adminDashboard.classList.remove('hidden');
         updateAdminDateDisplay();
         fetchAdminAppointments();
         fetchAdminStats();
+
+        // Show Manage Users button only for superadmin
+        const user = AUTH.getUser();
+        if (user && user.role === 'superadmin') {
+            manageUsersBtn.classList.remove('hidden');
+        }
     }
 
     function updateAdminDateDisplay() {
@@ -649,14 +626,13 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     async function fetchAdminStats() {
-        const token = localStorage.getItem('adminToken');
         const storageIndicator = document.getElementById('storage-indicator');
         const storageBar = document.getElementById('storage-bar');
         const storageText = document.getElementById('storage-text');
 
         try {
             const res = await fetch('/api/admin/stats', {
-                headers: { 'x-admin-token': token }
+                headers: AUTH.getHeaders()
             });
             const data = await res.json();
 
@@ -675,22 +651,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchAdminAppointments() {
-        const token = localStorage.getItem('adminToken');
-        timelineGrid.innerHTML = '<div class="p-10 text-center text-gray-400 font-medium">Se încarcă programările...</div>';
+        timelineGrid.innerHTML = '<div class="p-10 text-center text-gray-400 font-medium font-inter">Se încarcă programările...</div>';
 
         try {
             const res = await fetch('/api/admin/appointments', {
-                headers: { 'x-admin-token': token }
+                headers: AUTH.getHeaders()
             });
 
             const appointments = await res.json().catch(() => null);
 
             if (!res.ok) {
                 throw new Error(appointments?.error || `Server error: ${res.status}`);
-            }
-
-            if (!Array.isArray(appointments)) {
-                throw new Error('Data format error');
             }
 
             const y = adminActiveDate.getFullYear();
@@ -705,7 +676,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Admin Fetch Error:', err);
             timelineGrid.innerHTML = `<div class="p-10 text-center text-red-500 font-medium">
                 Eroare la încărcare.<br>
-                <span class="text-xs text-gray-400">${err.message}</span>
+                <span class="text-xs text-brand-400/50">${err.message}</span>
             </div>`;
         }
     }
@@ -742,16 +713,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 card.innerHTML = `
                     <div class="flex items-center gap-3 flex-wrap">
-                        <span class="font-bold text-gray-900">${app.name}</span>
+                        <span class="font-bold text-brand-100">${app.name}</span>
                         ${app.type === 'Prima Consultație' ? '<span class="app-new-badge">NOU</span>' : ''}
-                        <span class="text-gray-300">|</span>
-                        <span class="text-gray-600"><strong class="text-[11px] uppercase text-gray-400">Tel:</strong> ${app.phone}</span>
-                        <span class="text-gray-300">|</span>
-                        <span class="text-gray-600"><strong class="text-[11px] uppercase text-gray-400">CNP:</strong> ${app.cnp}</span>
-                        <span class="text-gray-300">|</span>
-                        <span class="text-gray-600"><strong class="text-[11px] uppercase text-gray-400">Tip:</strong> ${app.type}</span>
+                        <span class="text-brand-600/30">|</span>
+                        <span class="text-brand-300"><strong class="text-[11px] uppercase text-brand-400/50">Tel:</strong> ${app.phone}</span>
+                        <span class="text-brand-600/30">|</span>
+                        <span class="text-brand-300"><strong class="text-[11px] uppercase text-brand-400/50">CNP:</strong> ${app.cnp}</span>
+                        <span class="text-brand-600/30">|</span>
+                        <span class="text-brand-300"><strong class="text-[11px] uppercase text-brand-400/50">Tip:</strong> ${app.type}</span>
                         ${app.diagnosticFile ? `
-                            <button class="ml-auto view-file-link">VEZI DOC</button>
+                            <button class="ml-auto view-file-link bg-brand-600/20 px-3 py-1 rounded-lg text-xs font-bold text-brand-300 hover:bg-brand-600/40 transition-all">VEZI DOC</button>
                         ` : ''}
                     </div>
                 `;
@@ -772,31 +743,100 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Logout
-    function logout() {
-        localStorage.removeItem('adminToken');
-        adminDashboard.classList.add('hidden');
-        showToast('Deconectare', 'Te-ai deconectat cu succes.');
+    // User Management (SuperAdmin)
+    manageUsersBtn.addEventListener('click', () => {
+        timelineContainer.classList.add('hidden');
+        userManagerContainer.classList.remove('hidden');
+        fetchUsers();
+    });
+
+    backToTimeline.addEventListener('click', () => {
+        userManagerContainer.classList.add('hidden');
+        timelineContainer.classList.remove('hidden');
+    });
+
+    async function fetchUsers() {
+        userTableBody.innerHTML = '<tr><td colspan="4" class="p-10 text-center text-brand-400">Se încarcă lista de utilizatori...</td></tr>';
+        try {
+            const res = await fetch('/api/admin/users', {
+                headers: AUTH.getHeaders()
+            });
+            const users = await res.json();
+            if (res.ok) {
+                renderUsers(users);
+            } else {
+                showToast('Eroare', users.error || 'Eroare la preluare utilizatori.', 'error');
+            }
+        } catch (err) {
+            showToast('Eroare', 'Eroare de conexiune server.', 'error');
+        }
     }
 
-    adminLogout.addEventListener('click', logout);
+    function renderUsers(users) {
+        userTableBody.innerHTML = '';
+        users.forEach(user => {
+            const row = document.createElement('tr');
+            row.className = 'border-b border-brand-600/10 hover:bg-brand-600/5 transition-colors';
+
+            const isSelf = user.email === AUTH.getUser().email;
+            const isSuperAdmin = user.role === 'superadmin';
+
+            row.innerHTML = `
+                <td class="py-4 font-medium">${user.displayName}</td>
+                <td class="py-4 text-brand-400">${user.email}</td>
+                <td class="py-4 text-brand-400">${user.phone}</td>
+                <td class="py-4 text-center">
+                    <button class="role-toggle-btn w-12 h-6 rounded-full relative transition-all duration-300 ${user.role === 'admin' ? 'bg-brand-400' : (isSuperAdmin ? 'bg-medical-500' : 'bg-brand-700')}" 
+                            ${(isSelf || isSuperAdmin) ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}>
+                        <div class="w-4 h-4 bg-brand-900 rounded-full absolute top-1 transition-all duration-300 ${user.role === 'admin' ? 'left-7' : 'left-1'}"></div>
+                    </button>
+                    ${isSuperAdmin ? '<span class="block text-[10px] uppercase font-bold text-medical-500 mt-1">Super Admin</span>' : ''}
+                </td>
+            `;
+
+            if (!isSelf && !isSuperAdmin) {
+                row.querySelector('.role-toggle-btn').onclick = () => {
+                    const newRole = user.role === 'admin' ? 'user' : 'admin';
+                    toggleUserRole(user._id, newRole);
+                };
+            }
+
+            userTableBody.appendChild(row);
+        });
+    }
+
+    async function toggleUserRole(userId, role) {
+        try {
+            const res = await fetch('/api/admin/users/role', {
+                method: 'POST',
+                headers: AUTH.getHeaders(),
+                body: JSON.stringify({ userId, role })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showToast('Succes', data.message);
+                fetchUsers();
+            } else {
+                showToast('Eroare', data.error, 'error');
+            }
+        } catch (err) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        }
+    }
 
     const resetDatabaseBtn = document.getElementById('resetDatabaseBtn');
     resetDatabaseBtn.addEventListener('click', async () => {
         const confirm1 = confirm("Ești sigur că vrei să ștergi TOATE programările?");
         if (!confirm1) return;
-
         const confirm2 = confirm("CONFIRMARE FINALĂ: Toate datele vor fi șterse definitiv. Continuăm?");
         if (!confirm2) return;
 
-        const token = localStorage.getItem('adminToken');
         try {
             const res = await fetch('/api/admin/reset', {
                 method: 'POST',
-                headers: { 'x-admin-token': token }
+                headers: AUTH.getHeaders()
             });
             const data = await res.json();
-
             if (res.ok) {
                 showToast('Succes', 'Baza de date a fost resetată.');
                 fetchAdminAppointments();
@@ -810,7 +850,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     exportExcelBtn.addEventListener('click', () => {
-        window.location.href = '/api/admin/export';
+        window.location.href = `/api/admin/export?token=${AUTH.getToken()}`;
     });
 
     closeDashboard.addEventListener('click', () => {
