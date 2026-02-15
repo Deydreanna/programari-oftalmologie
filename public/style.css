@@ -23,7 +23,8 @@ h2,
 h3 {
     font-weight: 900;
     letter-spacing: -0.04em;
-    color: white;
+    color: #FFFFFF !important;
+    opacity: 1 !important;
 }
 
 /* Modal Transitions */
@@ -143,6 +144,17 @@ h3 {
     background: transparent;
     border: none;
     box-shadow: none;
+    transform: scale(0.9);
+    transform-origin: top left;
+}
+
+#date-selection.minimized .calendar-day:not(.selected) {
+    opacity: 0.3;
+}
+
+#date-selection.minimized #calendar-title,
+#date-selection.minimized #calendar-subtitle {
+    opacity: 0.2;
 }
 
 /* Slots Section visibility */
@@ -180,17 +192,28 @@ h3 {
 /* Form Styles */
 input,
 select {
-    background-color: rgba(255, 255, 255, 0.05) !important;
+    background-color: var(--midnight-light) !important;
     border: 1px solid var(--midnight-border) !important;
     color: white !important;
     border-radius: 12px !important;
     padding: 12px 16px !important;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    background-size: 1.5em;
+}
+
+select option {
+    background-color: var(--midnight-light);
+    color: white;
 }
 
 input:focus,
 select:focus {
     border-color: var(--indigo-400) !important;
     box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.2) !important;
+    outline: none !important;
 }
 
 label {
