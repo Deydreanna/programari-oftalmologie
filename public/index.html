@@ -18,20 +18,20 @@
                         sans: ['Geist Sans', 'Inter', 'sans-serif'],
                     },
                     colors: {
-                        emerald: {
-                            50: '#ECFDF5',
-                            100: '#D1FAE5',
-                            500: '#10B981',
-                            600: '#059669',
-                            700: '#047857',
+                        indigo: {
+                            50: '#EEF2FF',
+                            100: '#E0E7FF',
+                            500: '#6366F1',
+                            600: '#4F46E5',
+                            700: '#4338CA',
                         },
-                        neutral: {
-                            50: '#FAFAFA',
-                            100: '#F5F5F5',
-                            200: '#E5E5E5',
-                            600: '#525252',
-                            800: '#262626',
-                            900: '#171717',
+                        slate: {
+                            50: '#F8FAFC',
+                            100: '#F1F5F9',
+                            200: '#E2E8F0',
+                            600: '#475569',
+                            800: '#1E293B',
+                            900: '#0F172A',
                         }
                     }
                 }
@@ -40,20 +40,20 @@
     </script>
 </head>
 
-<body class="bg-neutral-50 text-neutral-900 font-sans antialiased">
+<body class="bg-white text-slate-900 font-sans antialiased">
 
     <!-- Header -->
-    <header class="bg-white border-b border-neutral-100 py-24">
-        <div class="max-w-7xl mx-auto px-12 text-center">
-            <h1 class="text-6xl md:text-8xl font-black text-neutral-900 tracking-tighter mb-6">
-                Prof. Dr. Balta Florian
+    <header class="bg-white border-b border-slate-50 py-16">
+        <div class="max-w-7xl mx-auto px-8 text-center">
+            <h1 class="text-4xl md:text-5xl font-black text-slate-900 tracking-tight mb-4">
+                Programari Prof. Dr. Balta Florian
             </h1>
-            <p class="text-neutral-600 opacity-60 font-semibold tracking-[0.2em] uppercase text-sm">Oftalmologie &
-                Cercetare</p>
+            <p class="text-slate-500 font-medium text-sm tracking-wide">Cabinetul 4, Ambulatoriul INSTITUTUL CLINIC DE
+                URGENTE OFTALMOLOGICE “PROF. DR. MIRCEA OLTEANU”</p>
         </div>
     </header>
 
-    <main class="max-w-7xl mx-auto px-12 py-24">
+    <main class="max-w-6xl mx-auto px-8 py-16">
 
         <!-- Booking Container -->
         <div id="booking-container"
@@ -71,15 +71,13 @@
                         Înapoi la Calendar
                     </button>
                     <h2 id="calendar-title"
-                        class="text-5xl font-black mb-6 text-neutral-900 transition-opacity duration-500">
+                        class="text-3xl font-bold mb-3 text-slate-900 transition-opacity duration-500">
                         Programare Nouă</h2>
-                    <p id="calendar-subtitle"
-                        class="text-xl text-neutral-600 opacity-60 mb-16 max-w-2xl transition-opacity duration-500">
-                        Selectați o zi de miercuri din calendarul de mai jos pentru a explora intervalele disponibile.
-                    </p>
+                    <p id="calendar-subtitle" class="text-slate-500 mb-12 max-w-lg transition-opacity duration-500">
+                        Selectați o zi disponibilă pentru a vedea intervalele de consult.</p>
 
                     <div id="calendar-card"
-                        class="max-w-md mx-auto bg-white p-10 transition-all duration-700 card-lift">
+                        class="max-w-md mx-auto bg-white p-6 transition-all duration-700 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
                         <div class="flex justify-between items-center mb-4 calendar-nav">
                             <button id="prevMonth"
                                 class="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600">
@@ -123,16 +121,16 @@
             <!-- Step 2: Select Slot -->
             <section id="slots-section"
                 class="hidden w-full opacity-0 transition-all duration-700 transform translate-x-10">
-                <div class="bg-white p-12 card-lift">
-                    <h2 class="text-4xl font-black mb-4 text-neutral-900">
+                <div class="bg-white p-10 rounded-[2rem] border border-slate-100 shadow-sm">
+                    <h2 class="text-2xl font-bold mb-2 text-slate-900">
                         Intervale Disponibile</h2>
-                    <p class="text-xl text-neutral-600 opacity-60 mb-12">Data selectată: <span id="selectedDateDisplay"
-                            class="text-emerald-500 font-bold"></span></p>
+                    <p class="text-slate-500 mb-10">Data: <span id="selectedDateDisplay"
+                            class="text-indigo-600 font-bold"></span></p>
 
-                    <div id="slotsGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-6">
-                        <!-- Slots will be injected here -->
+                    <div id="slotsGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-4">
+                        <!-- Slots dynamic render -->
                     </div>
-                    <div id="noSlotsMessage" class="hidden text-center py-20 text-neutral-600 opacity-60 text-lg">
+                    <div id="noSlotsMessage" class="hidden text-center py-16 text-slate-400">
                         Nu mai sunt locuri libere pentru această dată.
                     </div>
                 </div>
@@ -378,7 +376,7 @@
         <p id="toastMessage" class="text-sm text-gray-600"></p>
     </div>
 
-    <script src="script.js?v=1.4"></script>
+    <script src="script.js?v=1.7"></script>
 </body>
 
 </html>

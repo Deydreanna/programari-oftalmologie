@@ -73,28 +73,20 @@ h3,
 }
 
 .calendar-day.active-wednesday {
-    color: var(--neutral-900);
+    color: var(--slate-900);
     cursor: pointer;
-    background-color: white;
-    border: 1px solid var(--neutral-200);
 }
 
 .calendar-day.active-wednesday:hover {
-    background-color: var(--neutral-50);
-    border-color: var(--emerald-500);
-    color: var(--emerald-500);
-    transform: translateY(-2px);
+    color: var(--indigo-600);
 }
 
 .calendar-day.selected {
-    background-color: var(--emerald-500) !important;
-    border-color: var(--emerald-500) !important;
     color: white !important;
-    box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.3);
 }
 
 .calendar-day.disabled-day {
-    color: #D4D4D4;
+    color: var(--slate-200);
 }
 
 .calendar-day.empty {
@@ -140,163 +132,70 @@ select:focus {
     box-shadow: 0 0 0 2px rgba(123, 140, 125, 0.1) !important;
 }
 
-.btn-primary {
-    background-color: var(--emerald-500);
-    color: white;
-    padding: 16px 32px;
-    border-radius: 8px;
-    font-weight: 600;
-    box-shadow: var(--emerald-inner-shadow);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.btn-primary:hover {
-    background-color: #059669;
-    transform: translateY(-2px);
-    box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.2);
-}
-
-.nordic-card {
-    background: white;
-    border: 1px solid var(--nordic-gray);
-    box-shadow: 0 4px 20px -5px rgba(70, 63, 58, 0.05);
-}
-
-/* Timeline Custom Styles */
-.custom-scrollbar::-webkit-scrollbar {
-    width: 8px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-track {
-    background: #f1f1f1;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    border-radius: 10px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8;
-}
-
-.timeline-row {
+/* Calendar Days & Dots */
+.calendar-day {
+    aspect-ratio: 1;
     display: flex;
-    border-bottom: 1px solid #e2e8f0;
-    min-height: 48px;
-    position: relative;
-}
-
-.timeline-hour {
-    width: 60px;
-    padding: 8px 4px;
-    background: #E1E8F0;
-    color: #475569;
-    font-size: 11px;
-    font-weight: 700;
-    text-align: center;
-    border-right: 1px solid #cbd5e1;
-    display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-}
-
-.timeline-slots {
-    flex: 1;
+    border-radius: 50%;
+    cursor: default;
+    transition: all 0.2s ease;
+    font-size: 0.95rem;
+    font-weight: 500;
     position: relative;
-    display: flex;
-    align-items: center;
-    padding-left: 10px;
+    z-index: 1;
 }
 
-.appointment-card {
-    position: relative;
-    width: 98%;
-    height: 36px;
-    border-radius: 6px;
-    padding: 0 15px;
-    font-size: 11px;
-    display: flex;
-    align-items: center;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-    border-left: 5px solid;
-    white-space: nowrap;
-    overflow: hidden;
-    z-index: 10;
-    margin: 4px 0;
-}
-
-.app-type-prima {
-    background-color: #FFF3C4;
-    border-color: #F6AD55;
-    color: #7B341E;
-}
-
-.app-type-control {
-    background-color: #E6FFFA;
-    border-color: #38B2AC;
-    color: #234E52;
-}
-
-.app-new-badge {
-    color: #E53E3E;
-    font-weight: 900;
-}
-
-/* Transition for Minimized Calendar - Scandi Edition */
-#date-selection.minimized {
-    width: 25% !important;
-}
-
-#date-selection.minimized .calendar-day:not(.selected) {
-    opacity: 0.05;
-}
-
-#date-selection.minimized #calendar-card {
-    border: none;
-    box-shadow: none;
-    background: transparent;
-}
-
-/* Slots Section Active State */
-#slots-section.active {
-    display: block !important;
-    opacity: 1;
-    transform: translateX(0);
-}
-
-#date-selection.minimized #calendar-title,
-#date-selection.minimized #calendar-subtitle {
-    opacity: 0;
-    pointer-events: none;
-    height: 0;
-    margin: 0;
-}
-
-.back-btn {
-    display: none;
-}
-
-#date-selection.minimized .back-btn {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--nordic-blue);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+.calendar-day.active-wednesday {
+    color: var(--slate-900);
     cursor: pointer;
-    margin-bottom: 20px;
-    opacity: 0.7;
-    transition: opacity 0.2s;
 }
 
-#date-selection.minimized .back-btn:hover {
-    opacity: 1;
+.calendar-day.selected {
+    color: white !important;
 }
 
-.calendar-nav {
-    border-bottom: 1px solid var(--nordic-gray);
-    padding-bottom: 12px;
+.calendar-day.disabled-day {
+    color: var(--slate-200);
+}
+
+.availability-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background-color: var(--indigo-600);
+    margin-top: 2px;
+    opacity: 0.6;
+}
+
+/* Slot Chips */
+.slot-btn {
+    background-color: var(--slate-50);
+    border: 1px solid var(--slate-100);
+    color: var(--slate-900);
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-weight: 600;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.slot-btn:hover:not(:disabled) {
+    background-color: var(--indigo-600);
+    color: white;
+    border-color: var(--indigo-600);
+    transform: scale(1.05);
+}
+
+.slot-btn:disabled {
+    opacity: 0.3;
+    text-decoration: line-through;
+    cursor: not-allowed;
+}
+
+/* Admin Specifics */
+.appointment-card {
+    border-radius: 12px;
+    border-left: 4px solid var(--indigo-600);
 }

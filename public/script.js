@@ -197,7 +197,13 @@ document.addEventListener('DOMContentLoaded', () => {
             dayDiv.className = 'calendar-day';
 
             if (isWednesday && !isPast && isValidMonth && !isExcludedDate) {
-                dayDiv.classList.add('active-wednesday');
+                dayDiv.classList.add('active-wednesday', 'day-bubble');
+
+                // Availability Dot - Small indicator for slots
+                const dot = document.createElement('div');
+                dot.className = 'availability-dot';
+                dayDiv.appendChild(dot);
+
                 if (selectedDate === formattedDate) {
                     dayDiv.classList.add('selected');
                 }
@@ -233,11 +239,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 100);
         }, 400);
 
-        // Highlight selected with Emerald
-        document.querySelectorAll('.calendar-day').forEach(d => d.classList.remove('selected'));
+        // Highlight selected with Indigo
+        document.querySelectorAll('.calendar-day').forEach(d => {
+            d.classList.remove('selected');
+            d.style.backgroundColor = '';
+            d.style.color = '';
+        });
         element.classList.add('selected');
-        element.style.backgroundColor = '#10B981'; // Emerald-500
-        element.style.color = 'white';
 
         fetchSlots(date);
     }
@@ -371,13 +379,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        slots.forEach(slot => {
+        slots.forEach((slot, index) => {
             const btn = document.createElement('button');
-            // Premium Emerald Slot Buttons
-            btn.className = `slot-btn py-4 px-3 rounded-xl border-2 text-base font-bold transition-all duration-300 ${slot.available
-                ? 'bg-white border-neutral-100 text-neutral-800 hover:border-emerald-500 hover:text-emerald-500 hover:scale-105 shadow-sm'
-                : 'bg-neutral-50 border-neutral-50 text-neutral-200 cursor-not-allowed opacity-40'
-                }`;
+            // Apple Health Style Chips with Staggered Animation
+            btn.className = 'slot-btn slot-animation';
+            btn.style.animationDelay = `${index * 50}ms`;
+
             btn.textContent = slot.time;
             btn.disabled = !slot.available;
 
