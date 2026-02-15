@@ -499,9 +499,8 @@
     </div>
 
     <script src="auth.js"></script>
-    <script src="script.js?v=6.0"></script>
+    <script src="script.js?v=6.1"></script>
     <script>
-            // Auth state UI on main page
             // Auth state UI on main page
             (async function initAuthUI() {
                 const guestEl = document.getElementById('authGuest');
@@ -510,31 +509,38 @@
                 const logoutBtn = document.getElementById('logoutBtn');
                 const adminLink = document.getElementById('adminLoginBtn');
 
-                // 1. Initial UI based on cache
-                let user = AUTH.getUser();
-                if (AUTH.isLoggedIn() && user) {
+                function updateUI(user) {
+                    if (!user) {
+                        guestEl.classList.remove('hidden');
+                        userEl.classList.add('hidden');
+                        adminLink.classList.add('hidden');
+                        return;
+                    }
                     guestEl.classList.add('hidden');
                     userEl.classList.remove('hidden');
                     nameEl.textContent = user.displayName;
+
                     if (user.role === 'admin' || user.role === 'superadmin') {
                         adminLink.classList.remove('hidden');
+                        adminLink.style.display = 'inline-block';
+                        adminLink.style.color = '#AAD2BA';
+                    } else {
+                        adminLink.classList.add('hidden');
+                        adminLink.style.display = 'none';
                     }
-                } else {
-                    guestEl.classList.remove('hidden');
-                    userEl.classList.add('hidden');
-                    adminLink.classList.add('hidden');
                 }
 
-                // 2. Verified UI based on server (refreshes roles if they changed)
+                // 1. Initial check (fast, from cache)
+                const cachedUser = AUTH.getUser();
+                updateUI(cachedUser);
+
+                // 2. Server verification (background)
                 if (AUTH.isLoggedIn()) {
-                    user = await AUTH.verify();
-                    if (user) {
-                        nameEl.textContent = user.displayName;
-                        if (user.role === 'admin' || user.role === 'superadmin') {
-                            adminLink.classList.remove('hidden');
-                        } else {
-                            adminLink.classList.add('hidden');
-                        }
+                    try {
+                        const verifiedUser = await AUTH.verify();
+                        updateUI(verifiedUser);
+                    } catch (e) {
+                        console.error('Auth verification failed', e);
                     }
                 }
 

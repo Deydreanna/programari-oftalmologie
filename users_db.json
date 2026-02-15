@@ -1,0 +1,31 @@
+[
+  {
+    "_id": "6991d620fe1ccb892ca9fb93",
+    "email": "test@exemplu.ro",
+    "phone": "0745123456",
+    "password": "$2b$12$J5FYkcNWj6Z1.daJkHNPC.wJlkOFDu9z5cUZWs1DaKUdpz./5uvai",
+    "displayName": "Test User",
+    "createdAt": "2026-02-15T14:20:16.560Z",
+    "__v": 0
+  },
+  {
+    "_id": "6991d929b9695298064da549",
+    "email": "alexynho2009@gmail.com",
+    "phone": "0799999999",
+    "password": "$2b$12$Trll1sqOg6lZBZE52a9rOuebyla2SAYjI0uaR1wkDKmhzshnYvspO",
+    "displayName": "Big Admin",
+    "role": "superadmin",
+    "createdAt": "2026-02-15T14:33:13.361Z",
+    "__v": 0
+  },
+  {
+    "_id": "6991d931b9695298064da54d",
+    "email": "regular@user.com",
+    "phone": "0711111111",
+    "password": "$2b$12$p7qb8yE.MWNXI7V5Egyv..n8JpvpSEH.efYgkkCM0PlF2vEfTgTki",
+    "displayName": "Regular User",
+    "role": "admin",
+    "createdAt": "2026-02-15T14:33:21.812Z",
+    "__v": 0
+  }
+]
