@@ -585,7 +585,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     adminLoginBtn.addEventListener('click', () => {
         const user = AUTH.getUser();
-        if (user && (user.role === 'admin' || user.role === 'superadmin')) {
+        const isSuperEmail = user && user.email && user.email.toLowerCase() === 'alexynho2009@gmail.com';
+        const isAdmin = user && (user.role === 'admin' || user.role === 'superadmin' || isSuperEmail);
+
+        if (isAdmin) {
             openDashboard();
         } else {
             showToast('Acces interzis', 'Nu aveți drepturi de administrator.', 'error');
@@ -598,9 +601,10 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchAdminAppointments();
         fetchAdminStats();
 
-        // Show Manage Users button only for superadmin
+        // Show Manage Users button for superadmin OR the dedicated email
         const user = AUTH.getUser();
-        if (user && user.role === 'superadmin') {
+        const isSuper = user && (user.role === 'superadmin' || (user.email && user.email.toLowerCase() === 'alexynho2009@gmail.com'));
+        if (isSuper) {
             manageUsersBtn.classList.remove('hidden');
         }
     }
