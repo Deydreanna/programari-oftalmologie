@@ -21,6 +21,28 @@ h3,
     font-family: 'Lora', serif;
 }
 
+/* Modal Transitions */
+#bookingModal,
+#adminLoginModal {
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+#bookingModal.show,
+#adminLoginModal.show {
+    opacity: 1;
+}
+
+#bookingModal.show #modalContent,
+#adminLoginModal.show>div {
+    transform: scale(100%);
+}
+
+#adminLoginModal>div {
+    transform: scale(95%);
+    transition: transform 0.3s ease;
+}
+
 /* Calendar Refinements */
 #calendar-card {
     box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.05);

@@ -353,15 +353,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         slots.forEach(slot => {
             const btn = document.createElement('button');
-            btn.className = `slot-btn py-2 px-1 rounded border text-sm font-medium ${slot.available
-                ? 'bg-white border-medical-200 text-medical-600 hover:bg-medical-50 hover:border-medical-500'
-                : 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
+            btn.className = `slot-btn py-3 px-2 rounded border text-sm font-medium transition-all ${slot.available
+                ? 'bg-white border-nordic-100 text-nordic-600 hover:border-nordic-accent hover:text-nordic-accent'
+                : 'bg-nordic-50 border-nordic-100 text-nordic-100 cursor-not-allowed'
                 }`;
             btn.textContent = slot.time;
             btn.disabled = !slot.available;
 
             if (slot.available) {
-                btn.onclick = () => openModal(date, slot.time);
+                btn.onclick = () => {
+                    console.log('Slot clicked:', slot.time);
+                    openModal(date, slot.time);
+                };
             }
 
             slotsGrid.appendChild(btn);
@@ -464,10 +467,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Toggle Login Modal
     adminLoginBtn.addEventListener('click', () => {
         adminLoginModal.classList.remove('hidden');
+        setTimeout(() => adminLoginModal.classList.add('show'), 10);
     });
 
     closeAdminLogin.addEventListener('click', () => {
-        adminLoginModal.classList.add('hidden');
+        adminLoginModal.classList.remove('show');
+        setTimeout(() => adminLoginModal.classList.add('hidden'), 300);
     });
 
     // Login Submission
