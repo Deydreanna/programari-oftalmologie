@@ -675,7 +675,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="text-gray-600">|</span>
                         <span><strong class="text-[9px] uppercase opacity-60">Tip:</strong> ${app.type}</span>
                         ${app.diagnosticFile ? `
-                            <button class="ml-auto bg-medical-600 text-white rounded px-2 py-0.5 text-[10px] hover:bg-medical-700 view-file-link shadow-sm">DOC</button>
+                            <button class="ml-auto view-file-link uppercase">Vezi Doc</button>
                         ` : ''}
                     </div>
                 `;
