@@ -1,11 +1,11 @@
 /* Scandinavian Minimalist Styles */
 :root {
-    --nordic-bg: #FCFBFA;
-    --nordic-text: #2D3436;
-    --nordic-accent: #7B8C7D;
-    --nordic-blue: #3E606F;
-    --nordic-sand: #D1B9A1;
-    --nordic-gray: #E1E5E1;
+    --nordic-bg: #f4f3ee;
+    --nordic-text: #463f3a;
+    --nordic-accent: #e0afa0;
+    --nordic-blue: #8a817c;
+    --nordic-sand: #bcb8b1;
+    --nordic-gray: #bcb8b1;
 }
 
 body {
@@ -117,8 +117,14 @@ select:focus {
 }
 
 .btn-primary:hover {
-    background-color: #2F4F4F;
+    background-color: var(--nordic-text);
     transform: translateY(-1px);
+}
+
+.nordic-card {
+    background: white;
+    border: 1px solid var(--nordic-gray);
+    box-shadow: 0 4px 20px -5px rgba(70, 63, 58, 0.05);
 }
 
 /* Timeline Custom Styles */

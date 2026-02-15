@@ -20,19 +20,19 @@
                     },
                     colors: {
                         nordic: {
-                            50: '#F8F9F8',
-                            100: '#F0F2F0',
-                            200: '#E1E5E1',
-                            500: '#7B8C7D', // Sage
-                            600: '#3E606F', // Nordic Blue
-                            800: '#2D3436', // Charcoal
+                            50: '#f4f3ee', // Background
+                            100: '#bcb8b1', // Border/Subtle
+                            500: '#8a817c', // Secondary
+                            600: '#463f3a', // Primary
+                            800: '#463f3a',
+                            accent: '#e0afa0', // CTA/Highlight
                         },
                         medical: {
-                            50: '#F8F9F8',
-                            100: '#F0F2F0',
-                            500: '#3E606F',
-                            600: '#2F4F4F',
-                            900: '#1A2F2F',
+                            50: '#f4f3ee',
+                            100: '#bcb8b1',
+                            500: '#e0afa0',
+                            600: '#8a817c',
+                            900: '#463f3a',
                         }
                     }
                 }
@@ -41,7 +41,7 @@
     </script>
 </head>
 
-<body class="bg-gray-50 text-gray-800 font-sans antialiased">
+<body class="bg-nordic-50 text-nordic-800 font-sans antialiased">
 
     <!-- Header -->
     <header class="bg-white border-b border-nordic-100 py-12">
@@ -217,7 +217,7 @@
                 </div>
 
                 <button type="submit"
-                    class="w-full bg-nordic-600 text-white py-4 rounded-lg font-medium hover:bg-nordic-800 transition-all shadow-sm mt-6 flex justify-center items-center gap-2">
+                    class="w-full bg-nordic-accent text-white py-4 rounded-lg font-medium hover:opacity-90 transition-all shadow-sm mt-6 flex justify-center items-center gap-2">
                     <span>Confirmă Programarea</span>
                     <svg id="loadingSpinner" class="animate-spin h-5 w-5 text-white hidden"
                         xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -373,7 +373,7 @@
         <p id="toastMessage" class="text-sm text-gray-600"></p>
     </div>
 
-    <script src="script.js?v=1.1"></script>
+    <script src="script.js?v=1.3"></script>
 </body>
 
 </html>
