@@ -144,6 +144,36 @@ app.get('/api/admin/appointments', async (req, res) => {
     }
 });
 
+app.get('/api/admin/stats', async (req, res) => {
+    const token = req.headers['x-admin-token'];
+    if (token !== ADMIN_TOKEN) return res.status(403).json({ error: 'Unauthorized' });
+
+    try {
+        const stats = await mongoose.connection.db.command({ dbStats: 1 });
+        res.json({
+            usedSizeMB: (stats.dataSize / (1024 * 1024)).toFixed(2),
+            totalSizeMB: 512,
+            percentUsed: ((stats.dataSize / (512 * 1024 * 1024)) * 100).toFixed(2)
+        });
+    } catch (err) {
+        console.error('Stats error:', err);
+        res.status(500).json({ error: 'Could not fetch stats' });
+    }
+});
+
+app.post('/api/admin/reset', async (req, res) => {
+    const token = req.headers['x-admin-token'];
+    if (token !== ADMIN_TOKEN) return res.status(403).json({ error: 'Unauthorized' });
+
+    try {
+        await Appointment.deleteMany({});
+        res.json({ success: true, message: 'Baza de date a fost resetată.' });
+    } catch (err) {
+        console.error('Reset error:', err);
+        res.status(500).json({ error: 'Eroare la resetarea bazei de date.' });
+    }
+});
+
 // Export Excel (Manual)
 app.get('/api/admin/export', async (req, res) => {
     // Basic protection (can be improved with token query param if needed)

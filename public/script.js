@@ -129,18 +129,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 img.onload = () => {
                     let width = img.width;
                     let height = img.height;
+
+                    const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height, 1);
+                    width *= ratio;
+                    height *= ratio;
+
                     const canvas = document.createElement('canvas');
-                    if (width > height) {
-                        if (width > MAX_WIDTH) {
-                            height *= MAX_WIDTH / width;
-                            width = MAX_WIDTH;
-                        }
-                    } else {
-                        if (height > MAX_HEIGHT) {
-                            width *= MAX_HEIGHT / height;
-                            height = MAX_HEIGHT;
-                        }
-                    }
                     canvas.width = width;
                     canvas.height = height;
                     const ctx = canvas.getContext('2d');
@@ -484,6 +478,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
         adminDashboard.classList.remove('hidden');
         fetchAdminAppointments();
+        fetchAdminStats();
+    }
+
+    async function fetchAdminStats() {
+        const token = localStorage.getItem('adminToken');
+        const storageIndicator = document.getElementById('storage-indicator');
+        const storageBar = document.getElementById('storage-bar');
+        const storageText = document.getElementById('storage-text');
+
+        try {
+            const res = await fetch('/api/admin/stats', {
+                headers: { 'x-admin-token': token }
+            });
+            const data = await res.json();
+
+            if (res.ok) {
+                storageIndicator.classList.remove('hidden');
+                storageBar.style.width = `${Math.min(data.percentUsed, 100)}%`;
+                storageText.textContent = `${data.usedSizeMB} MB folosiți din ${data.totalSizeMB} MB (${data.percentUsed}%)`;
+
+                // Change color if getting full
+                if (data.percentUsed > 80) {
+                    storageBar.classList.replace('bg-medical-500', 'bg-red-500');
+                }
+            }
+        } catch (err) {
+            console.error('Error fetching stats:', err);
+        }
     }
 
     async function fetchAdminAppointments() {
@@ -554,6 +576,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     adminLogout.addEventListener('click', logout);
+
+    const resetDatabaseBtn = document.getElementById('resetDatabaseBtn');
+    resetDatabaseBtn.addEventListener('click', async () => {
+        const confirm1 = confirm("Ești sigur că vrei să ștergi TOATE programările? Această acțiune este ireversibilă.");
+        if (!confirm1) return;
+
+        const confirm2 = confirm("CONFIRMARE FINALĂ: Toate datele pacienților și fișierele încărcate vor fi șterse definitiv. Continuăm?");
+        if (!confirm2) return;
+
+        const token = localStorage.getItem('adminToken');
+        try {
+            const res = await fetch('/api/admin/reset', {
+                method: 'POST',
+                headers: { 'x-admin-token': token }
+            });
+            const data = await res.json();
+
+            if (res.ok) {
+                showToast('Succes', 'Baza de date a fost resetată.');
+                fetchAdminAppointments();
+                fetchAdminStats();
+            } else {
+                showToast('Eroare', data.error || 'Nu s-a putut reseta baza de date.', 'error');
+            }
+        } catch (err) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        }
+    });
 
     exportExcelBtn.addEventListener('click', () => {
         // Direct download
