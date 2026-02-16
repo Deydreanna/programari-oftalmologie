@@ -79,7 +79,7 @@ def send_confirmation_email(patient_name, patient_email, appointment_type, start
         </div>
         <p>Detaliile se află în invitația de calendar atașată. Vă rugăm să confirmați prezența folosind butoanele din e-mail.</p>
         <p>Vă mulțumim!</p>
-        <p><em>Echipa Dr. Eye David</em></p>
+        <p><em>Echipa Prof. Dr. Florian Balta</em></p>
     </body>
     </html>
     """
