@@ -474,32 +474,36 @@ app.post('/api/admin/resend-email/:id', requireAdmin, async (req, res) => {
         // Try 'py' launcher with 'python' fallback
         const command = `py "${scriptPath}" --json ${base64Data}`;
 
-        console.log(`[MANUAL EMAIL] Dispatching manual invitation for ${email}...`);
+        console.log(`[MANUAL EMAIL] Executing manual invitation for ${email}...`);
 
-        exec(command, async (error, stdout, stderr) => {
-            if (stdout) console.log(`[MANUAL EMAIL STDOUT]: ${stdout}`);
-            if (stderr) console.error(`[MANUAL EMAIL STDERR]: ${stderr}`);
-
-            if (error) {
-                console.error(`[MANUAL EMAIL FAILURE] 'py' command failed, trying fallback...`);
-                const fallbackCommand = `python "${scriptPath}" --json ${base64Data}`;
-                exec(fallbackCommand, async (fError, fStdout, fStderr) => {
-                    if (fStdout) console.log(`[MANUAL EMAIL FALLBACK STDOUT]: ${fStdout}`);
-                    if (fStderr) console.error(`[MANUAL EMAIL FALLBACK STDERR]: ${fStderr}`);
-                    if (!fError) {
-                        await Appointment.findByIdAndUpdate(appointment._id, { emailSent: true });
-                        console.log(`[MANUAL EMAIL SUCCESS] Status updated via fallback for ${email}`);
-                    }
-                });
-            } else {
-                await Appointment.findByIdAndUpdate(appointment._id, { emailSent: true });
-                console.log(`[MANUAL EMAIL SUCCESS] Invitation sent manually for ${email}`);
-            }
+        const execPromise = (cmd) => new Promise((resolve, reject) => {
+            exec(cmd, (error, stdout, stderr) => {
+                if (error) reject({ error, stdout, stderr });
+                else resolve({ stdout, stderr });
+            });
         });
 
-        res.json({ success: true, message: 'Tentativă de trimitere manuală inițiată.' });
+        try {
+            await execPromise(command);
+            await Appointment.findByIdAndUpdate(appointment._id, { emailSent: true });
+            res.json({ success: true, message: 'Email trimis cu succes!' });
+        } catch (err) {
+            console.error(`[MANUAL EMAIL FAILURE] 'py' failed, trying fallback...`);
+            const fallbackCommand = `python "${scriptPath}" --json ${base64Data}`;
+            try {
+                await execPromise(fallbackCommand);
+                await Appointment.findByIdAndUpdate(appointment._id, { emailSent: true });
+                res.json({ success: true, message: 'Email trimis cu succes (via fallback)!' });
+            } catch (fErr) {
+                console.error(`[MANUAL EMAIL CRITICAL] Both launchers failed:`, fErr.stderr);
+                res.status(500).json({
+                    error: 'Trimiterea a eșuat.',
+                    details: fErr.stderr || fErr.error.message
+                });
+            }
+        }
     } catch (err) {
-        res.status(500).json({ error: 'Eroare la procesarea cererii.' });
+        res.status(500).json({ error: 'Eroare de sistem.' });
     }
 });
 

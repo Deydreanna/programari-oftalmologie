@@ -802,7 +802,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 setTimeout(() => fetchAdminAppointments(''), 2000);
                             }
                         } else {
-                            showToast('Eroare', data.error || 'Eroare server', 'error');
+                            const errorMsg = data.details ? `${data.error}: ${data.details}` : (data.error || 'Eroare server');
+                            showToast('Eroare', errorMsg, 'error');
                         }
                     } catch (err) {
                         showToast('Eroare', 'Eroare de conexiune.', 'error');
