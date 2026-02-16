@@ -392,16 +392,35 @@ app.post('/api/book', optionalAuth, async (req, res) => {
 
         const scriptPath = path.resolve(__dirname, 'scripts', 'email_service.py');
         const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
-        const command = `python "${scriptPath}" --json ${base64Data}`;
 
-        console.log(`[EMAIL] Executing Base64 JSON bridge for ${email}...`);
+        // Try 'py' launcher which is more reliable on Windows
+        const command = `py "${scriptPath}" --json ${base64Data}`;
+
+        console.log(`[EMAIL] Dispatching: py "${scriptPath}" --json ...`);
 
         exec(command, async (error, stdout, stderr) => {
             if (stdout) console.log(`[EMAIL STDOUT]: ${stdout}`);
             if (stderr) console.error(`[EMAIL STDERR]: ${stderr}`);
 
             if (error) {
-                console.error(`[EMAIL FAILURE] Process error for ${email}:`, error);
+                console.error(`[EMAIL FAILURE] 'py' command failed: ${error.message}`);
+                // Fallback attempt with 'python' if 'py' failed
+                const fallbackCommand = `python "${scriptPath}" --json ${base64Data}`;
+                console.log(`[EMAIL] Retrying with: python ...`);
+                exec(fallbackCommand, async (fError, fStdout, fStderr) => {
+                    if (fStdout) console.log(`[EMAIL FALLBACK STDOUT]: ${fStdout}`);
+                    if (fStderr) console.error(`[EMAIL FALLBACK STDERR]: ${fStderr}`);
+                    if (!fError) {
+                        try {
+                            await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
+                            console.log(`[EMAIL SUCCESS] Status updated via fallback for ${email}`);
+                        } catch (e) {
+                            console.error('[EMAIL DB ERROR]:', e);
+                        }
+                    } else {
+                        console.error(`[EMAIL CRITICAL FAILURE] Both 'py' and 'python' failed for ${email}`);
+                    }
+                });
                 return;
             }
 
