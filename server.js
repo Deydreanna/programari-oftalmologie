@@ -384,31 +384,38 @@ app.post('/api/book', optionalAuth, async (req, res) => {
         const { spawn } = require('child_process');
         const scriptPath = path.join(__dirname, 'scripts', 'email_service.py');
 
-        console.log(`Attempting to send email via: ${scriptPath}`);
+        console.log(`[EMAIL] Spawning Python: ${scriptPath} for ${email}`);
 
         const pythonProcess = spawn('python', [
-            scriptPath,
-            name,
-            email,
-            type,
-            `${date} ${time}`,
-            "Piata Alexandru Lahovari nr. 1, Sector 1, Bucuresti"
-        ]);
+            `"${scriptPath}"`,
+            `"${name}"`,
+            `"${email}"`,
+            `"${type}"`,
+            `"${date} ${time}"`,
+            `"Piata Alexandru Lahovari nr. 1, Sector 1, Bucuresti"`
+        ], {
+            shell: true,
+            windowsVerbatimArguments: true
+        });
 
-        pythonProcess.stdout.on('data', (data) => console.log(`Email Service Output: ${data}`));
-        pythonProcess.stderr.on('data', (data) => console.error(`Email Service Error: ${data}`));
+        pythonProcess.stdout.on('data', (data) => console.log(`[EMAIL STDOUT]: ${data}`));
+        pythonProcess.stderr.on('data', (data) => console.error(`[EMAIL STDERR]: ${data}`));
 
         pythonProcess.on('error', (err) => {
-            console.error('Failed to start Python process:', err);
+            console.error('[EMAIL SPAWN ERROR]:', err);
         });
 
         pythonProcess.on('close', async (code) => {
-            console.log(`Email Service process exited with code ${code}`);
+            console.log(`[EMAIL] Process exited with code ${code}`);
             if (code === 0) {
-                await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
-                console.log(`Email status updated to SENT for ${email}`);
+                try {
+                    await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
+                    console.log(`[EMAIL SUCCESS] Status updated for ${email}`);
+                } catch (updateErr) {
+                    console.error('[EMAIL DB ERROR]:', updateErr);
+                }
             } else {
-                console.error(`Email delivery failed for ${email} (Exit Code: ${code})`);
+                console.error(`[EMAIL FAILURE] Delivery failed for ${email} (Exit Code: ${code})`);
             }
         });
 
