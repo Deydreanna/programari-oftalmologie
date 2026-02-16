@@ -382,17 +382,19 @@ app.post('/api/book', optionalAuth, async (req, res) => {
         await newAppointment.save();
 
         // Send Email Invitation (Async)
+        const appointmentData = {
+            name,
+            email,
+            type,
+            time: `${date} ${time}`,
+            location: "Piața Alexandru Lahovari nr. 1, Sector 1, București"
+        };
+
         const scriptPath = path.resolve(__dirname, 'scripts', 'email_service.py');
-        const dateTimeStr = `${date} ${time}`;
-        const locationStr = "Piața Alexandru Lahovari nr. 1, Sector 1, București";
+        const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
+        const command = `python "${scriptPath}" --json ${base64Data}`;
 
-        // Escape double quotes in name and type just in case
-        const safeName = name.replace(/"/g, '\\"');
-        const safeType = type.replace(/"/g, '\\"');
-
-        const command = `python "${scriptPath}" "${safeName}" "${email}" "${safeType}" "${dateTimeStr}" "${locationStr}"`;
-
-        console.log(`[EMAIL] Executing: ${command}`);
+        console.log(`[EMAIL] Executing Base64 JSON bridge for ${email}...`);
 
         exec(command, async (error, stdout, stderr) => {
             if (stdout) console.log(`[EMAIL STDOUT]: ${stdout}`);
@@ -405,7 +407,7 @@ app.post('/api/book', optionalAuth, async (req, res) => {
 
             try {
                 await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
-                console.log(`[EMAIL SUCCESS] Invitation sent and status updated for ${email}`);
+                console.log(`[EMAIL SUCCESS] Status updated for ${email}`);
             } catch (updateErr) {
                 console.error('[EMAIL DB UPDATE ERROR]:', updateErr);
             }

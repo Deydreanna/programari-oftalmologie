@@ -120,27 +120,39 @@ def send_confirmation_email(patient_name, patient_email, appointment_type, start
 
 if __name__ == "__main__":
     import sys
+    import json
+    import base64
     
     if len(sys.argv) > 1:
-        # Expected arguments: patient_name, patient_email, appointment_type, start_time_str, location
         try:
-            p_name = sys.argv[1]
-            p_email = sys.argv[2]
-            p_type = sys.argv[3]
-            p_time = sys.argv[4]
-            p_loc = sys.argv[5]
-            
-            send_confirmation_email(p_name, p_email, p_type, p_time, p_loc)
-        except IndexError:
-            print("Error: Missing arguments.")
-            print("Usage: python email_service.py 'Name' 'email@test.com' 'Type' 'YYYY-MM-DD HH:MM' 'Location'")
+            if sys.argv[1] == "--json" and len(sys.argv) > 2:
+                # Decode Base64 JSON payload
+                json_data = base64.b64decode(sys.argv[2]).decode('utf-8')
+                data = json.loads(json_data)
+                
+                p_name = data.get('name')
+                p_email = data.get('email')
+                p_type = data.get('type')
+                p_time = data.get('time')
+                p_loc = data.get('location')
+                
+                if all([p_name, p_email, p_type, p_time, p_loc]):
+                    send_confirmation_email(p_name, p_email, p_type, p_time, p_loc)
+                else:
+                    print("Error: Incomplete JSON data.")
+                    sys.exit(1)
+            else:
+                # Fallback to positional arguments
+                # Expected arguments: patient_name, patient_email, appointment_type, start_time_str, location
+                p_name = sys.argv[1]
+                p_email = sys.argv[2]
+                p_type = sys.argv[3]
+                p_time = sys.argv[4]
+                p_loc = sys.argv[5]
+                
+                send_confirmation_email(p_name, p_email, p_type, p_time, p_loc)
+        except Exception as e:
+            print(f"Error processing arguments: {e}")
+            sys.exit(1)
     else:
-        # Example usage:
-        # send_confirmation_email(
-        #     patient_name="Alexandru",
-        #     patient_email="alexynho2009@gmail.com",
-        #     appointment_type="Consultație Oftalmologică",
-        #     start_time_str="2026-02-25 10:00",
-        #     location="Piața Alexandru Lahovari nr. 1, Sector 1, București"
-        # )
-        print("Email service script ready. Use command line arguments to send emails.")
+        print("Email service script ready. Use --json or positional arguments.")
