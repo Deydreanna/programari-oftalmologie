@@ -384,19 +384,16 @@ app.post('/api/book', optionalAuth, async (req, res) => {
         const { spawn } = require('child_process');
         const scriptPath = path.join(__dirname, 'scripts', 'email_service.py');
 
-        console.log(`[EMAIL] Spawning Python: ${scriptPath} for ${email}`);
+        console.log(`[EMAIL] Triggering invitation for: ${email}`);
 
         const pythonProcess = spawn('python', [
-            `"${scriptPath}"`,
-            `"${name}"`,
-            `"${email}"`,
-            `"${type}"`,
-            `"${date} ${time}"`,
-            `"Piata Alexandru Lahovari nr. 1, Sector 1, Bucuresti"`
-        ], {
-            shell: true,
-            windowsVerbatimArguments: true
-        });
+            scriptPath,
+            name,
+            email,
+            type,
+            `${date} ${time}`,
+            "Piata Alexandru Lahovari nr. 1, Sector 1, Bucuresti"
+        ]);
 
         pythonProcess.stdout.on('data', (data) => console.log(`[EMAIL STDOUT]: ${data}`));
         pythonProcess.stderr.on('data', (data) => console.error(`[EMAIL STDERR]: ${data}`));
@@ -406,16 +403,15 @@ app.post('/api/book', optionalAuth, async (req, res) => {
         });
 
         pythonProcess.on('close', async (code) => {
-            console.log(`[EMAIL] Process exited with code ${code}`);
             if (code === 0) {
                 try {
                     await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
-                    console.log(`[EMAIL SUCCESS] Status updated for ${email}`);
+                    console.log(`[EMAIL SUCCESS] Invitation sent and status updated for ${email}`);
                 } catch (updateErr) {
-                    console.error('[EMAIL DB ERROR]:', updateErr);
+                    console.error('[EMAIL DB UPDATE ERROR]:', updateErr);
                 }
             } else {
-                console.error(`[EMAIL FAILURE] Delivery failed for ${email} (Exit Code: ${code})`);
+                console.error(`[EMAIL FAILURE] Python script exited with code ${code} for ${email}`);
             }
         });
 
