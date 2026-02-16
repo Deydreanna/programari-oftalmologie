@@ -6,6 +6,7 @@ from email import encoders
 from icalendar import Calendar, Event, Alarm
 from datetime import datetime, timedelta
 import pytz
+import sys
 
 def create_ics_invitation(summary, start_time, duration_minutes, location, attendee_email, organizer_email):
     """
@@ -53,7 +54,7 @@ def send_confirmation_email(patient_name, patient_email, appointment_type, start
         start_time = pytz.timezone('Europe/Bucharest').localize(start_time)
     except ValueError:
         print(f"Error: Invalid date format {start_time_str}. Expected YYYY-MM-DD HH:MM")
-        return
+        sys.exit(1)
 
     summary = f"Programare Prof. Dr. Balta Florian - [{appointment_type}]"
     
@@ -115,6 +116,7 @@ def send_confirmation_email(patient_name, patient_email, appointment_type, start
         print(f"Email sent successfully to {patient_email}")
     except Exception as e:
         print(f"Failed to send email: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     import sys

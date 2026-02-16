@@ -6,6 +6,8 @@ const mongoose = require('mongoose');
 const xlsx = require('xlsx');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const path = require('path');
+const { exec } = require('child_process');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -380,38 +382,32 @@ app.post('/api/book', optionalAuth, async (req, res) => {
         await newAppointment.save();
 
         // Send Email Invitation (Async)
-        const path = require('path');
-        const { spawn } = require('child_process');
-        const scriptPath = path.join(__dirname, 'scripts', 'email_service.py');
+        const scriptPath = path.resolve(__dirname, 'scripts', 'email_service.py');
+        const dateTimeStr = `${date} ${time}`;
+        const locationStr = "Piața Alexandru Lahovari nr. 1, Sector 1, București";
 
-        console.log(`[EMAIL] Triggering invitation for: ${email}`);
+        // Escape double quotes in name and type just in case
+        const safeName = name.replace(/"/g, '\\"');
+        const safeType = type.replace(/"/g, '\\"');
 
-        const pythonProcess = spawn('python', [
-            scriptPath,
-            name,
-            email,
-            type,
-            `${date} ${time}`,
-            "Piata Alexandru Lahovari nr. 1, Sector 1, Bucuresti"
-        ]);
+        const command = `python "${scriptPath}" "${safeName}" "${email}" "${safeType}" "${dateTimeStr}" "${locationStr}"`;
 
-        pythonProcess.stdout.on('data', (data) => console.log(`[EMAIL STDOUT]: ${data}`));
-        pythonProcess.stderr.on('data', (data) => console.error(`[EMAIL STDERR]: ${data}`));
+        console.log(`[EMAIL] Executing: ${command}`);
 
-        pythonProcess.on('error', (err) => {
-            console.error('[EMAIL SPAWN ERROR]:', err);
-        });
+        exec(command, async (error, stdout, stderr) => {
+            if (stdout) console.log(`[EMAIL STDOUT]: ${stdout}`);
+            if (stderr) console.error(`[EMAIL STDERR]: ${stderr}`);
 
-        pythonProcess.on('close', async (code) => {
-            if (code === 0) {
-                try {
-                    await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
-                    console.log(`[EMAIL SUCCESS] Invitation sent and status updated for ${email}`);
-                } catch (updateErr) {
-                    console.error('[EMAIL DB UPDATE ERROR]:', updateErr);
-                }
-            } else {
-                console.error(`[EMAIL FAILURE] Python script exited with code ${code} for ${email}`);
+            if (error) {
+                console.error(`[EMAIL FAILURE] Process error for ${email}:`, error);
+                return;
+            }
+
+            try {
+                await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
+                console.log(`[EMAIL SUCCESS] Invitation sent and status updated for ${email}`);
+            } catch (updateErr) {
+                console.error('[EMAIL DB UPDATE ERROR]:', updateErr);
             }
         });
 
