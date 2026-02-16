@@ -797,10 +797,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         const data = await res.json();
                         if (res.ok) {
                             showToast('Succes', data.message);
-                            // Refresh timeline to show updated status (optional, since it's async)
-                            setTimeout(fetchAppointments, 2000);
+                            // Refresh timeline to show updated status
+                            if (typeof fetchAdminAppointments === 'function') {
+                                setTimeout(() => fetchAdminAppointments(''), 2000);
+                            }
                         } else {
-                            showToast('Eroare', data.error, 'error');
+                            showToast('Eroare', data.error || 'Eroare server', 'error');
                         }
                     } catch (err) {
                         showToast('Eroare', 'Eroare de conexiune.', 'error');
