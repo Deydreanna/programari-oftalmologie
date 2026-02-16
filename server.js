@@ -380,26 +380,39 @@ app.post('/api/book', optionalAuth, async (req, res) => {
         await newAppointment.save();
 
         // Send Email Invitation (Async)
+        const path = require('path');
         const { spawn } = require('child_process');
+        const scriptPath = path.join(__dirname, 'scripts', 'email_service.py');
+
+        console.log(`Attempting to send email via: ${scriptPath}`);
+
         const pythonProcess = spawn('python', [
-            'scripts/email_service.py',
+            scriptPath,
             name,
             email,
             type,
             `${date} ${time}`,
-            "Piața Alexandru Lahovari nr. 1, Sector 1, București"
+            "Piata Alexandru Lahovari nr. 1, Sector 1, Bucuresti"
         ]);
 
-        pythonProcess.stdout.on('data', (data) => console.log(`Email Service: ${data}`));
+        pythonProcess.stdout.on('data', (data) => console.log(`Email Service Output: ${data}`));
         pythonProcess.stderr.on('data', (data) => console.error(`Email Service Error: ${data}`));
+
+        pythonProcess.on('error', (err) => {
+            console.error('Failed to start Python process:', err);
+        });
+
         pythonProcess.on('close', async (code) => {
+            console.log(`Email Service process exited with code ${code}`);
             if (code === 0) {
                 await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
-                console.log(`Email sent successfully to ${email}`);
+                console.log(`Email status updated to SENT for ${email}`);
+            } else {
+                console.error(`Email delivery failed for ${email} (Exit Code: ${code})`);
             }
         });
 
-        res.json({ success: true, message: 'Programare confirmată!' });
+        res.json({ success: true, message: 'Programare confirmată! Verificați e-mail-ul pentru invitație.' });
     } catch (err) {
         res.status(500).json({ error: 'Eroare la salvare.' });
     }
