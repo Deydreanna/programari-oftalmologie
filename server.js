@@ -393,34 +393,18 @@ app.post('/api/book', optionalAuth, async (req, res) => {
         const scriptPath = path.resolve(__dirname, 'scripts', 'email_service.py');
         const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
 
-        // Try 'py' launcher which is more reliable on Windows
-        const command = `py "${scriptPath}" --json ${base64Data}`;
+        // Force absolute path and cmd.exe for Windows reliability
+        const pythonPath = 'C:\\Python314\\python.exe';
+        const command = `"${pythonPath}" "${scriptPath}" --json ${base64Data}`;
 
-        console.log(`[EMAIL] Dispatching: py "${scriptPath}" --json ...`);
+        console.log(`[EMAIL] Dispatching invitation for ${email}...`);
 
-        exec(command, async (error, stdout, stderr) => {
+        exec(command, { shell: 'cmd.exe' }, async (error, stdout, stderr) => {
             if (stdout) console.log(`[EMAIL STDOUT]: ${stdout}`);
             if (stderr) console.error(`[EMAIL STDERR]: ${stderr}`);
 
             if (error) {
-                console.error(`[EMAIL FAILURE] 'py' command failed: ${error.message}`);
-                // Fallback attempt with 'python' if 'py' failed
-                const fallbackCommand = `python "${scriptPath}" --json ${base64Data}`;
-                console.log(`[EMAIL] Retrying with: python ...`);
-                exec(fallbackCommand, async (fError, fStdout, fStderr) => {
-                    if (fStdout) console.log(`[EMAIL FALLBACK STDOUT]: ${fStdout}`);
-                    if (fStderr) console.error(`[EMAIL FALLBACK STDERR]: ${fStderr}`);
-                    if (!fError) {
-                        try {
-                            await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
-                            console.log(`[EMAIL SUCCESS] Status updated via fallback for ${email}`);
-                        } catch (e) {
-                            console.error('[EMAIL DB ERROR]:', e);
-                        }
-                    } else {
-                        console.error(`[EMAIL CRITICAL FAILURE] Both 'py' and 'python' failed for ${email}`);
-                    }
-                });
+                console.error(`[EMAIL FAILURE] Process error for ${email}:`, error.message);
                 return;
             }
 
@@ -471,13 +455,14 @@ app.post('/api/admin/resend-email/:id', requireAdmin, async (req, res) => {
         const scriptPath = path.resolve(__dirname, 'scripts', 'email_service.py');
         const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
 
-        // Try 'py' launcher with 'python' fallback
-        const command = `py "${scriptPath}" --json ${base64Data}`;
+        // Force absolute path and cmd.exe for Windows reliability
+        const pythonPath = 'C:\\Python314\\python.exe';
+        const command = `"${pythonPath}" "${scriptPath}" --json ${base64Data}`;
 
         console.log(`[MANUAL EMAIL] Executing manual invitation for ${email}...`);
 
         const execPromise = (cmd) => new Promise((resolve, reject) => {
-            exec(cmd, (error, stdout, stderr) => {
+            exec(cmd, { shell: 'cmd.exe' }, (error, stdout, stderr) => {
                 if (error) reject({ error, stdout, stderr });
                 else resolve({ stdout, stderr });
             });
@@ -488,19 +473,11 @@ app.post('/api/admin/resend-email/:id', requireAdmin, async (req, res) => {
             await Appointment.findByIdAndUpdate(appointment._id, { emailSent: true });
             res.json({ success: true, message: 'Email trimis cu succes!' });
         } catch (err) {
-            console.error(`[MANUAL EMAIL FAILURE] 'py' failed, trying fallback...`);
-            const fallbackCommand = `python "${scriptPath}" --json ${base64Data}`;
-            try {
-                await execPromise(fallbackCommand);
-                await Appointment.findByIdAndUpdate(appointment._id, { emailSent: true });
-                res.json({ success: true, message: 'Email trimis cu succes (via fallback)!' });
-            } catch (fErr) {
-                console.error(`[MANUAL EMAIL CRITICAL] Both launchers failed:`, fErr.stderr);
-                res.status(500).json({
-                    error: 'Trimiterea a eșuat.',
-                    details: fErr.stderr || fErr.error.message
-                });
-            }
+            console.error(`[MANUAL EMAIL CRITICAL] Execution failed:`, err.stderr || err.error?.message || err);
+            res.status(500).json({
+                error: 'Trimiterea a eșuat.',
+                details: err.stderr || (err.error ? err.error.message : err.message) || 'Eroare necunoscută'
+            });
         }
     } catch (err) {
         res.status(500).json({ error: 'Eroare de sistem.' });
