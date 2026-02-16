@@ -765,6 +765,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12" />'}
                             </svg>
                         </div>
+                        <button class="resend-email-btn bg-brand-400/10 hover:bg-brand-400/20 text-brand-400 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1" data-id="${app._id}">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                            Trimite Manual
+                        </button>
                         ${app.diagnosticFile ? `
                             <button class="ml-auto view-file-link bg-brand-600/20 px-3 py-1 rounded-lg text-xs font-bold text-brand-300 hover:bg-brand-600/40 transition-all">VEZI DOC</button>
                         ` : ''}
@@ -777,6 +781,34 @@ document.addEventListener('DOMContentLoaded', () => {
                         openFileViewer(app.diagnosticFile, app.fileType);
                     };
                 }
+
+                card.querySelector('.resend-email-btn').onclick = async (e) => {
+                    e.stopPropagation();
+                    const btn = e.currentTarget;
+                    const originalText = btn.innerHTML;
+                    btn.disabled = true;
+                    btn.innerHTML = '<span class="animate-pulse">Se trimite...</span>';
+
+                    try {
+                        const res = await fetch(`/api/admin/resend-email/${app._id}`, {
+                            method: 'POST',
+                            headers: AUTH.getHeaders()
+                        });
+                        const data = await res.json();
+                        if (res.ok) {
+                            showToast('Succes', data.message);
+                            // Refresh timeline to show updated status (optional, since it's async)
+                            setTimeout(fetchAppointments, 2000);
+                        } else {
+                            showToast('Eroare', data.error, 'error');
+                        }
+                    } catch (err) {
+                        showToast('Eroare', 'Eroare de conexiune.', 'error');
+                    } finally {
+                        btn.disabled = false;
+                        btn.innerHTML = originalText;
+                    }
+                };
 
                 slotsArea.appendChild(card);
             });

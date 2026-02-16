@@ -453,6 +453,56 @@ app.get('/api/admin/appointments', requireAdmin, async (req, res) => {
     }
 });
 
+app.post('/api/admin/resend-email/:id', requireAdmin, async (req, res) => {
+    try {
+        const appointment = await Appointment.findById(req.params.id);
+        if (!appointment) return res.status(404).json({ error: 'Programare negăsită.' });
+        if (!appointment.email) return res.status(400).json({ error: 'Clientul nu are e-mail.' });
+
+        const { name, email, type, date, time } = appointment;
+        const appointmentData = {
+            name,
+            email,
+            type,
+            time: `${date} ${time}`,
+            location: "Piața Alexandru Lahovari nr. 1, Sector 1, București"
+        };
+
+        const scriptPath = path.resolve(__dirname, 'scripts', 'email_service.py');
+        const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
+
+        // Try 'py' launcher with 'python' fallback
+        const command = `py "${scriptPath}" --json ${base64Data}`;
+
+        console.log(`[MANUAL EMAIL] Dispatching manual invitation for ${email}...`);
+
+        exec(command, async (error, stdout, stderr) => {
+            if (stdout) console.log(`[MANUAL EMAIL STDOUT]: ${stdout}`);
+            if (stderr) console.error(`[MANUAL EMAIL STDERR]: ${stderr}`);
+
+            if (error) {
+                console.error(`[MANUAL EMAIL FAILURE] 'py' command failed, trying fallback...`);
+                const fallbackCommand = `python "${scriptPath}" --json ${base64Data}`;
+                exec(fallbackCommand, async (fError, fStdout, fStderr) => {
+                    if (fStdout) console.log(`[MANUAL EMAIL FALLBACK STDOUT]: ${fStdout}`);
+                    if (fStderr) console.error(`[MANUAL EMAIL FALLBACK STDERR]: ${fStderr}`);
+                    if (!fError) {
+                        await Appointment.findByIdAndUpdate(appointment._id, { emailSent: true });
+                        console.log(`[MANUAL EMAIL SUCCESS] Status updated via fallback for ${email}`);
+                    }
+                });
+            } else {
+                await Appointment.findByIdAndUpdate(appointment._id, { emailSent: true });
+                console.log(`[MANUAL EMAIL SUCCESS] Invitation sent manually for ${email}`);
+            }
+        });
+
+        res.json({ success: true, message: 'Tentativă de trimitere manuală inițiată.' });
+    } catch (err) {
+        res.status(500).json({ error: 'Eroare la procesarea cererii.' });
+    }
+});
+
 app.get('/api/admin/stats', requireAdmin, async (req, res) => {
     try {
         const stats = await mongoose.connection.db.command({ dbStats: 1 });
