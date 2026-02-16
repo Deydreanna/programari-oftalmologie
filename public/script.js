@@ -599,6 +599,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function openDashboard() {
         adminDashboard.classList.remove('hidden');
         updateAdminDateDisplay();
+        setupAdminSearch();
         fetchAdminAppointments();
         fetchAdminStats();
 
@@ -607,6 +608,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const isSuper = user && (user.role === 'superadmin' || (user.email && user.email.toLowerCase() === 'alexynho2009@gmail.com'));
         if (isSuper) {
             manageUsersBtn.classList.remove('hidden');
+        }
+    }
+
+    function setupAdminSearch() {
+        // Find or create search input
+        let searchInput = document.getElementById('adminSearchInput');
+        if (!searchInput) {
+            const headerActions = document.querySelector('#adminDashboard div.flex.flex-wrap.gap-2');
+            searchInput = document.createElement('input');
+            searchInput.id = 'adminSearchInput';
+            searchInput.type = 'text';
+            searchInput.placeholder = 'Caută nume, telefon sau email...';
+            searchInput.className = 'px-4 py-2 rounded-xl bg-brand-800 border border-brand-600/30 text-brand-100 placeholder-brand-400/50 text-sm focus:outline-none focus:border-brand-400 transition-all w-full md:w-64 order-first md:order-none';
+            headerActions.prepend(searchInput);
+
+            searchInput.addEventListener('input', () => {
+                fetchAdminAppointments(searchInput.value.toLowerCase());
+            });
         }
     }
 
@@ -655,7 +674,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function fetchAdminAppointments() {
+    async function fetchAdminAppointments(filterTerm = '') {
         timelineGrid.innerHTML = '<div class="p-10 text-center text-gray-400 font-medium font-inter">Se încarcă programările...</div>';
 
         try {
@@ -674,7 +693,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const d = String(adminActiveDate.getDate()).padStart(2, '0');
             const formattedActiveDate = `${y}-${m}-${d}`;
 
-            const filtered = appointments.filter(app => app.date === formattedActiveDate);
+            const filtered = appointments.filter(app => {
+                const isDateMatch = app.date === formattedActiveDate;
+                if (!isDateMatch) return false;
+                if (!filterTerm) return true;
+
+                return app.name.toLowerCase().includes(filterTerm) ||
+                    app.phone.includes(filterTerm) ||
+                    (app.email && app.email.toLowerCase().includes(filterTerm)) ||
+                    app.cnp.includes(filterTerm);
+            });
             renderTimeline(filtered);
             timelineHeaderCount.textContent = `(${filtered.length}) Programări`;
         } catch (err) {
@@ -721,11 +749,22 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="font-bold text-brand-100">${app.name}</span>
                         ${app.type === 'Prima Consultație' ? '<span class="app-new-badge">NOU</span>' : ''}
                         <span class="text-brand-600/30">|</span>
-                        <span class="text-brand-300"><strong class="text-[11px] uppercase text-brand-400/50">Tel:</strong> ${app.phone}</span>
+                        <span class="text-brand-300"><strong class="font-inter text-[11px] uppercase text-brand-400/50">Email:</strong> ${app.email || '—'}</span>
                         <span class="text-brand-600/30">|</span>
-                        <span class="text-brand-300"><strong class="text-[11px] uppercase text-brand-400/50">CNP:</strong> ${app.cnp}</span>
+                        <span class="text-brand-300"><strong class="font-inter text-[11px] uppercase text-brand-400/50">Tel:</strong> ${app.phone}</span>
                         <span class="text-brand-600/30">|</span>
-                        <span class="text-brand-300"><strong class="text-[11px] uppercase text-brand-400/50">Tip:</strong> ${app.type}</span>
+                        <span class="text-brand-300"><strong class="font-inter text-[11px] uppercase text-brand-400/50">CNP:</strong> ${app.cnp}</span>
+                        <span class="text-brand-600/30">|</span>
+                        <span class="text-brand-300"><strong class="font-inter text-[11px] uppercase text-brand-400/50">Tip:</strong> ${app.type}</span>
+                        <span class="text-brand-600/30">|</span>
+                        <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-lg ${app.emailSent ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}" title="${app.emailSent ? 'Invitație expediată' : 'Eroare trimitere sau în procesare'}">
+                            <span class="text-[10px] font-bold uppercase">${app.emailSent ? 'Trimis' : 'Netrimis'}</span>
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                ${app.emailSent ?
+                        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />' :
+                        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12" />'}
+                            </svg>
+                        </div>
                         ${app.diagnosticFile ? `
                             <button class="ml-auto view-file-link bg-brand-600/20 px-3 py-1 rounded-lg text-xs font-bold text-brand-300 hover:bg-brand-600/40 transition-all">VEZI DOC</button>
                         ` : ''}

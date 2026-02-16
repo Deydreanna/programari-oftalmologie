@@ -48,6 +48,7 @@ const appointmentSchema = new mongoose.Schema({
     date: String,
     time: String,
     email: String,
+    emailSent: { type: Boolean, default: false },
     hasDiagnosis: { type: Boolean, default: false },
     diagnosticFile: String,
     fileType: String,
@@ -391,6 +392,12 @@ app.post('/api/book', optionalAuth, async (req, res) => {
 
         pythonProcess.stdout.on('data', (data) => console.log(`Email Service: ${data}`));
         pythonProcess.stderr.on('data', (data) => console.error(`Email Service Error: ${data}`));
+        pythonProcess.on('close', async (code) => {
+            if (code === 0) {
+                await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
+                console.log(`Email sent successfully to ${email}`);
+            }
+        });
 
         res.json({ success: true, message: 'Programare confirmată!' });
     } catch (err) {
@@ -452,7 +459,8 @@ app.get('/api/admin/export', async (req, res) => {
 
         const appointments = await Appointment.find().sort({ date: 1, time: 1 }).lean();
         const data = appointments.map(a => ({
-            Data: a.date, Ora: a.time, Nume: a.name, Telefon: a.phone, CNP: a.cnp, Tip: a.type,
+            Data: a.date, Ora: a.time, Nume: a.name, Email: a.email || '', Telefon: a.phone, CNP: a.cnp, Tip: a.type,
+            Email_Trimis: a.emailSent ? 'DA' : 'NU',
             Creat: a.createdAt ? a.createdAt.toISOString().split('T')[0] : ''
         }));
         const wb = xlsx.utils.book_new();
