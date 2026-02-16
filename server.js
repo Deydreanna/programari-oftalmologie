@@ -47,6 +47,7 @@ const appointmentSchema = new mongoose.Schema({
     type: String,
     date: String,
     time: String,
+    email: String,
     hasDiagnosis: { type: Boolean, default: false },
     diagnosticFile: String,
     fileType: String,
@@ -355,8 +356,8 @@ app.get('/api/slots', async (req, res) => {
 });
 
 app.post('/api/book', optionalAuth, async (req, res) => {
-    const { name, phone, cnp, type, date, time } = req.body;
-    if (!name || !phone || !cnp || !type || !date || !time) {
+    const { name, phone, email, cnp, type, date, time } = req.body;
+    if (!name || !phone || !email || !cnp || !type || !date || !time) {
         return res.status(400).json({ error: 'Toate câmpurile sunt obligatorii.' });
     }
     if (!/^\d{13}$/.test(cnp)) {
@@ -369,13 +370,28 @@ app.post('/api/book', optionalAuth, async (req, res) => {
         }
         const { hasDiagnosis, diagnosticFile, fileType } = req.body;
         const newAppointment = new Appointment({
-            name, phone, cnp, type, date, time,
+            name, phone, email, cnp, type, date, time,
             hasDiagnosis: !!hasDiagnosis,
             diagnosticFile,
             fileType,
             userId: req.user ? req.user.id : null
         });
         await newAppointment.save();
+
+        // Send Email Invitation (Async)
+        const { spawn } = require('child_process');
+        const pythonProcess = spawn('python', [
+            'scripts/email_service.py',
+            name,
+            email,
+            type,
+            `${date} ${time}`,
+            "Piața Alexandru Lahovari nr. 1, Sector 1, București"
+        ]);
+
+        pythonProcess.stdout.on('data', (data) => console.log(`Email Service: ${data}`));
+        pythonProcess.stderr.on('data', (data) => console.error(`Email Service Error: ${data}`));
+
         res.json({ success: true, message: 'Programare confirmată!' });
     } catch (err) {
         res.status(500).json({ error: 'Eroare la salvare.' });

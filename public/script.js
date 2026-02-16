@@ -493,6 +493,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const name = `${lastName} ${firstName}`;
         const phone = document.getElementById('phone').value;
         const cnp = document.getElementById('cnp').value;
+        const email = document.getElementById('email').value;
         const type = typeInput.value;
         const date = formDate.value;
         const time = formTime.value;
@@ -522,7 +523,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    name, phone, cnp, type, date, time,
+                    name, phone, email, cnp, type, date, time,
                     hasDiagnosis: hasDiagnosis.checked,
                     diagnosticFile: fileData ? fileData.base64 : null,
                     fileType: fileData ? fileData.type : null
@@ -532,7 +533,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await res.json();
 
             if (res.ok) {
-                showToast('Succes!', 'Programarea a fost confirmată cu succes!');
+                showToast('Succes!', 'Confirmarea și invitația pentru calendar au fost trimise pe adresa dumneavoastră de e-mail.');
                 bookingForm.reset();
                 // Reset type selector
                 typeSelector.querySelectorAll('.type-btn').forEach(b => b.classList.remove('selected'));
