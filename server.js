@@ -6,15 +6,13 @@ const mongoose = require('mongoose');
 const xlsx = require('xlsx');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const path = require('path');
-const { execFile } = require('child_process');
-const { promisify } = require('util');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-dev-secret';
 const SALT_ROUNDS = 12;
-const execFileAsync = promisify(execFile);
+const CLINIC_LOCATION = "Piata Alexandru Lahovari nr. 1, Sector 1, Bucuresti";
 
 // The Super Admin Email
 const SUPER_ADMIN_EMAIL = 'alexynho2009@gmail.com';
@@ -103,35 +101,147 @@ function generateToken(user) {
 }
 
 async function executeEmailScript(base64Data) {
-    const scriptPath = path.resolve(__dirname, 'scripts', 'email_service.py');
-    const configuredPython = process.env.EMAIL_PYTHON_PATH || process.env.PYTHON_PATH;
-    const defaultCandidates = process.platform === 'win32'
-        ? ['py', 'python', 'python3']
-        : ['python3', 'python'];
-    const pythonCandidates = configuredPython
-        ? [configuredPython, ...defaultCandidates]
-        : defaultCandidates;
+    const smtpHost = process.env.EMAIL_SMTP_HOST || 'smtp.gmail.com';
+    const smtpPort = Number(process.env.EMAIL_SMTP_PORT || 587);
+    const smtpSecure = process.env.EMAIL_SMTP_SECURE === 'true';
+    const senderEmail = process.env.EMAIL_USER;
+    const senderPass = process.env.EMAIL_PASS;
+    const senderName = process.env.EMAIL_FROM_NAME || 'Prof. Dr. Florian Balta';
 
-    let lastError = null;
-
-    for (const pythonCmd of [...new Set(pythonCandidates)]) {
-        try {
-            const result = await execFileAsync(pythonCmd, [scriptPath, '--json', base64Data], {
-                windowsHide: true,
-                timeout: 30000,
-                maxBuffer: 1024 * 1024
-            });
-
-            return { ...result, pythonCmd };
-        } catch (err) {
-            lastError = err;
-            const stderr = err?.stderr ? String(err.stderr).trim() : '';
-            const reason = stderr || err.message;
-            console.error(`[EMAIL] Failed with interpreter "${pythonCmd}": ${reason}`);
-        }
+    if (!senderEmail || !senderPass) {
+        throw new Error('EMAIL_USER and EMAIL_PASS are required.');
     }
 
-    throw lastError || new Error('No compatible Python interpreter found.');
+    const appointmentData = JSON.parse(Buffer.from(base64Data, 'base64').toString('utf8'));
+    const { name, email, type, time, location } = appointmentData;
+    if (!name || !email || !type || !time || !location) {
+        throw new Error('Incomplete email payload.');
+    }
+
+    const [datePart, timePart] = time.split(' ');
+    if (!datePart || !timePart) {
+        throw new Error(`Invalid appointment time: ${time}`);
+    }
+    const [year, month, day] = datePart.split('-').map(Number);
+    const [hour, minute] = timePart.split(':').map(Number);
+    if ([year, month, day, hour, minute].some(Number.isNaN)) {
+        throw new Error(`Invalid date/time values: ${time}`);
+    }
+
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const addMinutes = (y, mo, d, h, mi, delta) => {
+        const dt = new Date(Date.UTC(y, mo - 1, d, h, mi + delta, 0));
+        return {
+            year: dt.getUTCFullYear(),
+            month: dt.getUTCMonth() + 1,
+            day: dt.getUTCDate(),
+            hour: dt.getUTCHours(),
+            minute: dt.getUTCMinutes()
+        };
+    };
+    const toIcsLocal = ({ year: y, month: mo, day: d, hour: h, minute: mi }) =>
+        `${y}${pad2(mo)}${pad2(d)}T${pad2(h)}${pad2(mi)}00`;
+    const nowUtcStamp = () => {
+        const now = new Date();
+        return `${now.getUTCFullYear()}${pad2(now.getUTCMonth() + 1)}${pad2(now.getUTCDate())}T${pad2(now.getUTCHours())}${pad2(now.getUTCMinutes())}${pad2(now.getUTCSeconds())}Z`;
+    };
+    const escapeIcs = (value) =>
+        String(value || '')
+            .replace(/\\/g, '\\\\')
+            .replace(/\n/g, '\\n')
+            .replace(/;/g, '\\;')
+            .replace(/,/g, '\\,');
+
+    const start = { year, month, day, hour, minute };
+    const end = addMinutes(year, month, day, hour, minute, 30);
+    const uid = `${Date.now()}-${Math.random().toString(36).slice(2)}@antigravity`;
+    const dtStart = toIcsLocal(start);
+    const dtEnd = toIcsLocal(end);
+    const dtStamp = nowUtcStamp();
+    const dateRo = `${pad2(day)}.${pad2(month)}.${year}`;
+    const timeRo = `${pad2(hour)}:${pad2(minute)}`;
+    const summary = `Programare Prof. Dr. Balta Florian - [${type}]`;
+
+    const icsContent = [
+        'BEGIN:VCALENDAR',
+        'PRODID:-//Antigravity Appointments//RO',
+        'VERSION:2.0',
+        'CALSCALE:GREGORIAN',
+        'METHOD:REQUEST',
+        'BEGIN:VTIMEZONE',
+        'TZID:Europe/Bucharest',
+        'BEGIN:STANDARD',
+        'TZOFFSETFROM:+0300',
+        'TZOFFSETTO:+0200',
+        'TZNAME:EET',
+        'DTSTART:19701025T040000',
+        'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
+        'END:STANDARD',
+        'BEGIN:DAYLIGHT',
+        'TZOFFSETFROM:+0200',
+        'TZOFFSETTO:+0300',
+        'TZNAME:EEST',
+        'DTSTART:19700329T030000',
+        'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU',
+        'END:DAYLIGHT',
+        'END:VTIMEZONE',
+        'BEGIN:VEVENT',
+        `UID:${uid}`,
+        `DTSTAMP:${dtStamp}`,
+        `DTSTART;TZID=Europe/Bucharest:${dtStart}`,
+        `DTEND;TZID=Europe/Bucharest:${dtEnd}`,
+        `SUMMARY:${escapeIcs(summary)}`,
+        `DESCRIPTION:${escapeIcs(`Pacient: ${name}\nTip: ${type}`)}`,
+        `LOCATION:${escapeIcs(location)}`,
+        'STATUS:CONFIRMED',
+        'BEGIN:VALARM',
+        'ACTION:DISPLAY',
+        'DESCRIPTION:Reminder',
+        'TRIGGER:-PT60M',
+        'END:VALARM',
+        'END:VEVENT',
+        'END:VCALENDAR'
+    ].join('\r\n');
+
+    const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpSecure,
+        auth: {
+            user: senderEmail,
+            pass: senderPass
+        }
+    });
+
+    const htmlBody = `
+        <div style="font-family: Arial, sans-serif;">
+            <h2>Buna ziua, ${name}!</h2>
+            <p>Programarea dumneavoastra a fost confirmata cu succes.</p>
+            <ul>
+                <li><strong>Tip:</strong> ${type}</li>
+                <li><strong>Data si ora:</strong> ${dateRo} ${timeRo}</li>
+                <li><strong>Locatie:</strong> ${location}</li>
+            </ul>
+            <p>Gasiti atasata invitatia de calendar (.ics).</p>
+            <p>Multumim,<br/>Echipa ${senderName}</p>
+        </div>
+    `;
+
+    const info = await transporter.sendMail({
+        from: `"${senderName}" <${senderEmail}>`,
+        to: email,
+        subject: `Confirmare programare: ${summary}`,
+        html: htmlBody,
+        attachments: [
+            {
+                filename: 'invite.ics',
+                content: icsContent,
+                contentType: 'text/calendar; charset=UTF-8; method=REQUEST'
+            }
+        ]
+    });
+
+    return { messageId: info.messageId, envelope: info.envelope };
 }
 
 // Optional auth middleware
