@@ -551,22 +551,20 @@
                     }
                 }
 
-                // 1. Initial check (fast, from cache)
+                // 1. Initial check (fast, from local cache)
                 const cachedUser = AUTH.getUser();
                 updateUI(cachedUser);
 
-                // 2. Server verification (background)
-                if (AUTH.isLoggedIn()) {
-                    try {
-                        const verifiedUser = await AUTH.verify();
-                        updateUI(verifiedUser);
-                    } catch (e) {
-                        console.error('Auth verification failed', e);
-                    }
+                // 2. Server verification (authoritative, cookie-based)
+                try {
+                    const verifiedUser = await AUTH.verify();
+                    updateUI(verifiedUser);
+                } catch (e) {
+                    console.error('Auth verification failed', e);
                 }
 
-                logoutBtn.addEventListener('click', () => {
-                    AUTH.logout();
+                logoutBtn.addEventListener('click', async () => {
+                    await AUTH.logout();
                     window.location.reload();
                 });
             })();

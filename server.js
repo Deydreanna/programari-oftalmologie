@@ -9,6 +9,7 @@ const xlsx = require('xlsx');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 const { validateBaseEnv, parseAllowedOrigins } = require('./scripts/env-utils');
 
 const app = express();
@@ -31,10 +32,29 @@ if (!baseEnvValidation.ok) {
     process.exit(1);
 }
 
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 const MONGODB_URI = process.env.MONGODB_URI;
 const ALLOWED_ORIGINS = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
+const ACCESS_TOKEN_TTL_MINUTES = Number(process.env.ACCESS_TOKEN_TTL_MINUTES || 15);
+const REFRESH_TOKEN_TTL_DAYS = Number(process.env.REFRESH_TOKEN_TTL_DAYS || 30);
+const ACCESS_COOKIE_NAME = '__Host-access';
+const REFRESH_COOKIE_NAME = '__Host-refresh';
+const CSRF_COOKIE_NAME = '__Host-csrf';
+const AUTH_COOKIE_BASE_OPTIONS = Object.freeze({
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict',
+    path: '/'
+});
+const CSRF_COOKIE_OPTIONS = Object.freeze({
+    httpOnly: false,
+    secure: true,
+    sameSite: 'strict',
+    path: '/'
+});
 const loginAttempts = new Map();
+const refreshAttempts = new Map();
 
 // =====================
 //  SCHEMAS
@@ -129,9 +149,39 @@ app.use(cors({
         }
 
         return callback(new Error('Origin not allowed by CORS.'));
-    }
+    },
+    credentials: false
 }));
 app.use(bodyParser.json({ limit: '10mb' }));
+
+app.use((req, res, next) => {
+    req._parsedCookies = parseCookies(req);
+    next();
+});
+
+app.use((req, res, next) => {
+    const csrfCookie = getCookie(req, CSRF_COOKIE_NAME);
+    if (!csrfCookie) {
+        const token = setCsrfCookie(res);
+        req._parsedCookies[CSRF_COOKIE_NAME] = token;
+    }
+    next();
+});
+
+app.use((req, res, next) => {
+    if (!shouldRequireCsrf(req)) {
+        return next();
+    }
+
+    const csrfCookie = getCookie(req, CSRF_COOKIE_NAME);
+    const csrfHeader = String(req.get('X-CSRF-Token') || '').trim();
+
+    if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
+        return res.status(403).json({ error: 'CSRF token invalid or missing.' });
+    }
+    return next();
+});
+
 app.use(express.static('public'));
 
 // =====================
@@ -158,12 +208,158 @@ function isEmail(identifier) {
     return identifier.includes('@');
 }
 
-function generateToken(user) {
+function toPositiveInt(value, fallback) {
+    const parsed = Number.parseInt(String(value), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+    return parsed;
+}
+
+const ACCESS_TOKEN_TTL_MINUTES_SAFE = toPositiveInt(ACCESS_TOKEN_TTL_MINUTES, 15);
+const REFRESH_TOKEN_TTL_DAYS_SAFE = toPositiveInt(REFRESH_TOKEN_TTL_DAYS, 30);
+
+function generateAccessToken(user) {
     return jwt.sign(
-        { id: user._id, email: user.email, displayName: user.displayName, role: user.role },
-        JWT_SECRET,
-        { expiresIn: '24h' }
+        { sub: String(user._id), tokenType: 'access' },
+        JWT_ACCESS_SECRET,
+        { expiresIn: `${ACCESS_TOKEN_TTL_MINUTES_SAFE}m` }
     );
+}
+
+function generateRefreshToken(user) {
+    return jwt.sign(
+        { sub: String(user._id), tokenType: 'refresh' },
+        JWT_REFRESH_SECRET,
+        { expiresIn: `${REFRESH_TOKEN_TTL_DAYS_SAFE}d` }
+    );
+}
+
+function verifyAccessToken(token) {
+    const payload = jwt.verify(token, JWT_ACCESS_SECRET);
+    if (!payload || payload.tokenType !== 'access' || !payload.sub) {
+        throw new Error('Invalid access token payload.');
+    }
+    return payload;
+}
+
+function verifyRefreshToken(token) {
+    const payload = jwt.verify(token, JWT_REFRESH_SECRET);
+    if (!payload || payload.tokenType !== 'refresh' || !payload.sub) {
+        throw new Error('Invalid refresh token payload.');
+    }
+    return payload;
+}
+
+function buildUserPayload(user) {
+    return {
+        id: user._id,
+        email: user.email,
+        phone: user.phone,
+        displayName: user.displayName,
+        role: user.role,
+        createdAt: user.createdAt
+    };
+}
+
+function buildSessionUser(user) {
+    return {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+        displayName: user.displayName
+    };
+}
+
+function parseCookies(req) {
+    const cookieHeader = req.headers.cookie || '';
+    if (!cookieHeader) return {};
+
+    const parsed = {};
+    const entries = cookieHeader.split(';');
+    for (const entry of entries) {
+        const index = entry.indexOf('=');
+        if (index <= 0) continue;
+
+        const key = entry.slice(0, index).trim();
+        const rawValue = entry.slice(index + 1).trim();
+        try {
+            parsed[key] = decodeURIComponent(rawValue);
+        } catch (_) {
+            parsed[key] = rawValue;
+        }
+    }
+    return parsed;
+}
+
+function getCookie(req, key) {
+    if (!req._parsedCookies) {
+        req._parsedCookies = parseCookies(req);
+    }
+    return req._parsedCookies[key];
+}
+
+function generateCsrfToken() {
+    return crypto.randomBytes(32).toString('hex');
+}
+
+function setCsrfCookie(res, token = generateCsrfToken()) {
+    res.cookie(CSRF_COOKIE_NAME, token, CSRF_COOKIE_OPTIONS);
+    return token;
+}
+
+function setSessionCookies(res, user, { rotateRefresh = true, rotateCsrf = true } = {}) {
+    const accessToken = generateAccessToken(user);
+    res.cookie(ACCESS_COOKIE_NAME, accessToken, {
+        ...AUTH_COOKIE_BASE_OPTIONS,
+        maxAge: ACCESS_TOKEN_TTL_MINUTES_SAFE * 60 * 1000
+    });
+
+    if (rotateRefresh) {
+        const refreshToken = generateRefreshToken(user);
+        res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
+            ...AUTH_COOKIE_BASE_OPTIONS,
+            maxAge: REFRESH_TOKEN_TTL_DAYS_SAFE * 24 * 60 * 60 * 1000
+        });
+    }
+
+    if (rotateCsrf) {
+        setCsrfCookie(res);
+    }
+}
+
+function clearSessionCookies(res) {
+    const authClearOpts = {
+        ...AUTH_COOKIE_BASE_OPTIONS,
+        maxAge: 0
+    };
+    const csrfClearOpts = {
+        ...CSRF_COOKIE_OPTIONS,
+        maxAge: 0
+    };
+
+    res.clearCookie(ACCESS_COOKIE_NAME, authClearOpts);
+    res.clearCookie(REFRESH_COOKIE_NAME, authClearOpts);
+    res.clearCookie(CSRF_COOKIE_NAME, csrfClearOpts);
+}
+
+function setAuthNoStore(res) {
+    res.set('Cache-Control', 'no-store');
+    res.set('Pragma', 'no-cache');
+}
+
+function shouldRequireCsrf(req) {
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+        return false;
+    }
+    if (req.path === '/api/auth/login') {
+        return false;
+    }
+    return true;
+}
+
+function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function getClientIp(req) {
@@ -217,6 +413,35 @@ function getLoginLock(req, identifier = '') {
     return 0;
 }
 
+function getRefreshAttemptState(key) {
+    const now = Date.now();
+    const existing = refreshAttempts.get(key);
+
+    if (!existing) {
+        return { count: 0, firstAttemptAt: now };
+    }
+
+    if (existing.firstAttemptAt + LOGIN_LOCKOUT_WINDOW_MS < now) {
+        refreshAttempts.delete(key);
+        return { count: 0, firstAttemptAt: now };
+    }
+
+    return existing;
+}
+
+function registerFailedRefreshAttempt(req) {
+    const key = getClientIp(req);
+    const now = Date.now();
+    const state = getRefreshAttemptState(key);
+    const count = state.count + 1;
+    refreshAttempts.set(key, { count, firstAttemptAt: state.firstAttemptAt || now });
+    return { count };
+}
+
+function clearFailedRefreshAttempt(req) {
+    refreshAttempts.delete(getClientIp(req));
+}
+
 function sanitizeAppointmentForAdminList(appointment) {
     return {
         _id: appointment._id,
@@ -265,7 +490,15 @@ const strictAuthLimiter = rateLimit({
     max: 8,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Prea multe Ã®ncercÄƒri. ReÃ®ncercaÈ›i Ã®n cÃ¢teva minute.' }
+    message: { error: 'Prea multe ÃƒÂ®ncercÃ„Æ’ri. ReÃƒÂ®ncercaÃˆâ€ºi ÃƒÂ®n cÃƒÂ¢teva minute.' }
+});
+
+const refreshLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Prea multe cereri de refresh. Reincercati in cateva minute.' }
 });
 
 const bookingLimiter = rateLimit({
@@ -273,7 +506,7 @@ const bookingLimiter = rateLimit({
     max: 30,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Prea multe programÄƒri trimise de la acest IP. ÃŽncercaÈ›i mai tÃ¢rziu.' }
+    message: { error: 'Prea multe programÃ„Æ’ri trimise de la acest IP. ÃƒÅ½ncercaÃˆâ€ºi mai tÃƒÂ¢rziu.' }
 });
 
 const adminLimiter = rateLimit({
@@ -428,64 +661,58 @@ async function executeEmailScript(base64Data) {
     return { messageId: info.messageId, envelope: info.envelope };
 }
 
+async function getAuthenticatedUser(req) {
+    const accessToken = getCookie(req, ACCESS_COOKIE_NAME);
+    if (!accessToken) return null;
+
+    const payload = verifyAccessToken(accessToken);
+    const user = await User.findById(payload.sub);
+    return user || null;
+}
+
 // Optional auth middleware
-function optionalAuth(req, res, next) {
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-        const token = authHeader.split(' ')[1];
-        try {
-            const decoded = jwt.verify(token, JWT_SECRET);
-            req.user = decoded;
-        } catch (err) {
-            // Token invalid
-        }
+async function optionalAuth(req, res, next) {
+    try {
+        req.user = await getAuthenticatedUser(req);
+    } catch (_) {
+        req.user = null;
     }
     next();
 }
 
 // Required Admin middleware
 async function requireAdmin(req, res, next) {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Autentificare necesarÄƒ.' });
-    }
-
-    const token = authHeader.split(' ')[1];
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const user = await User.findById(decoded.id);
-
-        if (user && (user.role === 'admin' || user.role === 'superadmin')) {
-            req.user = user;
-            next();
-        } else {
-            res.status(403).json({ error: 'Acces interzis. Drepturi de administrator necesare.' });
+        const user = await getAuthenticatedUser(req);
+        if (!user) {
+            return res.status(401).json({ error: 'Autentificare necesara.' });
         }
-    } catch (err) {
-        res.status(401).json({ error: 'Sesiune invalidÄƒ sau expiratÄƒ.' });
+
+        if (user.role === 'admin' || user.role === 'superadmin') {
+            req.user = user;
+            return next();
+        }
+        return res.status(403).json({ error: 'Acces interzis. Drepturi de administrator necesare.' });
+    } catch (_) {
+        return res.status(401).json({ error: 'Sesiune invalida sau expirata.' });
     }
 }
 
 // Required Super Admin middleware
 async function requireSuperAdmin(req, res, next) {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Autentificare necesarÄƒ.' });
-    }
-
-    const token = authHeader.split(' ')[1];
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const user = await User.findById(decoded.id);
-
-        if (user && user.role === 'superadmin') {
-            req.user = user;
-            next();
-        } else {
-            res.status(403).json({ error: 'Acces interzis. Doar Super Admin are acces aici.' });
+        const user = await getAuthenticatedUser(req);
+        if (!user) {
+            return res.status(401).json({ error: 'Autentificare necesara.' });
         }
-    } catch (err) {
-        res.status(401).json({ error: 'Sesiune invalidÄƒ sau expiratÄƒ.' });
+
+        if (user.role === 'superadmin') {
+            req.user = user;
+            return next();
+        }
+        return res.status(403).json({ error: 'Acces interzis. Doar Super Admin are acces aici.' });
+    } catch (_) {
+        return res.status(401).json({ error: 'Sesiune invalida sau expirata.' });
     }
 }
 
@@ -495,19 +722,22 @@ async function requireSuperAdmin(req, res, next) {
 
 app.use('/api/auth/login', strictAuthLimiter);
 app.use('/api/auth/signup', strictAuthLimiter);
+app.use('/api/auth/refresh', refreshLimiter);
 app.use('/api/book', bookingLimiter);
 app.use('/api/admin', adminLimiter);
 
 app.post('/api/auth/signup', async (req, res) => {
+    setAuthNoStore(res);
+
     try {
-        const { email, phone, password, displayName } = req.body;
+        const { email, phone, password, displayName } = req.body || {};
 
         if (!email || !phone || !password) {
-            return res.status(400).json({ error: 'Email, telefon È™i parola sunt obligatorii.' });
+            return res.status(400).json({ error: 'Email, telefon si parola sunt obligatorii.' });
         }
 
         if (!displayName || displayName.trim().length < 2) {
-            return res.status(400).json({ error: 'Numele trebuie sÄƒ aibÄƒ cel puÈ›in 2 caractere.' });
+            return res.status(400).json({ error: 'Numele trebuie sa aiba cel putin 2 caractere.' });
         }
 
         if (!validateEmail(email)) {
@@ -515,74 +745,69 @@ app.post('/api/auth/signup', async (req, res) => {
         }
 
         if (!validatePhone(phone)) {
-            return res.status(400).json({ error: 'Format telefon invalid. FolosiÈ›i formatul 07xx xxx xxx.' });
+            return res.status(400).json({ error: 'Format telefon invalid. Folositi formatul 07xx xxx xxx.' });
         }
 
-        if (password.length < 6) {
-            return res.status(400).json({ error: 'Parola trebuie sÄƒ aibÄƒ minim 6 caractere.' });
+        if (String(password).length < 6) {
+            return res.status(400).json({ error: 'Parola trebuie sa aiba minim 6 caractere.' });
         }
 
         const cleanedPhone = cleanPhone(phone);
 
-        const existingEmail = await User.findOne({ email: email.toLowerCase() });
+        const existingEmail = await User.findOne({ email: String(email).toLowerCase() });
         if (existingEmail) {
-            return res.status(409).json({ error: 'Acest email este deja Ã®nregistrat.' });
+            return res.status(409).json({ error: 'Acest email este deja inregistrat.' });
         }
 
         const existingPhone = await User.findOne({ phone: cleanedPhone });
         if (existingPhone) {
-            return res.status(409).json({ error: 'Acest numÄƒr de telefon este deja Ã®nregistrat.' });
+            return res.status(409).json({ error: 'Acest numar de telefon este deja inregistrat.' });
         }
 
         const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
         const user = new User({
-            email: email.toLowerCase(),
+            email: String(email).toLowerCase(),
             phone: cleanedPhone,
             password: hashedPassword,
-            displayName: displayName.trim(),
+            displayName: String(displayName).trim(),
             role: 'user'
         });
 
         await user.save();
-        const token = generateToken(user);
+        setSessionCookies(res, user, { rotateRefresh: true, rotateCsrf: true });
 
-        res.status(201).json({
-            success: true,
-            message: 'Cont creat cu succes!',
-            token,
-            user: {
-                id: user._id,
-                email: user.email,
-                phone: user.phone,
-                displayName: user.displayName,
-                role: user.role
-            }
+        return res.status(201).json({
+            ok: true,
+            user: buildSessionUser(user)
         });
 
     } catch (err) {
-        console.error('Signup error:', err);
-        res.status(500).json({ error: 'Eroare la Ã®nregistrare.' });
+        console.error('Signup error:', err.message);
+        return res.status(500).json({ error: 'Eroare la inregistrare.' });
     }
 });
 
 app.post('/api/auth/login', async (req, res) => {
-    try {
-        const { identifier, password } = req.body;
+    setAuthNoStore(res);
 
-        if (!identifier || !password) {
-            return res.status(400).json({ error: 'Introduce?i email/telefon ?i parola.' });
+    try {
+        const identifier = typeof req.body?.identifier === 'string' ? req.body.identifier.trim() : '';
+        const password = typeof req.body?.password === 'string' ? req.body.password : '';
+
+        if (!identifier || !password || identifier.length > 254 || password.length > 1024) {
+            return res.status(400).json({ error: 'Date de autentificare invalide.' });
         }
 
         const lockUntil = getLoginLock(req, identifier);
         if (lockUntil) {
             const waitSeconds = Math.ceil((lockUntil - Date.now()) / 1000);
-            return res.status(429).json({ error: `Prea multe încercari e?uate. Încerca?i din nou în ${waitSeconds} secunde.` });
+            return res.status(429).json({ error: `Prea multe incercari esuate. Incercati din nou in ${waitSeconds} secunde.` });
         }
 
         let user;
         if (isEmail(identifier)) {
-            user = await User.findOne({ email: identifier.toLowerCase().trim() });
+            user = await User.findOne({ email: identifier.toLowerCase() });
         } else {
             const cleanedPhone = cleanPhone(identifier);
             user = await User.findOne({ phone: cleanedPhone });
@@ -591,73 +816,97 @@ app.post('/api/auth/login', async (req, res) => {
         if (!user) {
             const failedAttempt = registerFailedLoginAttempt(req, identifier);
             if (failedAttempt.count > 1) {
-                await new Promise((resolve) => setTimeout(resolve, Math.min(200 * failedAttempt.count, 2000)));
+                await delay(Math.min(200 * failedAttempt.count, 2000));
             }
-            return res.status(401).json({ error: 'Email/telefon sau parola incorecta.' });
+            return res.status(401).json({ error: 'Credentiale invalide.' });
         }
 
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             const failedAttempt = registerFailedLoginAttempt(req, identifier);
             if (failedAttempt.count > 1) {
-                await new Promise((resolve) => setTimeout(resolve, Math.min(200 * failedAttempt.count, 2000)));
+                await delay(Math.min(200 * failedAttempt.count, 2000));
             }
-            return res.status(401).json({ error: 'Email/telefon sau parola incorecta.' });
+            return res.status(401).json({ error: 'Credentiale invalide.' });
         }
 
         clearFailedLoginAttempt(req, identifier);
-        const token = generateToken(user);
+        setSessionCookies(res, user, { rotateRefresh: true, rotateCsrf: true });
 
-        res.json({
-            success: true,
-            message: 'Autentificare reu?ita!',
-            token,
-            user: {
-                id: user._id,
-                email: user.email,
-                phone: user.phone,
-                displayName: user.displayName,
-                role: user.role
-            }
+        return res.json({
+            ok: true,
+            user: buildSessionUser(user)
         });
 
     } catch (err) {
-        console.error('Login error:', err);
-        res.status(500).json({ error: 'Eroare la autentificare.' });
+        console.error('Login error:', err.message);
+        return res.status(500).json({ error: 'Eroare la autentificare.' });
+    }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+    setAuthNoStore(res);
+    clearSessionCookies(res);
+    return res.json({ ok: true });
+});
+
+app.post('/api/auth/refresh', async (req, res) => {
+    setAuthNoStore(res);
+
+    const refreshToken = getCookie(req, REFRESH_COOKIE_NAME);
+    if (!refreshToken) {
+        const failedAttempt = registerFailedRefreshAttempt(req);
+        if (failedAttempt.count > 1) {
+            await delay(Math.min(150 * failedAttempt.count, 1500));
+        }
+        clearSessionCookies(res);
+        return res.status(401).json({ error: 'Sesiune invalida.' });
+    }
+
+    try {
+        const payload = verifyRefreshToken(refreshToken);
+        const user = await User.findById(payload.sub);
+
+        if (!user) {
+            throw new Error('User not found for refresh token.');
+        }
+
+        clearFailedRefreshAttempt(req);
+        setSessionCookies(res, user, { rotateRefresh: true, rotateCsrf: true });
+        return res.json({ ok: true });
+
+    } catch (_) {
+        const failedAttempt = registerFailedRefreshAttempt(req);
+        if (failedAttempt.count > 1) {
+            await delay(Math.min(150 * failedAttempt.count, 1500));
+        }
+        clearSessionCookies(res);
+        return res.status(401).json({ error: 'Sesiune invalida.' });
     }
 });
 
 app.get('/api/auth/me', async (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Token lipsÄƒ.' });
+    setAuthNoStore(res);
+
+    const accessToken = getCookie(req, ACCESS_COOKIE_NAME);
+    if (!accessToken) {
+        return res.status(401).json({ error: 'Sesiune absenta.' });
     }
 
-    const token = authHeader.split(' ')[1];
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const user = await User.findById(decoded.id).select('-password');
+        const payload = verifyAccessToken(accessToken);
+        const user = await User.findById(payload.sub).select('-password');
         if (!user) {
-            return res.status(404).json({ error: 'Utilizator negÄƒsit.' });
+            return res.status(401).json({ error: 'Sesiune invalida.' });
         }
 
-        // Return a fresh token too, in case role changed
-        const newToken = generateToken(user);
-
-        res.json({
-            token: newToken,
-            user: {
-                id: user._id,
-                email: user.email,
-                phone: user.phone,
-                displayName: user.displayName,
-                role: user.role,
-                createdAt: user.createdAt
-            }
+        return res.json({
+            ok: true,
+            user: buildUserPayload(user)
         });
 
-    } catch (err) {
-        return res.status(401).json({ error: 'Sesiune invalidÄƒ.' });
+    } catch (_) {
+        return res.status(401).json({ error: 'Sesiune invalida sau expirata.' });
     }
 });
 
@@ -702,7 +951,7 @@ app.get('/api/slots', async (req, res) => {
 app.post('/api/book', optionalAuth, async (req, res) => {
     const { name, phone, email, type, date, time } = req.body;
     if (!name || !phone || !email || !type || !date || !time) {
-        return res.status(400).json({ error: 'Toate câmpurile obligatorii trebuie completate.' });
+        return res.status(400).json({ error: 'Toate cÃ¢mpurile obligatorii trebuie completate.' });
     }
 
     if (!validateEmail(email)) {
@@ -719,25 +968,25 @@ app.post('/api/book', optionalAuth, async (req, res) => {
 
     const dateDay = new Date(date).getDay();
     if (dateDay !== 3) {
-        return res.status(400).json({ error: 'Programările sunt disponibile doar miercurea.' });
+        return res.status(400).json({ error: 'ProgramÄƒrile sunt disponibile doar miercurea.' });
     }
 
     try {
         const { hasDiagnosis, diagnosticFile, diagnosticFileMeta } = req.body;
         if (diagnosticFile) {
-            return res.status(400).json({ error: 'Încărcarea directă de fișiere este dezactivată. Folosiți stocare externă securizată.' });
+            return res.status(400).json({ error: 'ÃŽncÄƒrcarea directÄƒ de fiÈ™iere este dezactivatÄƒ. FolosiÈ›i stocare externÄƒ securizatÄƒ.' });
         }
 
         let safeDiagnosticFileMeta = null;
         if (hasDiagnosis) {
             if (!ENABLE_DIAGNOSTIC_UPLOAD && diagnosticFileMeta) {
-                return res.status(400).json({ error: 'Încărcarea documentelor este dezactivată momentan.' });
+                return res.status(400).json({ error: 'ÃŽncÄƒrcarea documentelor este dezactivatÄƒ momentan.' });
             }
 
             if (ENABLE_DIAGNOSTIC_UPLOAD && diagnosticFileMeta) {
                 if (!validateDiagnosticFileMeta(diagnosticFileMeta)) {
                     return res.status(400).json({
-                        error: `Metadatele fișierului sunt invalide. Tipuri permise: ${Array.from(ALLOWED_DIAGNOSTIC_MIME_TYPES).join(', ')}; mărime maximă ${MAX_DIAGNOSTIC_FILE_SIZE_BYTES} bytes.`
+                        error: `Metadatele fiÈ™ierului sunt invalide. Tipuri permise: ${Array.from(ALLOWED_DIAGNOSTIC_MIME_TYPES).join(', ')}; mÄƒrime maximÄƒ ${MAX_DIAGNOSTIC_FILE_SIZE_BYTES} bytes.`
                     });
                 }
                 safeDiagnosticFileMeta = {
@@ -768,7 +1017,7 @@ app.post('/api/book', optionalAuth, async (req, res) => {
             email,
             type,
             time: `${date} ${time}`,
-            location: "PiaÈ›a Alexandru Lahovari nr. 1, Sector 1, BucureÈ™ti"
+            location: "PiaÃˆâ€ºa Alexandru Lahovari nr. 1, Sector 1, BucureÃˆâ„¢ti"
         };
 
         const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
@@ -790,7 +1039,7 @@ app.post('/api/book', optionalAuth, async (req, res) => {
             console.error(`[EMAIL FAILURE] Process error for ${email}:`, error?.stderr || error.message);
         });
 
-        res.json({ success: true, message: 'Programare confirmată! Verificați e-mail-ul pentru invitație.' });
+        res.json({ success: true, message: 'Programare confirmatÄƒ! VerificaÈ›i e-mail-ul pentru invitaÈ›ie.' });
     } catch (err) {
         if (err?.code === 11000) {
             return res.status(409).json({ error: 'Interval deja rezervat.' });
@@ -819,7 +1068,7 @@ app.get('/api/admin/appointments/:id', requireAdmin, async (req, res) => {
     try {
         const appointment = await Appointment.findById(req.params.id).lean();
         if (!appointment) {
-            return res.status(404).json({ error: 'Programare negăsită.' });
+            return res.status(404).json({ error: 'Programare negÄƒsitÄƒ.' });
         }
 
         await writeAuditLog(req, 'appointment_details_read', appointment._id);
@@ -833,16 +1082,16 @@ app.get('/api/admin/appointments/:id/file-url', requireAdmin, async (req, res) =
     try {
         const appointment = await Appointment.findById(req.params.id).lean();
         if (!appointment) {
-            return res.status(404).json({ error: 'Programare negăsită.' });
+            return res.status(404).json({ error: 'Programare negÄƒsitÄƒ.' });
         }
 
         await writeAuditLog(req, 'appointment_file_download_requested', appointment._id);
 
         if (!ENABLE_DIAGNOSTIC_UPLOAD || !appointment.diagnosticFileMeta?.key) {
-            return res.status(404).json({ error: 'Documentul nu este disponibil pentru descărcare.' });
+            return res.status(404).json({ error: 'Documentul nu este disponibil pentru descÄƒrcare.' });
         }
 
-        return res.status(501).json({ error: 'Generarea URL-urilor semnate nu este configurată în acest mediu.' });
+        return res.status(501).json({ error: 'Generarea URL-urilor semnate nu este configuratÄƒ Ã®n acest mediu.' });
     } catch (err) {
         res.status(500).json({ error: 'Database error' });
     }
@@ -851,7 +1100,7 @@ app.get('/api/admin/appointments/:id/file-url', requireAdmin, async (req, res) =
 app.post('/api/admin/resend-email/:id', requireAdmin, async (req, res) => {
     try {
         const appointment = await Appointment.findById(req.params.id);
-        if (!appointment) return res.status(404).json({ error: 'Programare negÄƒsitÄƒ.' });
+        if (!appointment) return res.status(404).json({ error: 'Programare negÃ„Æ’sitÃ„Æ’.' });
         if (!appointment.email) return res.status(400).json({ error: 'Clientul nu are e-mail.' });
 
         const { name, email, type, date, time } = appointment;
@@ -860,7 +1109,7 @@ app.post('/api/admin/resend-email/:id', requireAdmin, async (req, res) => {
             email,
             type,
             time: `${date} ${time}`,
-            location: "PiaÈ›a Alexandru Lahovari nr. 1, Sector 1, BucureÈ™ti"
+            location: "PiaÃˆâ€ºa Alexandru Lahovari nr. 1, Sector 1, BucureÃˆâ„¢ti"
         };
 
         const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
@@ -876,8 +1125,8 @@ app.post('/api/admin/resend-email/:id', requireAdmin, async (req, res) => {
         } catch (err) {
             console.error(`[MANUAL EMAIL CRITICAL] Execution failed:`, err?.stderr || err.message || err);
             res.status(500).json({
-                error: 'Trimiterea a eÈ™uat.',
-                details: err?.stderr || err.message || 'Eroare necunoscutÄƒ'
+                error: 'Trimiterea a eÃˆâ„¢uat.',
+                details: err?.stderr || err.message || 'Eroare necunoscutÃ„Æ’'
             });
         }
     } catch (err) {
@@ -902,7 +1151,7 @@ app.get('/api/admin/stats', requireAdmin, async (req, res) => {
 app.post('/api/admin/reset', requireAdmin, async (req, res) => {
     try {
         await Appointment.deleteMany({});
-        res.json({ success: true, message: 'Baza de date a fost resetatÄƒ.' });
+        res.json({ success: true, message: 'Baza de date a fost resetatÃ„Æ’.' });
     } catch (err) {
         res.status(500).json({ error: 'Eroare la resetarea bazei de date.' });
     }
@@ -912,11 +1161,11 @@ app.delete('/api/admin/appointment/:id', requireAdmin, async (req, res) => {
     try {
         const deleted = await Appointment.findByIdAndDelete(req.params.id);
         if (!deleted) {
-            return res.status(404).json({ error: 'Programare negÄƒsitÄƒ.' });
+            return res.status(404).json({ error: 'Programare negÃ„Æ’sitÃ„Æ’.' });
         }
-        res.json({ success: true, message: 'Programarea pacientului a fost anulatÄƒ.' });
+        res.json({ success: true, message: 'Programarea pacientului a fost anulatÃ„Æ’.' });
     } catch (err) {
-        res.status(500).json({ error: 'Eroare la anularea programÄƒrii.' });
+        res.status(500).json({ error: 'Eroare la anularea programÃ„Æ’rii.' });
     }
 });
 
@@ -924,17 +1173,17 @@ app.delete('/api/admin/appointments/by-date', requireAdmin, async (req, res) => 
     try {
         const { date } = req.body || {};
         if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-            return res.status(400).json({ error: 'Data este invalidÄƒ. FolosiÈ›i formatul YYYY-MM-DD.' });
+            return res.status(400).json({ error: 'Data este invalidÃ„Æ’. FolosiÃˆâ€ºi formatul YYYY-MM-DD.' });
         }
 
         const result = await Appointment.deleteMany({ date });
         res.json({
             success: true,
             deletedCount: result.deletedCount || 0,
-            message: `Au fost anulate ${result.deletedCount || 0} programÄƒri pentru data ${date}.`
+            message: `Au fost anulate ${result.deletedCount || 0} programÃ„Æ’ri pentru data ${date}.`
         });
     } catch (err) {
-        res.status(500).json({ error: 'Eroare la anularea programÄƒrilor pe zi.' });
+        res.status(500).json({ error: 'Eroare la anularea programÃ„Æ’rilor pe zi.' });
     }
 });
 
@@ -978,12 +1227,12 @@ app.post('/api/admin/users/role', requireSuperAdmin, async (req, res) => {
         const { userId, role } = req.body;
 
         if (!userId || !role) {
-            return res.status(400).json({ error: 'UserId È™i Rolul sunt necesare.' });
+            return res.status(400).json({ error: 'UserId Ãˆâ„¢i Rolul sunt necesare.' });
         }
 
         const user = await User.findById(userId);
         if (!user) {
-            return res.status(404).json({ error: 'Utilizator negÄƒsit.' });
+            return res.status(404).json({ error: 'Utilizator negÃ„Æ’sit.' });
         }
 
         // Prevent changing superadmin role via this endpoint
@@ -1014,5 +1263,7 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT} (MongoDB + Auth + RBAC Enabled)`);
 });
+
+
 
 

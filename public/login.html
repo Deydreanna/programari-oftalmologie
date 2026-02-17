@@ -226,9 +226,12 @@
     <script src="auth.js"></script>
     <script>
         // Redirect if already logged in
-        if (localStorage.getItem('authToken')) {
-            window.location.href = '/';
-        }
+        (async () => {
+            const user = await AUTH.verify();
+            if (user) {
+                window.location.href = '/';
+            }
+        })();
 
         function togglePassword(inputId, btn) {
             const input = document.getElementById(inputId);
@@ -258,9 +261,8 @@
             loginSpinner.classList.remove('hidden');
 
             try {
-                const res = await fetch('/api/auth/login', {
+                const res = await AUTH.apiFetch('/api/auth/login', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ identifier, password })
                 });
 
@@ -271,9 +273,7 @@
                     return;
                 }
 
-                // Save token and user data
-                localStorage.setItem('authToken', data.token);
-                localStorage.setItem('authUser', JSON.stringify(data.user));
+                AUTH.setUser(data.user || null);
 
                 successMessage.textContent = 'Autentificare reușită! Redirecționare...';
                 successMessage.classList.remove('hidden');

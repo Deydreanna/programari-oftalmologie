@@ -521,9 +521,8 @@ document.addEventListener('DOMContentLoaded', () => {
         loadingSpinner.classList.remove('hidden');
 
         try {
-            const res = await fetch('/api/book', {
+            const res = await AUTH.apiFetch('/api/book', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     name, phone, email, cnp, type, date, time,
                     hasDiagnosis: hasDiagnosis.checked
@@ -661,9 +660,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const storageText = document.getElementById('storage-text');
 
         try {
-            const res = await fetch('/api/admin/stats', {
-                headers: AUTH.getHeaders()
-            });
+            const res = await AUTH.apiFetch('/api/admin/stats');
             const data = await res.json();
 
             if (res.ok) {
@@ -684,9 +681,7 @@ document.addEventListener('DOMContentLoaded', () => {
         timelineGrid.innerHTML = '<div class="p-10 text-center text-gray-400 font-medium font-inter">Se încarcă programările...</div>';
 
         try {
-            const res = await fetch('/api/admin/appointments', {
-                headers: AUTH.getHeaders()
-            });
+            const res = await AUTH.apiFetch('/api/admin/appointments');
 
             const appointments = await res.json().catch(() => null);
 
@@ -790,9 +785,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     btn.innerHTML = '<span class="animate-pulse">Se trimite...</span>';
 
                     try {
-                        const res = await fetch(`/api/admin/resend-email/${app._id}`, {
-                            method: 'POST',
-                            headers: AUTH.getHeaders()
+                        const res = await AUTH.apiFetch(`/api/admin/resend-email/${app._id}`, {
+                            method: 'POST'
                         });
                         const data = await res.json();
                         if (res.ok) {
@@ -821,9 +815,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!confirm2) return;
 
                     try {
-                        const res = await fetch(`/api/admin/appointment/${app._id}`, {
-                            method: 'DELETE',
-                            headers: AUTH.getHeaders()
+                        const res = await AUTH.apiFetch(`/api/admin/appointment/${app._id}`, {
+                            method: 'DELETE'
                         });
                         const data = await res.json();
                         if (res.ok) {
@@ -862,9 +855,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchUsers() {
         userTableBody.innerHTML = '<tr><td colspan="4" class="p-10 text-center text-brand-400">Se încarcă lista de utilizatori...</td></tr>';
         try {
-            const res = await fetch('/api/admin/users', {
-                headers: AUTH.getHeaders()
-            });
+            const res = await AUTH.apiFetch('/api/admin/users');
             const users = await res.json();
             if (res.ok) {
                 renderUsers(users);
@@ -911,9 +902,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function toggleUserRole(userId, role) {
         try {
-            const res = await fetch('/api/admin/users/role', {
+            const res = await AUTH.apiFetch('/api/admin/users/role', {
                 method: 'POST',
-                headers: AUTH.getHeaders(),
                 body: JSON.stringify({ userId, role })
             });
             const data = await res.json();
@@ -937,9 +927,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!confirm2) return;
 
         try {
-            const res = await fetch('/api/admin/reset', {
-                method: 'POST',
-                headers: AUTH.getHeaders()
+            const res = await AUTH.apiFetch('/api/admin/reset', {
+                method: 'POST'
             });
             const data = await res.json();
             if (res.ok) {
@@ -962,9 +951,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!confirm2) return;
 
         try {
-            const res = await fetch('/api/admin/appointments/by-date', {
+            const res = await AUTH.apiFetch('/api/admin/appointments/by-date', {
                 method: 'DELETE',
-                headers: AUTH.getHeaders(),
                 body: JSON.stringify({ date: selectedDate })
             });
             const data = await res.json();
@@ -982,9 +970,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     exportExcelBtn.addEventListener('click', async () => {
         try {
-            const res = await fetch('/api/admin/export', {
-                headers: AUTH.getHeaders()
-            });
+            const res = await AUTH.apiFetch('/api/admin/export');
 
             if (!res.ok) {
                 const errText = await res.text();
