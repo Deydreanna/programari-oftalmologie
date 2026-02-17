@@ -103,7 +103,8 @@ const AUTH = {
 
         const response = await fetch(url, requestOptions);
         const skipRefresh = Boolean(options.skipRefresh);
-        const isAuthEndpoint = String(url).startsWith('/api/auth/');
+        const requestUrl = String(url);
+        const isAuthEndpoint = requestUrl.startsWith('/api/auth/') && !requestUrl.startsWith('/api/auth/step-up');
         if (skipRefresh || response.status !== 401 || isAuthEndpoint) {
             return response;
         }

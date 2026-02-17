@@ -34,13 +34,21 @@ if (!baseEnvValidation.ok) {
 
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+const JWT_STEPUP_SECRET = process.env.JWT_STEPUP_SECRET;
 const MONGODB_URI = process.env.MONGODB_URI;
 const ALLOWED_ORIGINS = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
 const ACCESS_TOKEN_TTL_MINUTES = Number(process.env.ACCESS_TOKEN_TTL_MINUTES || 15);
 const REFRESH_TOKEN_TTL_DAYS = Number(process.env.REFRESH_TOKEN_TTL_DAYS || 30);
+const STEP_UP_TOKEN_TTL_MINUTES = Number(process.env.STEP_UP_TOKEN_TTL_MINUTES || 5);
 const ACCESS_COOKIE_NAME = '__Host-access';
 const REFRESH_COOKIE_NAME = '__Host-refresh';
 const CSRF_COOKIE_NAME = '__Host-csrf';
+const ROLE = Object.freeze({
+    VIEWER: 'viewer',
+    SCHEDULER: 'scheduler',
+    SUPERADMIN: 'superadmin'
+});
+const VALID_ROLES = new Set(Object.values(ROLE));
 const AUTH_COOKIE_BASE_OPTIONS = Object.freeze({
     httpOnly: true,
     secure: true,
@@ -67,9 +75,9 @@ const userSchema = new mongoose.Schema({
     password: String,
     googleId: String,
     displayName: String,
-    role: { type: String, enum: ['user', 'admin', 'superadmin'], default: 'user' },
+    role: { type: String, enum: [ROLE.VIEWER, ROLE.SCHEDULER, ROLE.SUPERADMIN], default: ROLE.VIEWER },
     createdAt: { type: Date, default: Date.now }
-});
+}, { strict: 'throw' });
 
 const User = mongoose.model('User', userSchema);
 
@@ -92,18 +100,25 @@ const appointmentSchema = new mongoose.Schema({
     },
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     createdAt: { type: Date, default: Date.now }
-});
+}, { strict: 'throw' });
 appointmentSchema.index({ date: 1, time: 1 }, { unique: true });
 
 const Appointment = mongoose.model('Appointment', appointmentSchema);
 
 const auditLogSchema = new mongoose.Schema({
-    adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    actorUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    actorRole: { type: String, default: 'anonymous' },
     action: { type: String, required: true },
-    appointmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', default: null },
+    targetType: { type: String, default: '' },
+    targetId: { type: String, default: '' },
+    result: { type: String, enum: ['success', 'failure', 'denied'], required: true },
     ip: { type: String, default: '' },
+    userAgent: { type: String, default: '' },
+    metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
     timestamp: { type: Date, default: Date.now }
-});
+}, { strict: 'throw' });
+auditLogSchema.index({ timestamp: -1 });
+auditLogSchema.index({ action: 1, timestamp: -1 });
 
 const AuditLog = mongoose.model('AuditLog', auditLogSchema);
 
@@ -125,7 +140,7 @@ app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", 'https://cdn.tailwindcss.com'],
+            scriptSrc: ["'self'", 'https://cdn.tailwindcss.com', "'unsafe-inline'"],
             styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
             fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
             imgSrc: ["'self'", 'data:', 'blob:'],
@@ -153,6 +168,11 @@ app.use(cors({
     credentials: false
 }));
 app.use(bodyParser.json({ limit: '10mb' }));
+app.use('/api', (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    res.set('Pragma', 'no-cache');
+    return next();
+});
 
 app.use((req, res, next) => {
     req._parsedCookies = parseCookies(req);
@@ -190,6 +210,7 @@ app.use(express.static('public'));
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^(\+?40|0)7\d{8}$/;
+const MONGODB_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
 
 function validateEmail(email) {
     return EMAIL_REGEX.test(email);
@@ -206,6 +227,195 @@ function cleanPhone(phone) {
 
 function isEmail(identifier) {
     return identifier.includes('@');
+}
+
+function isValidISODateString(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+
+    const [yearStr, monthStr, dayStr] = value.split('-');
+    const year = Number(yearStr);
+    const month = Number(monthStr);
+    const day = Number(dayStr);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCFullYear() === year &&
+        date.getUTCMonth() + 1 === month &&
+        date.getUTCDate() === day;
+}
+
+function trimString(value) {
+    return typeof value === 'string' ? value.trim() : value;
+}
+
+function createSchema(parser) {
+    return {
+        safeParse(input) {
+            try {
+                return { success: true, data: parser(input) };
+            } catch (error) {
+                return {
+                    success: false,
+                    error: { issues: [{ message: error?.message || 'Invalid request payload.' }] }
+                };
+            }
+        }
+    };
+}
+
+function ensureObjectStrict(input, allowedKeys = []) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        throw new Error('Invalid request payload.');
+    }
+
+    const keySet = new Set(allowedKeys);
+    for (const key of Object.keys(input)) {
+        if (!keySet.has(key)) {
+            throw new Error(`Unexpected field: ${key}`);
+        }
+    }
+    return input;
+}
+
+function parseStringField(value, fieldName, { min = 0, max = 1024, pattern = null, trim = true } = {}) {
+    if (typeof value !== 'string') {
+        throw new Error(`${fieldName} must be a string.`);
+    }
+    const normalized = trim ? value.trim() : value;
+    if (normalized.length < min || normalized.length > max) {
+        throw new Error(`${fieldName} length is invalid.`);
+    }
+    if (pattern && !pattern.test(normalized)) {
+        throw new Error(`${fieldName} format is invalid.`);
+    }
+    return normalized;
+}
+
+function parseBooleanField(value, fieldName, { optional = false } = {}) {
+    if (value === undefined && optional) return undefined;
+    if (typeof value !== 'boolean') {
+        throw new Error(`${fieldName} must be a boolean.`);
+    }
+    return value;
+}
+
+function parseISODateField(value, fieldName) {
+    const dateValue = parseStringField(value, fieldName, { min: 10, max: 10, pattern: /^\d{4}-\d{2}-\d{2}$/ });
+    if (!isValidISODateString(dateValue)) {
+        throw new Error(`${fieldName} is invalid.`);
+    }
+    return dateValue;
+}
+
+function parseTimeField(value, fieldName) {
+    return parseStringField(value, fieldName, { min: 5, max: 5, pattern: /^\d{2}:\d{2}$/ });
+}
+
+function parseDiagnosticFileMeta(value) {
+    if (value === undefined) return undefined;
+    const input = ensureObjectStrict(value, ['key', 'mime', 'size']);
+    const key = parseStringField(input.key, 'diagnosticFileMeta.key', { min: 1, max: 512 });
+    const mime = parseStringField(input.mime, 'diagnosticFileMeta.mime', { min: 1, max: 128 });
+    const size = Number(input.size);
+    if (!Number.isInteger(size) || size <= 0 || size > MAX_DIAGNOSTIC_FILE_SIZE_BYTES) {
+        throw new Error('diagnosticFileMeta.size is invalid.');
+    }
+    return { key, mime, size };
+}
+
+const loginBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['identifier', 'password']);
+    return {
+        identifier: parseStringField(payload.identifier, 'identifier', { min: 3, max: 254 }),
+        password: parseStringField(payload.password, 'password', { min: 1, max: 1024, trim: false })
+    };
+});
+
+const signupBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['email', 'phone', 'password', 'displayName']);
+    const email = parseStringField(payload.email, 'email', { min: 3, max: 254 });
+    if (!validateEmail(email)) throw new Error('email format is invalid.');
+    return {
+        email,
+        phone: parseStringField(payload.phone, 'phone', { min: 10, max: 20 }),
+        password: parseStringField(payload.password, 'password', { min: 6, max: 128, trim: false }),
+        displayName: parseStringField(payload.displayName, 'displayName', { min: 2, max: 120 })
+    };
+});
+
+const slotsQuerySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['date']);
+    return {
+        date: parseISODateField(payload.date, 'date')
+    };
+});
+
+const bookBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['name', 'phone', 'email', 'type', 'date', 'time', 'hasDiagnosis', 'diagnosticFileMeta', 'diagnosticFile']);
+    const email = parseStringField(payload.email, 'email', { min: 3, max: 254 });
+    if (!validateEmail(email)) throw new Error('email format is invalid.');
+    return {
+        name: parseStringField(payload.name, 'name', { min: 2, max: 120 }),
+        phone: parseStringField(payload.phone, 'phone', { min: 10, max: 20 }),
+        email,
+        type: parseStringField(payload.type, 'type', { min: 2, max: 64 }),
+        date: parseISODateField(payload.date, 'date'),
+        time: parseTimeField(payload.time, 'time'),
+        hasDiagnosis: parseBooleanField(payload.hasDiagnosis, 'hasDiagnosis', { optional: true }),
+        diagnosticFileMeta: parseDiagnosticFileMeta(payload.diagnosticFileMeta),
+        diagnosticFile: payload.diagnosticFile
+    };
+});
+
+const roleUpdateBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['userId', 'role']);
+    const userId = parseStringField(payload.userId, 'userId', { min: 24, max: 24 });
+    if (!MONGODB_OBJECT_ID_REGEX.test(userId)) throw new Error('Invalid userId.');
+    const role = parseStringField(payload.role, 'role', { min: 6, max: 10 });
+    if (![ROLE.VIEWER, ROLE.SCHEDULER].includes(role)) throw new Error('Invalid role.');
+    return { userId, role };
+});
+
+const dateOnlyBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['date']);
+    return {
+        date: parseISODateField(payload.date, 'date')
+    };
+});
+
+const stepUpBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['password', 'action']);
+    return {
+        password: parseStringField(payload.password, 'password', { min: 6, max: 1024, trim: false }),
+        action: parseStringField(payload.action, 'action', { min: 3, max: 64 })
+    };
+});
+
+function formatZodError(error) {
+    const firstIssue = error?.issues?.[0];
+    return firstIssue?.message || 'Invalid request payload.';
+}
+
+function validateBody(schema) {
+    return (req, res, next) => {
+        const parsed = schema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: formatZodError(parsed.error) });
+        }
+        req.validatedBody = parsed.data;
+        return next();
+    };
+}
+
+function validateQuery(schema) {
+    return (req, res, next) => {
+        const parsed = schema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(400).json({ error: formatZodError(parsed.error) });
+        }
+        req.validatedQuery = parsed.data;
+        return next();
+    };
 }
 
 function toPositiveInt(value, fallback) {
@@ -251,6 +461,27 @@ function verifyRefreshToken(token) {
     return payload;
 }
 
+function generateStepUpToken(user, action) {
+    return jwt.sign(
+        {
+            sub: String(user._id),
+            role: user.role,
+            tokenType: 'stepup',
+            action: String(action || '').trim()
+        },
+        JWT_STEPUP_SECRET,
+        { expiresIn: `${toPositiveInt(STEP_UP_TOKEN_TTL_MINUTES, 5)}m` }
+    );
+}
+
+function verifyStepUpToken(token) {
+    const payload = jwt.verify(token, JWT_STEPUP_SECRET);
+    if (!payload || payload.tokenType !== 'stepup' || !payload.sub || !payload.action) {
+        throw new Error('Invalid step-up token payload.');
+    }
+    return payload;
+}
+
 function buildUserPayload(user) {
     return {
         id: user._id,
@@ -269,6 +500,29 @@ function buildSessionUser(user) {
         role: user.role,
         displayName: user.displayName
     };
+}
+
+function normalizeRoleValue(rawRole) {
+    if (VALID_ROLES.has(rawRole)) {
+        return rawRole;
+    }
+    if (rawRole === 'admin') {
+        return ROLE.SCHEDULER;
+    }
+    if (rawRole === 'user') {
+        return ROLE.VIEWER;
+    }
+    return ROLE.VIEWER;
+}
+
+async function ensureNormalizedRole(user) {
+    if (!user) return null;
+    const normalizedRole = normalizeRoleValue(user.role);
+    if (normalizedRole !== user.role) {
+        user.role = normalizedRole;
+        await user.save();
+    }
+    return user;
 }
 
 function parseCookies(req) {
@@ -459,13 +713,33 @@ function sanitizeAppointmentForAdminList(appointment) {
     };
 }
 
-async function writeAuditLog(req, action, appointmentId = null) {
+function getUserAgent(req) {
+    return String(req.headers['user-agent'] || '').slice(0, 512);
+}
+
+function hashIdentifier(identifier) {
+    return crypto.createHash('sha256').update(String(identifier || '').toLowerCase().trim()).digest('hex');
+}
+
+async function writeAuditLog(req, {
+    action,
+    result = 'success',
+    targetType = '',
+    targetId = '',
+    actorUser = req.user || null,
+    metadata = {}
+} = {}) {
     try {
         await AuditLog.create({
-            adminId: req.user._id,
-            action,
-            appointmentId,
-            ip: getClientIp(req)
+            actorUserId: actorUser?._id || null,
+            actorRole: actorUser?.role || 'anonymous',
+            action: String(action || 'unknown_action'),
+            targetType: String(targetType || ''),
+            targetId: String(targetId || ''),
+            result,
+            ip: getClientIp(req),
+            userAgent: getUserAgent(req),
+            metadata: metadata && typeof metadata === 'object' ? metadata : {}
         });
     } catch (error) {
         console.error('Audit log write failed:', error.message);
@@ -490,7 +764,7 @@ const strictAuthLimiter = rateLimit({
     max: 8,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Prea multe ÃƒÂ®ncercÃ„Æ’ri. ReÃƒÂ®ncercaÃˆâ€ºi ÃƒÂ®n cÃƒÂ¢teva minute.' }
+    message: { error: 'Prea multe ÃƒÆ’Ã‚Â®ncercÃƒâ€žÃ†â€™ri. ReÃƒÆ’Ã‚Â®ncercaÃƒË†Ã¢â‚¬Âºi ÃƒÆ’Ã‚Â®n cÃƒÆ’Ã‚Â¢teva minute.' }
 });
 
 const refreshLimiter = rateLimit({
@@ -506,7 +780,7 @@ const bookingLimiter = rateLimit({
     max: 30,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Prea multe programÃ„Æ’ri trimise de la acest IP. ÃƒÅ½ncercaÃˆâ€ºi mai tÃƒÂ¢rziu.' }
+    message: { error: 'Prea multe programÃƒâ€žÃ†â€™ri trimise de la acest IP. ÃƒÆ’Ã…Â½ncercaÃƒË†Ã¢â‚¬Âºi mai tÃƒÆ’Ã‚Â¢rziu.' }
 });
 
 const adminLimiter = rateLimit({
@@ -667,7 +941,7 @@ async function getAuthenticatedUser(req) {
 
     const payload = verifyAccessToken(accessToken);
     const user = await User.findById(payload.sub);
-    return user || null;
+    return ensureNormalizedRole(user || null);
 }
 
 // Optional auth middleware
@@ -680,41 +954,102 @@ async function optionalAuth(req, res, next) {
     next();
 }
 
-// Required Admin middleware
-async function requireAdmin(req, res, next) {
+async function requireAuthenticated(req, res, next) {
     try {
         const user = await getAuthenticatedUser(req);
         if (!user) {
             return res.status(401).json({ error: 'Autentificare necesara.' });
         }
-
-        if (user.role === 'admin' || user.role === 'superadmin') {
-            req.user = user;
-            return next();
-        }
-        return res.status(403).json({ error: 'Acces interzis. Drepturi de administrator necesare.' });
+        req.user = user;
+        return next();
     } catch (_) {
         return res.status(401).json({ error: 'Sesiune invalida sau expirata.' });
     }
 }
 
-// Required Super Admin middleware
-async function requireSuperAdmin(req, res, next) {
-    try {
-        const user = await getAuthenticatedUser(req);
-        if (!user) {
-            return res.status(401).json({ error: 'Autentificare necesara.' });
-        }
+function requireRoles(allowedRoles = []) {
+    return async (req, res, next) => {
+        try {
+            const user = await getAuthenticatedUser(req);
+            if (!user) {
+                return res.status(401).json({ error: 'Autentificare necesara.' });
+            }
 
-        if (user.role === 'superadmin') {
+            if (!allowedRoles.includes(user.role)) {
+                await writeAuditLog(req, {
+                    action: 'authorization_denied',
+                    result: 'denied',
+                    targetType: 'endpoint',
+                    targetId: req.path,
+                    actorUser: user,
+                    metadata: { method: req.method, requiredRoles: allowedRoles }
+                });
+                return res.status(403).json({ error: 'Acces interzis.' });
+            }
+
             req.user = user;
             return next();
+        } catch (_) {
+            return res.status(401).json({ error: 'Sesiune invalida sau expirata.' });
         }
-        return res.status(403).json({ error: 'Acces interzis. Doar Super Admin are acces aici.' });
-    } catch (_) {
-        return res.status(401).json({ error: 'Sesiune invalida sau expirata.' });
-    }
+    };
 }
+
+function requireStepUp(action) {
+    return async (req, res, next) => {
+        try {
+            const token = String(req.get('X-Step-Up-Token') || '').trim();
+            if (!token) {
+                await writeAuditLog(req, {
+                    action: 'step_up_required_but_missing',
+                    result: 'denied',
+                    targetType: 'action',
+                    targetId: action,
+                    actorUser: req.user || null
+                });
+                return res.status(403).json({ error: 'Step-up authentication required.' });
+            }
+
+            const payload = verifyStepUpToken(token);
+            if (!req.user || String(req.user._id) !== String(payload.sub)) {
+                await writeAuditLog(req, {
+                    action: 'step_up_token_user_mismatch',
+                    result: 'denied',
+                    targetType: 'action',
+                    targetId: action,
+                    actorUser: req.user || null
+                });
+                return res.status(403).json({ error: 'Step-up token does not match current user.' });
+            }
+
+            if (String(payload.action) !== String(action)) {
+                await writeAuditLog(req, {
+                    action: 'step_up_token_action_mismatch',
+                    result: 'denied',
+                    targetType: 'action',
+                    targetId: action,
+                    actorUser: req.user || null
+                });
+                return res.status(403).json({ error: 'Step-up token action mismatch.' });
+            }
+
+            return next();
+        } catch (_) {
+            await writeAuditLog(req, {
+                action: 'step_up_token_invalid',
+                result: 'denied',
+                targetType: 'action',
+                targetId: action,
+                actorUser: req.user || null
+            });
+            return res.status(403).json({ error: 'Invalid or expired step-up token.' });
+        }
+    };
+}
+
+const requireViewerSchedulerOrSuperadmin = requireRoles([ROLE.VIEWER, ROLE.SCHEDULER, ROLE.SUPERADMIN]);
+const requireSchedulerOrSuperadmin = requireRoles([ROLE.SCHEDULER, ROLE.SUPERADMIN]);
+const requireSuperadminOnly = requireRoles([ROLE.SUPERADMIN]);
 
 // =====================
 //  AUTH API
@@ -726,35 +1061,20 @@ app.use('/api/auth/refresh', refreshLimiter);
 app.use('/api/book', bookingLimiter);
 app.use('/api/admin', adminLimiter);
 
-app.post('/api/auth/signup', async (req, res) => {
+app.post('/api/auth/signup', validateBody(signupBodySchema), async (req, res) => {
     setAuthNoStore(res);
 
     try {
-        const { email, phone, password, displayName } = req.body || {};
-
-        if (!email || !phone || !password) {
-            return res.status(400).json({ error: 'Email, telefon si parola sunt obligatorii.' });
-        }
-
-        if (!displayName || displayName.trim().length < 2) {
-            return res.status(400).json({ error: 'Numele trebuie sa aiba cel putin 2 caractere.' });
-        }
-
-        if (!validateEmail(email)) {
-            return res.status(400).json({ error: 'Format email invalid.' });
-        }
+        const { email, phone, password, displayName } = req.validatedBody;
 
         if (!validatePhone(phone)) {
             return res.status(400).json({ error: 'Format telefon invalid. Folositi formatul 07xx xxx xxx.' });
         }
 
-        if (String(password).length < 6) {
-            return res.status(400).json({ error: 'Parola trebuie sa aiba minim 6 caractere.' });
-        }
-
         const cleanedPhone = cleanPhone(phone);
+        const normalizedEmail = String(email).toLowerCase();
 
-        const existingEmail = await User.findOne({ email: String(email).toLowerCase() });
+        const existingEmail = await User.findOne({ email: normalizedEmail });
         if (existingEmail) {
             return res.status(409).json({ error: 'Acest email este deja inregistrat.' });
         }
@@ -767,15 +1087,22 @@ app.post('/api/auth/signup', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
         const user = new User({
-            email: String(email).toLowerCase(),
+            email: normalizedEmail,
             phone: cleanedPhone,
             password: hashedPassword,
-            displayName: String(displayName).trim(),
-            role: 'user'
+            displayName: displayName.trim(),
+            role: ROLE.VIEWER
         });
 
         await user.save();
         setSessionCookies(res, user, { rotateRefresh: true, rotateCsrf: true });
+        await writeAuditLog(req, {
+            action: 'auth_signup_success',
+            result: 'success',
+            targetType: 'user',
+            targetId: String(user._id),
+            actorUser: user
+        });
 
         return res.status(201).json({
             ok: true,
@@ -788,20 +1115,26 @@ app.post('/api/auth/signup', async (req, res) => {
     }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', validateBody(loginBodySchema), async (req, res) => {
     setAuthNoStore(res);
 
     try {
-        const identifier = typeof req.body?.identifier === 'string' ? req.body.identifier.trim() : '';
-        const password = typeof req.body?.password === 'string' ? req.body.password : '';
-
-        if (!identifier || !password || identifier.length > 254 || password.length > 1024) {
-            return res.status(400).json({ error: 'Date de autentificare invalide.' });
-        }
+        const identifier = trimString(req.validatedBody.identifier);
+        const password = req.validatedBody.password;
 
         const lockUntil = getLoginLock(req, identifier);
         if (lockUntil) {
             const waitSeconds = Math.ceil((lockUntil - Date.now()) / 1000);
+            await writeAuditLog(req, {
+                action: 'auth_login_failed',
+                result: 'failure',
+                targetType: 'auth',
+                targetId: 'login',
+                metadata: {
+                    reason: 'lockout',
+                    identifierHash: hashIdentifier(identifier)
+                }
+            });
             return res.status(429).json({ error: `Prea multe incercari esuate. Incercati din nou in ${waitSeconds} secunde.` });
         }
 
@@ -818,8 +1151,20 @@ app.post('/api/auth/login', async (req, res) => {
             if (failedAttempt.count > 1) {
                 await delay(Math.min(200 * failedAttempt.count, 2000));
             }
+            await writeAuditLog(req, {
+                action: 'auth_login_failed',
+                result: 'failure',
+                targetType: 'auth',
+                targetId: 'login',
+                metadata: {
+                    reason: 'unknown_user',
+                    identifierHash: hashIdentifier(identifier)
+                }
+            });
             return res.status(401).json({ error: 'Credentiale invalide.' });
         }
+
+        user = await ensureNormalizedRole(user);
 
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
@@ -827,11 +1172,26 @@ app.post('/api/auth/login', async (req, res) => {
             if (failedAttempt.count > 1) {
                 await delay(Math.min(200 * failedAttempt.count, 2000));
             }
+            await writeAuditLog(req, {
+                action: 'auth_login_failed',
+                result: 'failure',
+                targetType: 'user',
+                targetId: String(user._id),
+                actorUser: user,
+                metadata: { reason: 'password_mismatch' }
+            });
             return res.status(401).json({ error: 'Credentiale invalide.' });
         }
 
         clearFailedLoginAttempt(req, identifier);
         setSessionCookies(res, user, { rotateRefresh: true, rotateCsrf: true });
+        await writeAuditLog(req, {
+            action: 'auth_login_success',
+            result: 'success',
+            targetType: 'user',
+            targetId: String(user._id),
+            actorUser: user
+        });
 
         return res.json({
             ok: true,
@@ -844,9 +1204,19 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-app.post('/api/auth/logout', (req, res) => {
+app.post('/api/auth/logout', async (req, res) => {
     setAuthNoStore(res);
+    const user = await getAuthenticatedUser(req).catch(() => null);
     clearSessionCookies(res);
+
+    await writeAuditLog(req, {
+        action: 'auth_logout',
+        result: 'success',
+        targetType: 'session',
+        targetId: String(user?._id || ''),
+        actorUser: user
+    });
+
     return res.json({ ok: true });
 });
 
@@ -895,7 +1265,7 @@ app.get('/api/auth/me', async (req, res) => {
 
     try {
         const payload = verifyAccessToken(accessToken);
-        const user = await User.findById(payload.sub).select('-password');
+        const user = await ensureNormalizedRole(await User.findById(payload.sub));
         if (!user) {
             return res.status(401).json({ error: 'Sesiune invalida.' });
         }
@@ -907,6 +1277,46 @@ app.get('/api/auth/me', async (req, res) => {
 
     } catch (_) {
         return res.status(401).json({ error: 'Sesiune invalida sau expirata.' });
+    }
+});
+
+app.post('/api/auth/step-up', requireAuthenticated, validateBody(stepUpBodySchema), async (req, res) => {
+    setAuthNoStore(res);
+
+    const { password, action } = req.validatedBody;
+
+    try {
+        const user = req.user;
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            await writeAuditLog(req, {
+                action: 'step_up_failed',
+                result: 'failure',
+                targetType: 'action',
+                targetId: action,
+                actorUser: user
+            });
+            return res.status(401).json({ error: 'Confirmarea parolei a esuat.' });
+        }
+
+        const stepUpToken = generateStepUpToken(user, action);
+        await writeAuditLog(req, {
+            action: 'step_up_success',
+            result: 'success',
+            targetType: 'action',
+            targetId: action,
+            actorUser: user
+        });
+
+        return res.json({
+            ok: true,
+            stepUpToken,
+            expiresInSeconds: toPositiveInt(STEP_UP_TOKEN_TTL_MINUTES, 5) * 60
+        });
+
+    } catch (error) {
+        console.error('Step-up error:', error.message);
+        return res.status(500).json({ error: 'Eroare la confirmarea pasului suplimentar.' });
     }
 });
 
@@ -929,64 +1339,60 @@ const generateSlots = () => {
     return slots;
 };
 
-app.get('/api/slots', async (req, res) => {
-    const { date } = req.query;
-    if (!date) return res.status(400).json({ error: 'Date is required' });
-    const day = new Date(date).getDay();
-    if (day !== 3) return res.status(400).json({ error: 'Appointments are only available on Wednesdays.' });
+app.get('/api/slots', validateQuery(slotsQuerySchema), async (req, res) => {
+    const { date } = req.validatedQuery;
+    const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+    if (day !== 3) {
+        return res.status(400).json({ error: 'Appointments are only available on Wednesdays.' });
+    }
+
     const allSlots = generateSlots();
     try {
         const existingAppointments = await Appointment.find({ date });
-        const bookedTimes = existingAppointments.map(a => a.time);
-        const availableSlots = allSlots.map(time => ({
+        const bookedTimes = existingAppointments.map((a) => a.time);
+        const availableSlots = allSlots.map((time) => ({
             time,
             available: !bookedTimes.includes(time)
         }));
-        res.json(availableSlots);
-    } catch (err) {
-        res.status(500).json({ error: 'Database error' });
+        return res.json(availableSlots);
+    } catch (_) {
+        return res.status(500).json({ error: 'Database error' });
     }
 });
 
-app.post('/api/book', optionalAuth, async (req, res) => {
-    const { name, phone, email, type, date, time } = req.body;
-    if (!name || !phone || !email || !type || !date || !time) {
-        return res.status(400).json({ error: 'Toate cÃ¢mpurile obligatorii trebuie completate.' });
-    }
-
-    if (!validateEmail(email)) {
-        return res.status(400).json({ error: 'Format email invalid.' });
-    }
+app.post('/api/book', optionalAuth, validateBody(bookBodySchema), async (req, res) => {
+    const { name, phone, email, type, date, time, hasDiagnosis, diagnosticFile, diagnosticFileMeta } = req.validatedBody;
 
     if (!validatePhone(phone)) {
         return res.status(400).json({ error: 'Format telefon invalid.' });
     }
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
-        return res.status(400).json({ error: 'Data sau ora sunt invalide.' });
+    const [hours, minutes] = String(time).split(':').map(Number);
+    const minutesOfDay = (hours * 60) + minutes;
+    if (Number.isNaN(minutesOfDay) || minutesOfDay < 9 * 60 || minutesOfDay > 13 * 60 + 40 || minutes % 20 !== 0) {
+        return res.status(400).json({ error: 'Ora selectata este invalida.' });
     }
 
-    const dateDay = new Date(date).getDay();
+    const dateDay = new Date(`${date}T00:00:00Z`).getUTCDay();
     if (dateDay !== 3) {
-        return res.status(400).json({ error: 'ProgramÄƒrile sunt disponibile doar miercurea.' });
+        return res.status(400).json({ error: 'Programarile sunt disponibile doar miercurea.' });
     }
 
     try {
-        const { hasDiagnosis, diagnosticFile, diagnosticFileMeta } = req.body;
         if (diagnosticFile) {
-            return res.status(400).json({ error: 'ÃŽncÄƒrcarea directÄƒ de fiÈ™iere este dezactivatÄƒ. FolosiÈ›i stocare externÄƒ securizatÄƒ.' });
+            return res.status(400).json({ error: 'Incarcarea directa de fisiere este dezactivata. Folositi stocare externa securizata.' });
         }
 
         let safeDiagnosticFileMeta = null;
         if (hasDiagnosis) {
             if (!ENABLE_DIAGNOSTIC_UPLOAD && diagnosticFileMeta) {
-                return res.status(400).json({ error: 'ÃŽncÄƒrcarea documentelor este dezactivatÄƒ momentan.' });
+                return res.status(400).json({ error: 'Incarcarea documentelor este dezactivata momentan.' });
             }
 
             if (ENABLE_DIAGNOSTIC_UPLOAD && diagnosticFileMeta) {
                 if (!validateDiagnosticFileMeta(diagnosticFileMeta)) {
                     return res.status(400).json({
-                        error: `Metadatele fiÈ™ierului sunt invalide. Tipuri permise: ${Array.from(ALLOWED_DIAGNOSTIC_MIME_TYPES).join(', ')}; mÄƒrime maximÄƒ ${MAX_DIAGNOSTIC_FILE_SIZE_BYTES} bytes.`
+                        error: `Metadatele fisierului sunt invalide. Tipuri permise: ${Array.from(ALLOWED_DIAGNOSTIC_MIME_TYPES).join(', ')}; marime maxima ${MAX_DIAGNOSTIC_FILE_SIZE_BYTES} bytes.`
                     });
                 }
                 safeDiagnosticFileMeta = {
@@ -1007,44 +1413,39 @@ app.post('/api/book', optionalAuth, async (req, res) => {
             time,
             hasDiagnosis: !!hasDiagnosis,
             diagnosticFileMeta: safeDiagnosticFileMeta,
-            userId: req.user ? req.user.id : null
+            userId: req.user ? req.user._id : null
         });
         await newAppointment.save();
 
-        // Send Email Invitation (Async)
         const appointmentData = {
             name,
             email,
             type,
             time: `${date} ${time}`,
-            location: "PiaÃˆâ€ºa Alexandru Lahovari nr. 1, Sector 1, BucureÃˆâ„¢ti"
+            location: CLINIC_LOCATION
         };
 
         const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
 
-        console.log(`[EMAIL] Dispatching invitation for ${email}...`);
-
-        executeEmailScript(base64Data).then(async ({ stdout, stderr, pythonCmd }) => {
+        executeEmailScript(base64Data).then(async ({ stdout, stderr }) => {
             if (stdout) console.log(`[EMAIL STDOUT]: ${stdout}`);
             if (stderr) console.error(`[EMAIL STDERR]: ${stderr}`);
-            console.log(`[EMAIL] Sent using interpreter: ${pythonCmd}`);
 
             try {
                 await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
-                console.log(`[EMAIL SUCCESS] Status updated for ${email}`);
             } catch (updateErr) {
-                console.error('[EMAIL DB UPDATE ERROR]:', updateErr);
+                console.error('[EMAIL DB UPDATE ERROR]:', updateErr.message);
             }
-        }).catch(error => {
-            console.error(`[EMAIL FAILURE] Process error for ${email}:`, error?.stderr || error.message);
+        }).catch((error) => {
+            console.error(`[EMAIL FAILURE]:`, error?.stderr || error.message);
         });
 
-        res.json({ success: true, message: 'Programare confirmatÄƒ! VerificaÈ›i e-mail-ul pentru invitaÈ›ie.' });
+        return res.json({ success: true, message: 'Programare confirmata! Verificati e-mail-ul pentru invitatie.' });
     } catch (err) {
         if (err?.code === 11000) {
             return res.status(409).json({ error: 'Interval deja rezervat.' });
         }
-        res.status(500).json({ error: 'Eroare la salvare.' });
+        return res.status(500).json({ error: 'Eroare la salvare.' });
     }
 });
 
@@ -1053,54 +1454,95 @@ app.post('/api/book', optionalAuth, async (req, res) => {
 //  ADMIN API
 // =====================
 
-// List appointments - Use JWT auth now
-app.get('/api/admin/appointments', requireAdmin, async (req, res) => {
+// List appointments
+app.get('/api/admin/appointments', requireViewerSchedulerOrSuperadmin, async (req, res) => {
+    setAuthNoStore(res);
+
     try {
         const appointments = await Appointment.find().sort({ date: 1, time: 1 }).lean();
-        await writeAuditLog(req, 'appointments_list');
-        res.json(appointments.map(sanitizeAppointmentForAdminList));
-    } catch (err) {
-        res.status(500).json({ error: 'Database error' });
+        await writeAuditLog(req, {
+            action: 'appointments_list_view',
+            result: 'success',
+            targetType: 'appointment_collection',
+            actorUser: req.user,
+            metadata: { count: appointments.length }
+        });
+        return res.json(appointments.map(sanitizeAppointmentForAdminList));
+    } catch (_) {
+        return res.status(500).json({ error: 'Database error' });
     }
 });
 
-app.get('/api/admin/appointments/:id', requireAdmin, async (req, res) => {
+app.get('/api/admin/appointments/:id', requireViewerSchedulerOrSuperadmin, async (req, res) => {
+    setAuthNoStore(res);
+
+    const appointmentId = String(req.params.id || '').trim();
+    if (!MONGODB_OBJECT_ID_REGEX.test(appointmentId)) {
+        return res.status(400).json({ error: 'Programare invalida.' });
+    }
+
     try {
-        const appointment = await Appointment.findById(req.params.id).lean();
+        const appointment = await Appointment.findById(appointmentId).lean();
         if (!appointment) {
-            return res.status(404).json({ error: 'Programare negÄƒsitÄƒ.' });
+            return res.status(404).json({ error: 'Programare negasita.' });
         }
 
-        await writeAuditLog(req, 'appointment_details_read', appointment._id);
-        res.json(sanitizeAppointmentForAdminList(appointment));
-    } catch (err) {
-        res.status(500).json({ error: 'Database error' });
+        await writeAuditLog(req, {
+            action: 'appointment_view',
+            result: 'success',
+            targetType: 'appointment',
+            targetId: appointmentId,
+            actorUser: req.user
+        });
+        return res.json(sanitizeAppointmentForAdminList(appointment));
+    } catch (_) {
+        return res.status(500).json({ error: 'Database error' });
     }
 });
 
-app.get('/api/admin/appointments/:id/file-url', requireAdmin, async (req, res) => {
+app.get('/api/admin/appointments/:id/file-url', requireSchedulerOrSuperadmin, async (req, res) => {
+    setAuthNoStore(res);
+
+    const appointmentId = String(req.params.id || '').trim();
+    if (!MONGODB_OBJECT_ID_REGEX.test(appointmentId)) {
+        return res.status(400).json({ error: 'Programare invalida.' });
+    }
+
     try {
-        const appointment = await Appointment.findById(req.params.id).lean();
+        const appointment = await Appointment.findById(appointmentId).lean();
         if (!appointment) {
-            return res.status(404).json({ error: 'Programare negÄƒsitÄƒ.' });
+            return res.status(404).json({ error: 'Programare negasita.' });
         }
 
-        await writeAuditLog(req, 'appointment_file_download_requested', appointment._id);
+        await writeAuditLog(req, {
+            action: 'appointment_file_download_requested',
+            result: 'success',
+            targetType: 'appointment',
+            targetId: appointmentId,
+            actorUser: req.user
+        });
 
         if (!ENABLE_DIAGNOSTIC_UPLOAD || !appointment.diagnosticFileMeta?.key) {
-            return res.status(404).json({ error: 'Documentul nu este disponibil pentru descÄƒrcare.' });
+            return res.status(404).json({ error: 'Documentul nu este disponibil pentru descarcare.' });
         }
 
-        return res.status(501).json({ error: 'Generarea URL-urilor semnate nu este configuratÄƒ Ã®n acest mediu.' });
-    } catch (err) {
-        res.status(500).json({ error: 'Database error' });
+        return res.status(501).json({ error: 'Generarea URL-urilor semnate nu este configurata in acest mediu.' });
+    } catch (_) {
+        return res.status(500).json({ error: 'Database error' });
     }
 });
 
-app.post('/api/admin/resend-email/:id', requireAdmin, async (req, res) => {
+app.post('/api/admin/resend-email/:id', requireSchedulerOrSuperadmin, async (req, res) => {
+    setAuthNoStore(res);
+
+    const appointmentId = String(req.params.id || '').trim();
+    if (!MONGODB_OBJECT_ID_REGEX.test(appointmentId)) {
+        return res.status(400).json({ error: 'Programare invalida.' });
+    }
+
     try {
-        const appointment = await Appointment.findById(req.params.id);
-        if (!appointment) return res.status(404).json({ error: 'Programare negÃ„Æ’sitÃ„Æ’.' });
+        const appointment = await Appointment.findById(appointmentId);
+        if (!appointment) return res.status(404).json({ error: 'Programare negasita.' });
         if (!appointment.email) return res.status(400).json({ error: 'Clientul nu are e-mail.' });
 
         const { name, email, type, date, time } = appointment;
@@ -1109,101 +1551,205 @@ app.post('/api/admin/resend-email/:id', requireAdmin, async (req, res) => {
             email,
             type,
             time: `${date} ${time}`,
-            location: "PiaÃˆâ€ºa Alexandru Lahovari nr. 1, Sector 1, BucureÃˆâ„¢ti"
+            location: CLINIC_LOCATION
         };
 
         const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
-        console.log(`[MANUAL EMAIL] Executing manual invitation for ${email}...`);
 
         try {
-            const { stdout, stderr, pythonCmd } = await executeEmailScript(base64Data);
-            if (stdout) console.log(`[MANUAL EMAIL STDOUT]: ${stdout}`);
-            if (stderr) console.error(`[MANUAL EMAIL STDERR]: ${stderr}`);
-            console.log(`[MANUAL EMAIL] Sent using interpreter: ${pythonCmd}`);
+            await executeEmailScript(base64Data);
             await Appointment.findByIdAndUpdate(appointment._id, { emailSent: true });
-            res.json({ success: true, message: 'Email trimis cu succes!' });
+            await writeAuditLog(req, {
+                action: 'appointment_resend_email',
+                result: 'success',
+                targetType: 'appointment',
+                targetId: appointmentId,
+                actorUser: req.user
+            });
+            return res.json({ success: true, message: 'Email trimis cu succes!' });
         } catch (err) {
-            console.error(`[MANUAL EMAIL CRITICAL] Execution failed:`, err?.stderr || err.message || err);
-            res.status(500).json({
-                error: 'Trimiterea a eÃˆâ„¢uat.',
-                details: err?.stderr || err.message || 'Eroare necunoscutÃ„Æ’'
+            await writeAuditLog(req, {
+                action: 'appointment_resend_email',
+                result: 'failure',
+                targetType: 'appointment',
+                targetId: appointmentId,
+                actorUser: req.user,
+                metadata: { reason: err?.message || 'send_failed' }
+            });
+            return res.status(500).json({
+                error: 'Trimiterea a esuat.',
+                details: err?.stderr || err.message || 'Eroare necunoscuta'
             });
         }
-    } catch (err) {
-        res.status(500).json({ error: 'Eroare de sistem.' });
+    } catch (_) {
+        return res.status(500).json({ error: 'Eroare de sistem.' });
     }
 });
 
-app.get('/api/admin/stats', requireAdmin, async (req, res) => {
+app.get('/api/admin/stats', requireViewerSchedulerOrSuperadmin, async (req, res) => {
+    setAuthNoStore(res);
+
     try {
         const stats = await mongoose.connection.db.command({ dbStats: 1 });
         const usedSize = stats.storageSize || stats.dataSize;
-        res.json({
+        await writeAuditLog(req, {
+            action: 'admin_stats_view',
+            result: 'success',
+            targetType: 'system',
+            targetId: 'db_stats',
+            actorUser: req.user
+        });
+        return res.json({
             usedSizeMB: (usedSize / (1024 * 1024)).toFixed(3),
             totalSizeMB: 512,
             percentUsed: ((usedSize / (512 * 1024 * 1024)) * 100).toFixed(2)
         });
-    } catch (err) {
-        res.status(500).json({ error: 'Could not fetch stats' });
+    } catch (_) {
+        return res.status(500).json({ error: 'Could not fetch stats' });
     }
 });
 
-app.post('/api/admin/reset', requireAdmin, async (req, res) => {
+app.post('/api/admin/reset', requireSuperadminOnly, requireStepUp('appointments_reset'), async (req, res) => {
+    setAuthNoStore(res);
+
     try {
-        await Appointment.deleteMany({});
-        res.json({ success: true, message: 'Baza de date a fost resetatÃ„Æ’.' });
-    } catch (err) {
-        res.status(500).json({ error: 'Eroare la resetarea bazei de date.' });
+        const result = await Appointment.deleteMany({});
+        await writeAuditLog(req, {
+            action: 'appointments_reset',
+            result: 'success',
+            targetType: 'appointment_collection',
+            actorUser: req.user,
+            metadata: { deletedCount: result.deletedCount || 0 }
+        });
+        return res.json({ success: true, message: 'Baza de date a fost resetata.' });
+    } catch (_) {
+        await writeAuditLog(req, {
+            action: 'appointments_reset',
+            result: 'failure',
+            targetType: 'appointment_collection',
+            actorUser: req.user
+        });
+        return res.status(500).json({ error: 'Eroare la resetarea bazei de date.' });
     }
 });
 
-app.delete('/api/admin/appointment/:id', requireAdmin, async (req, res) => {
+app.delete('/api/admin/appointment/:id', requireSuperadminOnly, requireStepUp('appointment_delete'), async (req, res) => {
+    setAuthNoStore(res);
+
+    const appointmentId = String(req.params.id || '').trim();
+    if (!MONGODB_OBJECT_ID_REGEX.test(appointmentId)) {
+        return res.status(400).json({ error: 'Programare invalida.' });
+    }
+
     try {
-        const deleted = await Appointment.findByIdAndDelete(req.params.id);
+        const deleted = await Appointment.findByIdAndDelete(appointmentId);
         if (!deleted) {
-            return res.status(404).json({ error: 'Programare negÃ„Æ’sitÃ„Æ’.' });
+            return res.status(404).json({ error: 'Programare negasita.' });
         }
-        res.json({ success: true, message: 'Programarea pacientului a fost anulatÃ„Æ’.' });
-    } catch (err) {
-        res.status(500).json({ error: 'Eroare la anularea programÃ„Æ’rii.' });
+        await writeAuditLog(req, {
+            action: 'appointment_delete',
+            result: 'success',
+            targetType: 'appointment',
+            targetId: appointmentId,
+            actorUser: req.user
+        });
+        return res.json({ success: true, message: 'Programarea pacientului a fost anulata.' });
+    } catch (_) {
+        await writeAuditLog(req, {
+            action: 'appointment_delete',
+            result: 'failure',
+            targetType: 'appointment',
+            targetId: appointmentId,
+            actorUser: req.user
+        });
+        return res.status(500).json({ error: 'Eroare la anularea programarii.' });
     }
 });
 
-app.delete('/api/admin/appointments/by-date', requireAdmin, async (req, res) => {
-    try {
-        const { date } = req.body || {};
-        if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-            return res.status(400).json({ error: 'Data este invalidÃ„Æ’. FolosiÃˆâ€ºi formatul YYYY-MM-DD.' });
-        }
+app.delete('/api/admin/appointments/by-date', requireSuperadminOnly, requireStepUp('appointments_delete_by_date'), validateBody(dateOnlyBodySchema), async (req, res) => {
+    setAuthNoStore(res);
 
+    try {
+        const { date } = req.validatedBody;
         const result = await Appointment.deleteMany({ date });
-        res.json({
+        await writeAuditLog(req, {
+            action: 'appointments_delete_by_date',
+            result: 'success',
+            targetType: 'appointment_collection',
+            targetId: date,
+            actorUser: req.user,
+            metadata: { deletedCount: result.deletedCount || 0 }
+        });
+        return res.json({
             success: true,
             deletedCount: result.deletedCount || 0,
-            message: `Au fost anulate ${result.deletedCount || 0} programÃ„Æ’ri pentru data ${date}.`
+            message: `Au fost anulate ${result.deletedCount || 0} programari pentru data ${date}.`
         });
-    } catch (err) {
-        res.status(500).json({ error: 'Eroare la anularea programÃ„Æ’rilor pe zi.' });
+    } catch (_) {
+        await writeAuditLog(req, {
+            action: 'appointments_delete_by_date',
+            result: 'failure',
+            targetType: 'appointment_collection',
+            actorUser: req.user
+        });
+        return res.status(500).json({ error: 'Eroare la anularea programarilor pe zi.' });
     }
 });
 
-app.get('/api/admin/export', requireAdmin, async (req, res) => {
+app.get('/api/admin/export', requireSuperadminOnly, requireStepUp('appointments_export'), async (req, res) => {
+    setAuthNoStore(res);
+
     try {
         const appointments = await Appointment.find().sort({ date: 1, time: 1 }).lean();
-        const data = appointments.map(a => ({
-            Data: a.date, Ora: a.time, Nume: a.name, Email: a.email || '', Telefon: a.phone, Tip: a.type,
+
+        const metadataRows = [{
+            NOTICE: 'CONFIDENTIAL - authorized superadmin use only',
+            GeneratedAt: new Date().toISOString(),
+            GeneratedBy: req.user?.email || 'unknown',
+            Records: appointments.length
+        }];
+
+        const data = appointments.map((a) => ({
+            Data: a.date,
+            Ora: a.time,
+            Tip: a.type,
             Email_Trimis: a.emailSent ? 'DA' : 'NU',
-            Creat: a.createdAt ? a.createdAt.toISOString().split('T')[0] : ''
+            Creat: a.createdAt ? new Date(a.createdAt).toISOString().split('T')[0] : ''
         }));
+
         const wb = xlsx.utils.book_new();
-        const ws = xlsx.utils.json_to_sheet(data);
-        xlsx.utils.book_append_sheet(wb, ws, "Programari");
+        wb.Props = {
+            Title: 'Programari Export',
+            Subject: 'Confidential',
+            Author: req.user?.email || 'system',
+            CreatedDate: new Date()
+        };
+
+        const wsMeta = xlsx.utils.json_to_sheet(metadataRows);
+        const wsData = xlsx.utils.json_to_sheet(data);
+        xlsx.utils.book_append_sheet(wb, wsMeta, 'METADATA');
+        xlsx.utils.book_append_sheet(wb, wsData, 'Programari');
+
         const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+        await writeAuditLog(req, {
+            action: 'appointments_export',
+            result: 'success',
+            targetType: 'appointment_collection',
+            actorUser: req.user,
+            metadata: { count: appointments.length }
+        });
+
         res.setHeader('Content-Disposition', 'attachment; filename="programari.xlsx"');
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.send(buf);
-    } catch (err) {
-        res.status(500).send('Eroare la generarea Excel.');
+        return res.send(buf);
+    } catch (_) {
+        await writeAuditLog(req, {
+            action: 'appointments_export',
+            result: 'failure',
+            targetType: 'appointment_collection',
+            actorUser: req.user
+        });
+        return res.status(500).send('Eroare la generarea Excel.');
     }
 });
 
@@ -1211,59 +1757,83 @@ app.get('/api/admin/export', requireAdmin, async (req, res) => {
 //  USER MANAGEMENT (SUPER ADMIN)
 // =====================
 
-// List all users
-app.get('/api/admin/users', requireSuperAdmin, async (req, res) => {
+app.get('/api/admin/users', requireSuperadminOnly, async (req, res) => {
+    setAuthNoStore(res);
+
     try {
-        const users = await User.find().select('-password').sort({ createdAt: -1 });
-        res.json(users);
-    } catch (err) {
-        res.status(500).json({ error: 'Database error' });
+        const users = await User.find().select('-password').sort({ createdAt: -1 }).lean();
+        const normalizedUsers = users.map((user) => ({
+            ...user,
+            role: normalizeRoleValue(user.role)
+        }));
+        await writeAuditLog(req, {
+            action: 'users_list_view',
+            result: 'success',
+            targetType: 'user_collection',
+            actorUser: req.user,
+            metadata: { count: normalizedUsers.length }
+        });
+        return res.json(normalizedUsers);
+    } catch (_) {
+        return res.status(500).json({ error: 'Database error' });
     }
 });
 
-// Toggle Admin role
-app.post('/api/admin/users/role', requireSuperAdmin, async (req, res) => {
-    try {
-        const { userId, role } = req.body;
+app.post('/api/admin/users/role', requireSuperadminOnly, requireStepUp('user_role_change'), validateBody(roleUpdateBodySchema), async (req, res) => {
+    setAuthNoStore(res);
 
-        if (!userId || !role) {
-            return res.status(400).json({ error: 'UserId Ãˆâ„¢i Rolul sunt necesare.' });
-        }
+    try {
+        const { userId, role } = req.validatedBody;
 
         const user = await User.findById(userId);
         if (!user) {
-            return res.status(404).json({ error: 'Utilizator negÃ„Æ’sit.' });
+            return res.status(404).json({ error: 'Utilizator negasit.' });
         }
 
-        // Prevent changing superadmin role via this endpoint
-        if (user.role === 'superadmin') {
+        if (user.role === ROLE.SUPERADMIN) {
             return res.status(403).json({ error: 'Rolul de Super Admin nu poate fi schimbat.' });
         }
 
-        if (!['user', 'admin'].includes(role)) {
-            return res.status(400).json({ error: 'Rol invalid.' });
-        }
-
+        const previousRole = user.role;
         user.role = role;
         await user.save();
 
-        res.json({ success: true, message: `Rolul utilizatorului ${user.displayName} a fost actualizat la ${role}.` });
-    } catch (err) {
-        res.status(500).json({ error: 'Database error' });
+        await writeAuditLog(req, {
+            action: 'user_role_change',
+            result: 'success',
+            targetType: 'user',
+            targetId: String(user._id),
+            actorUser: req.user,
+            metadata: { previousRole, newRole: role }
+        });
+
+        return res.json({ success: true, message: `Rolul utilizatorului ${user.displayName} a fost actualizat la ${role}.` });
+    } catch (_) {
+        await writeAuditLog(req, {
+            action: 'user_role_change',
+            result: 'failure',
+            targetType: 'user',
+            actorUser: req.user
+        });
+        return res.status(500).json({ error: 'Database error' });
     }
 });
-
 app.use((err, req, res, next) => {
     if (err && String(err.message || '').includes('CORS')) {
         return res.status(403).json({ error: 'Origin not allowed.' });
     }
-    return next(err);
+    console.error('Unhandled error:', err?.message || err);
+    if (res.headersSent) {
+        return next(err);
+    }
+
+    const isProduction = process.env.NODE_ENV === 'production';
+    if (isProduction) {
+        return res.status(500).json({ error: 'Internal server error.' });
+    }
+    return res.status(500).json({ error: 'Internal server error.', details: err?.message || 'Unknown error' });
 });
 
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT} (MongoDB + Auth + RBAC Enabled)`);
 });
-
-
-
-

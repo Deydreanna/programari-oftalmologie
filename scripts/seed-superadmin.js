@@ -40,7 +40,7 @@ const userSchema = new mongoose.Schema({
     password: String,
     googleId: String,
     displayName: String,
-    role: { type: String, enum: ['user', 'admin', 'superadmin'], default: 'user' },
+    role: { type: String, enum: ['viewer', 'scheduler', 'superadmin'], default: 'viewer' },
     createdAt: { type: Date, default: Date.now }
 });
 

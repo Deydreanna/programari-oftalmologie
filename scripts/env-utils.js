@@ -1,4 +1,4 @@
-const REQUIRED_ENV_VARS = ['MONGODB_URI', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'ALLOWED_ORIGINS'];
+const REQUIRED_ENV_VARS = ['MONGODB_URI', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'JWT_STEPUP_SECRET', 'ALLOWED_ORIGINS'];
 
 function parseAllowedOrigins(raw) {
     if (!raw) return [];
@@ -26,6 +26,11 @@ function validateBaseEnv(env = process.env) {
     const refreshSecret = env.JWT_REFRESH_SECRET || '';
     if (refreshSecret && refreshSecret.length < 32) {
         errors.push('JWT_REFRESH_SECRET must be at least 32 characters.');
+    }
+
+    const stepupSecret = env.JWT_STEPUP_SECRET || '';
+    if (stepupSecret && stepupSecret.length < 32) {
+        errors.push('JWT_STEPUP_SECRET must be at least 32 characters.');
     }
 
     const origins = parseAllowedOrigins(env.ALLOWED_ORIGINS || '');
