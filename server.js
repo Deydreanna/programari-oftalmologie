@@ -634,6 +634,36 @@ app.post('/api/admin/reset', requireAdmin, async (req, res) => {
     }
 });
 
+app.delete('/api/admin/appointment/:id', requireAdmin, async (req, res) => {
+    try {
+        const deleted = await Appointment.findByIdAndDelete(req.params.id);
+        if (!deleted) {
+            return res.status(404).json({ error: 'Programare negăsită.' });
+        }
+        res.json({ success: true, message: 'Programarea pacientului a fost anulată.' });
+    } catch (err) {
+        res.status(500).json({ error: 'Eroare la anularea programării.' });
+    }
+});
+
+app.delete('/api/admin/appointments/by-date', requireAdmin, async (req, res) => {
+    try {
+        const { date } = req.body || {};
+        if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return res.status(400).json({ error: 'Data este invalidă. Folosiți formatul YYYY-MM-DD.' });
+        }
+
+        const result = await Appointment.deleteMany({ date });
+        res.json({
+            success: true,
+            deletedCount: result.deletedCount || 0,
+            message: `Au fost anulate ${result.deletedCount || 0} programări pentru data ${date}.`
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Eroare la anularea programărilor pe zi.' });
+    }
+});
+
 app.get('/api/admin/export', async (req, res) => {
     try {
         const token = req.query.token;

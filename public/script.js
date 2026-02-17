@@ -639,6 +639,13 @@ document.addEventListener('DOMContentLoaded', () => {
         currentAdminDateDisplay.textContent = (isToday ? 'Azi, ' : '') + dateStr;
     }
 
+    function getAdminActiveDateISO() {
+        const y = adminActiveDate.getFullYear();
+        const m = String(adminActiveDate.getMonth() + 1).padStart(2, '0');
+        const d = String(adminActiveDate.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+
     prevAdminDate.onclick = () => {
         adminActiveDate.setDate(adminActiveDate.getDate() - 7);
         updateAdminDateDisplay();
@@ -771,6 +778,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
                             Trimite Manual
                         </button>
+                        <button class="cancel-appointment-btn bg-red-500/10 hover:bg-red-500/20 text-red-300 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1" data-id="${app._id}">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                            Anuleaza
+                        </button>
                         ${app.diagnosticFile ? `
                             <button class="ml-auto view-file-link bg-brand-600/20 px-3 py-1 rounded-lg text-xs font-bold text-brand-300 hover:bg-brand-600/40 transition-all">VEZI DOC</button>
                         ` : ''}
@@ -812,6 +823,31 @@ document.addEventListener('DOMContentLoaded', () => {
                     } finally {
                         btn.disabled = false;
                         btn.innerHTML = originalText;
+                    }
+                };
+
+                card.querySelector('.cancel-appointment-btn').onclick = async (e) => {
+                    e.stopPropagation();
+                    const confirm1 = confirm(`Esti sigur ca vrei sa anulezi programarea pacientului ${app.name}?`);
+                    if (!confirm1) return;
+                    const confirm2 = confirm('CONFIRMARE FINALA: Programarea va fi stearsa definitiv. Continuam?');
+                    if (!confirm2) return;
+
+                    try {
+                        const res = await fetch(`/api/admin/appointment/${app._id}`, {
+                            method: 'DELETE',
+                            headers: AUTH.getHeaders()
+                        });
+                        const data = await res.json();
+                        if (res.ok) {
+                            showToast('Succes', data.message || 'Programarea a fost anulata.');
+                            fetchAdminAppointments();
+                            fetchAdminStats();
+                        } else {
+                            showToast('Eroare', data.error || 'Nu s-a putut anula programarea.', 'error');
+                        }
+                    } catch (err) {
+                        showToast('Eroare', 'Eroare de conexiune.', 'error');
                     }
                 };
 
@@ -906,6 +942,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const resetDatabaseBtn = document.getElementById('resetDatabaseBtn');
+    const cancelDayAppointmentsBtn = document.getElementById('cancelDayAppointmentsBtn');
     resetDatabaseBtn.addEventListener('click', async () => {
         const confirm1 = confirm("Ești sigur că vrei să ștergi TOATE programările?");
         if (!confirm1) return;
@@ -924,6 +961,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetchAdminStats();
             } else {
                 showToast('Eroare', data.error || 'Nu s-a putut reseta.', 'error');
+            }
+        } catch (err) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        }
+    });
+
+    cancelDayAppointmentsBtn.addEventListener('click', async () => {
+        const selectedDate = getAdminActiveDateISO();
+        const confirm1 = confirm(`Esti sigur ca vrei sa anulezi TOATE programarile din ${selectedDate}?`);
+        if (!confirm1) return;
+        const confirm2 = confirm('CONFIRMARE FINALA: Toate programarile din ziua selectata vor fi sterse definitiv. Continuam?');
+        if (!confirm2) return;
+
+        try {
+            const res = await fetch('/api/admin/appointments/by-date', {
+                method: 'DELETE',
+                headers: AUTH.getHeaders(),
+                body: JSON.stringify({ date: selectedDate })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showToast('Succes', data.message || 'Programarile din ziua selectata au fost anulate.');
+                fetchAdminAppointments();
+                fetchAdminStats();
+            } else {
+                showToast('Eroare', data.error || 'Nu s-au putut anula programarile zilei.', 'error');
             }
         } catch (err) {
             showToast('Eroare', 'Eroare de conexiune.', 'error');
