@@ -138,13 +138,15 @@ document.addEventListener('DOMContentLoaded', () => {
     function showToast(title, message, type = 'success') {
         toastTitle.textContent = title;
         toastMessage.textContent = message;
-        toast.className = `fixed bottom-5 right-5 bg-white shadow-xl rounded-xl p-5 transform transition-all duration-300 max-w-sm z-50 border-l-4 ${type === 'success' ? 'border-green-500' : 'border-red-500'}`;
+        toast.className = `fixed bottom-5 right-5 bg-brand-800 shadow-xl rounded-xl p-5 transform transition-all duration-300 max-w-sm z-50 border-l-4 border border-brand-600/30 ${type === 'success' ? 'border-l-brand-400' : 'border-l-red-400'}`;
+        toastTitle.className = `font-bold ${type === 'success' ? 'text-brand-100' : 'text-red-300'}`;
+        toastMessage.className = `text-sm mt-1 ${type === 'success' ? 'text-brand-300' : 'text-red-200'}`;
         setTimeout(() => {
             toast.classList.remove('translate-y-20', 'opacity-0');
         }, 10);
         setTimeout(() => {
             toast.classList.add('translate-y-20', 'opacity-0');
-        }, 4000);
+        }, 12000);
     }
 
     // ========================
