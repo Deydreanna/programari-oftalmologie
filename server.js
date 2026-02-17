@@ -3,26 +3,38 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const mongoose = require('mongoose');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const xlsx = require('xlsx');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
+const { validateBaseEnv, parseAllowedOrigins } = require('./scripts/env-utils');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-dev-secret';
 const SALT_ROUNDS = 12;
 const CLINIC_LOCATION = "Piata Alexandru Lahovari nr. 1, Sector 1, Bucuresti";
+const LOGIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_LOCKOUT_AFTER_ATTEMPTS = 5;
+const LOGIN_LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+const MAX_DIAGNOSTIC_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_DIAGNOSTIC_MIME_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png']);
+const ENABLE_DIAGNOSTIC_UPLOAD = process.env.ENABLE_DIAGNOSTIC_UPLOAD === 'true';
 
-// The Super Admin Email
-const SUPER_ADMIN_EMAIL = 'alexynho2009@gmail.com';
+const baseEnvValidation = validateBaseEnv(process.env);
+if (!baseEnvValidation.ok) {
+    console.error('Startup environment validation failed:');
+    for (const error of baseEnvValidation.errors) {
+        console.error(`- ${error}`);
+    }
+    process.exit(1);
+}
 
-// Connect to MongoDB
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/appointments';
-
-mongoose.connect(MONGODB_URI)
-    .then(() => console.log('Connected to MongoDB'))
-    .catch(err => console.error('MongoDB connection error:', err));
+const JWT_SECRET = process.env.JWT_SECRET;
+const MONGODB_URI = process.env.MONGODB_URI;
+const ALLOWED_ORIGINS = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
+const loginAttempts = new Map();
 
 // =====================
 //  SCHEMAS
@@ -45,26 +57,80 @@ const User = mongoose.model('User', userSchema);
 const appointmentSchema = new mongoose.Schema({
     name: String,
     phone: String,
-    cnp: String,
     type: String,
     date: String,
     time: String,
+    notes: { type: String, default: '' },
     email: String,
     emailSent: { type: Boolean, default: false },
     hasDiagnosis: { type: Boolean, default: false },
-    diagnosticFile: String,
-    fileType: String,
+    diagnosticFileMeta: {
+        key: { type: String, default: null },
+        mime: { type: String, default: null },
+        size: { type: Number, default: null },
+        uploadedAt: { type: Date, default: null }
+    },
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     createdAt: { type: Date, default: Date.now }
 });
+appointmentSchema.index({ date: 1, time: 1 }, { unique: true });
 
 const Appointment = mongoose.model('Appointment', appointmentSchema);
+
+const auditLogSchema = new mongoose.Schema({
+    adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    action: { type: String, required: true },
+    appointmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', default: null },
+    ip: { type: String, default: '' },
+    timestamp: { type: Date, default: Date.now }
+});
+
+const AuditLog = mongoose.model('AuditLog', auditLogSchema);
+
+mongoose.connect(MONGODB_URI)
+    .then(async () => {
+        await Appointment.syncIndexes();
+        console.log('Connected to MongoDB');
+    })
+    .catch(err => console.error('MongoDB connection error:', err));
 
 // =====================
 //  MIDDLEWARE
 // =====================
 
-app.use(cors());
+app.set('trust proxy', 1);
+
+app.use(helmet({
+    frameguard: { action: 'deny' },
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", 'https://cdn.tailwindcss.com'],
+            styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+            fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+            imgSrc: ["'self'", 'data:', 'blob:'],
+            connectSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            frameAncestors: ["'none'"],
+            baseUri: ["'self'"],
+            formAction: ["'self'"]
+        }
+    }
+}));
+
+app.use(cors({
+    origin: (origin, callback) => {
+        if (!origin) {
+            return callback(null, true);
+        }
+
+        if (ALLOWED_ORIGINS.includes(origin)) {
+            return callback(null, true);
+        }
+
+        return callback(new Error('Origin not allowed by CORS.'));
+    }
+}));
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
@@ -99,6 +165,124 @@ function generateToken(user) {
         { expiresIn: '24h' }
     );
 }
+
+function getClientIp(req) {
+    const forwarded = req.headers['x-forwarded-for'];
+    if (forwarded) {
+        return String(forwarded).split(',')[0].trim();
+    }
+    return req.ip || req.socket?.remoteAddress || 'unknown';
+}
+
+function getAttemptKey(req, identifier = '') {
+    return `${getClientIp(req)}:${String(identifier).toLowerCase().trim()}`;
+}
+
+function getLoginAttemptState(key) {
+    const now = Date.now();
+    const existing = loginAttempts.get(key);
+
+    if (!existing) {
+        return { count: 0, firstAttemptAt: now, lockUntil: 0 };
+    }
+
+    if (existing.firstAttemptAt + LOGIN_LOCKOUT_WINDOW_MS < now) {
+        loginAttempts.delete(key);
+        return { count: 0, firstAttemptAt: now, lockUntil: 0 };
+    }
+
+    return existing;
+}
+
+function registerFailedLoginAttempt(req, identifier = '') {
+    const key = getAttemptKey(req, identifier);
+    const now = Date.now();
+    const state = getLoginAttemptState(key);
+    const count = state.count + 1;
+    const lockUntil = count >= LOGIN_LOCKOUT_AFTER_ATTEMPTS ? now + LOGIN_LOCKOUT_DURATION_MS : state.lockUntil;
+
+    loginAttempts.set(key, { count, firstAttemptAt: state.firstAttemptAt || now, lockUntil });
+    return { count, lockUntil };
+}
+
+function clearFailedLoginAttempt(req, identifier = '') {
+    loginAttempts.delete(getAttemptKey(req, identifier));
+}
+
+function getLoginLock(req, identifier = '') {
+    const state = getLoginAttemptState(getAttemptKey(req, identifier));
+    if (state.lockUntil && state.lockUntil > Date.now()) {
+        return state.lockUntil;
+    }
+    return 0;
+}
+
+function sanitizeAppointmentForAdminList(appointment) {
+    return {
+        _id: appointment._id,
+        name: appointment.name,
+        phone: appointment.phone,
+        email: appointment.email || '',
+        date: appointment.date,
+        time: appointment.time,
+        type: appointment.type,
+        notes: appointment.notes || '',
+        hasDiagnosis: !!appointment.hasDiagnosis,
+        diagnosticFileMeta: appointment.diagnosticFileMeta || null,
+        emailSent: !!appointment.emailSent,
+        createdAt: appointment.createdAt
+    };
+}
+
+async function writeAuditLog(req, action, appointmentId = null) {
+    try {
+        await AuditLog.create({
+            adminId: req.user._id,
+            action,
+            appointmentId,
+            ip: getClientIp(req)
+        });
+    } catch (error) {
+        console.error('Audit log write failed:', error.message);
+    }
+}
+
+function validateDiagnosticFileMeta(meta) {
+    if (!meta || typeof meta !== 'object') return false;
+
+    const key = String(meta.key || '').trim();
+    const mime = String(meta.mime || '').trim();
+    const size = Number(meta.size);
+
+    if (!key || !mime || Number.isNaN(size)) return false;
+    if (!ALLOWED_DIAGNOSTIC_MIME_TYPES.has(mime)) return false;
+    if (size <= 0 || size > MAX_DIAGNOSTIC_FILE_SIZE_BYTES) return false;
+    return true;
+}
+
+const strictAuthLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 8,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Prea multe Ã®ncercÄƒri. ReÃ®ncercaÈ›i Ã®n cÃ¢teva minute.' }
+});
+
+const bookingLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Prea multe programÄƒri trimise de la acest IP. ÃŽncercaÈ›i mai tÃ¢rziu.' }
+});
+
+const adminLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Prea multe cereri administrative de la acest IP.' }
+});
 
 async function executeEmailScript(base64Data) {
     const smtpHost = process.env.EMAIL_SMTP_HOST || 'smtp.gmail.com';
@@ -263,7 +447,7 @@ function optionalAuth(req, res, next) {
 async function requireAdmin(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Autentificare necesară.' });
+        return res.status(401).json({ error: 'Autentificare necesarÄƒ.' });
     }
 
     const token = authHeader.split(' ')[1];
@@ -271,16 +455,14 @@ async function requireAdmin(req, res, next) {
         const decoded = jwt.verify(token, JWT_SECRET);
         const user = await User.findById(decoded.id);
 
-        const isSuperEmail = decoded.email && decoded.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
-
-        if (user && (user.role === 'admin' || user.role === 'superadmin' || isSuperEmail)) {
-            req.user = user || decoded; // Fallback to decoded if user find fails but email matches
+        if (user && (user.role === 'admin' || user.role === 'superadmin')) {
+            req.user = user;
             next();
         } else {
             res.status(403).json({ error: 'Acces interzis. Drepturi de administrator necesare.' });
         }
     } catch (err) {
-        res.status(401).json({ error: 'Sesiune invalidă sau expirată.' });
+        res.status(401).json({ error: 'Sesiune invalidÄƒ sau expiratÄƒ.' });
     }
 }
 
@@ -288,7 +470,7 @@ async function requireAdmin(req, res, next) {
 async function requireSuperAdmin(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Autentificare necesară.' });
+        return res.status(401).json({ error: 'Autentificare necesarÄƒ.' });
     }
 
     const token = authHeader.split(' ')[1];
@@ -296,16 +478,14 @@ async function requireSuperAdmin(req, res, next) {
         const decoded = jwt.verify(token, JWT_SECRET);
         const user = await User.findById(decoded.id);
 
-        const isSuperEmail = decoded.email && decoded.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
-
-        if ((user && user.role === 'superadmin') || isSuperEmail) {
-            req.user = user || decoded;
+        if (user && user.role === 'superadmin') {
+            req.user = user;
             next();
         } else {
             res.status(403).json({ error: 'Acces interzis. Doar Super Admin are acces aici.' });
         }
     } catch (err) {
-        res.status(401).json({ error: 'Sesiune invalidă sau expirată.' });
+        res.status(401).json({ error: 'Sesiune invalidÄƒ sau expiratÄƒ.' });
     }
 }
 
@@ -313,16 +493,21 @@ async function requireSuperAdmin(req, res, next) {
 //  AUTH API
 // =====================
 
+app.use('/api/auth/login', strictAuthLimiter);
+app.use('/api/auth/signup', strictAuthLimiter);
+app.use('/api/book', bookingLimiter);
+app.use('/api/admin', adminLimiter);
+
 app.post('/api/auth/signup', async (req, res) => {
     try {
         const { email, phone, password, displayName } = req.body;
 
         if (!email || !phone || !password) {
-            return res.status(400).json({ error: 'Email, telefon și parola sunt obligatorii.' });
+            return res.status(400).json({ error: 'Email, telefon È™i parola sunt obligatorii.' });
         }
 
         if (!displayName || displayName.trim().length < 2) {
-            return res.status(400).json({ error: 'Numele trebuie să aibă cel puțin 2 caractere.' });
+            return res.status(400).json({ error: 'Numele trebuie sÄƒ aibÄƒ cel puÈ›in 2 caractere.' });
         }
 
         if (!validateEmail(email)) {
@@ -330,36 +515,33 @@ app.post('/api/auth/signup', async (req, res) => {
         }
 
         if (!validatePhone(phone)) {
-            return res.status(400).json({ error: 'Format telefon invalid. Folosiți formatul 07xx xxx xxx.' });
+            return res.status(400).json({ error: 'Format telefon invalid. FolosiÈ›i formatul 07xx xxx xxx.' });
         }
 
         if (password.length < 6) {
-            return res.status(400).json({ error: 'Parola trebuie să aibă minim 6 caractere.' });
+            return res.status(400).json({ error: 'Parola trebuie sÄƒ aibÄƒ minim 6 caractere.' });
         }
 
         const cleanedPhone = cleanPhone(phone);
 
         const existingEmail = await User.findOne({ email: email.toLowerCase() });
         if (existingEmail) {
-            return res.status(409).json({ error: 'Acest email este deja înregistrat.' });
+            return res.status(409).json({ error: 'Acest email este deja Ã®nregistrat.' });
         }
 
         const existingPhone = await User.findOne({ phone: cleanedPhone });
         if (existingPhone) {
-            return res.status(409).json({ error: 'Acest număr de telefon este deja înregistrat.' });
+            return res.status(409).json({ error: 'Acest numÄƒr de telefon este deja Ã®nregistrat.' });
         }
 
         const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
-
-        // Assign superadmin role if it's the target email
-        const role = email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() ? 'superadmin' : 'user';
 
         const user = new User({
             email: email.toLowerCase(),
             phone: cleanedPhone,
             password: hashedPassword,
             displayName: displayName.trim(),
-            role: role
+            role: 'user'
         });
 
         await user.save();
@@ -380,7 +562,7 @@ app.post('/api/auth/signup', async (req, res) => {
 
     } catch (err) {
         console.error('Signup error:', err);
-        res.status(500).json({ error: 'Eroare la înregistrare.' });
+        res.status(500).json({ error: 'Eroare la Ã®nregistrare.' });
     }
 });
 
@@ -389,7 +571,13 @@ app.post('/api/auth/login', async (req, res) => {
         const { identifier, password } = req.body;
 
         if (!identifier || !password) {
-            return res.status(400).json({ error: 'Introduceți email/telefon și parola.' });
+            return res.status(400).json({ error: 'Introduce?i email/telefon ?i parola.' });
+        }
+
+        const lockUntil = getLoginLock(req, identifier);
+        if (lockUntil) {
+            const waitSeconds = Math.ceil((lockUntil - Date.now()) / 1000);
+            return res.status(429).json({ error: `Prea multe încercari e?uate. Încerca?i din nou în ${waitSeconds} secunde.` });
         }
 
         let user;
@@ -401,19 +589,28 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         if (!user) {
-            return res.status(401).json({ error: 'Email/telefon sau parolă incorectă.' });
+            const failedAttempt = registerFailedLoginAttempt(req, identifier);
+            if (failedAttempt.count > 1) {
+                await new Promise((resolve) => setTimeout(resolve, Math.min(200 * failedAttempt.count, 2000)));
+            }
+            return res.status(401).json({ error: 'Email/telefon sau parola incorecta.' });
         }
 
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
-            return res.status(401).json({ error: 'Email/telefon sau parolă incorectă.' });
+            const failedAttempt = registerFailedLoginAttempt(req, identifier);
+            if (failedAttempt.count > 1) {
+                await new Promise((resolve) => setTimeout(resolve, Math.min(200 * failedAttempt.count, 2000)));
+            }
+            return res.status(401).json({ error: 'Email/telefon sau parola incorecta.' });
         }
 
+        clearFailedLoginAttempt(req, identifier);
         const token = generateToken(user);
 
         res.json({
             success: true,
-            message: 'Autentificare reușită!',
+            message: 'Autentificare reu?ita!',
             token,
             user: {
                 id: user._id,
@@ -433,7 +630,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/auth/me', async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Token lipsă.' });
+        return res.status(401).json({ error: 'Token lipsÄƒ.' });
     }
 
     const token = authHeader.split(' ')[1];
@@ -441,7 +638,7 @@ app.get('/api/auth/me', async (req, res) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         const user = await User.findById(decoded.id).select('-password');
         if (!user) {
-            return res.status(404).json({ error: 'Utilizator negăsit.' });
+            return res.status(404).json({ error: 'Utilizator negÄƒsit.' });
         }
 
         // Return a fresh token too, in case role changed
@@ -460,7 +657,7 @@ app.get('/api/auth/me', async (req, res) => {
         });
 
     } catch (err) {
-        return res.status(401).json({ error: 'Sesiune invalidă.' });
+        return res.status(401).json({ error: 'Sesiune invalidÄƒ.' });
     }
 });
 
@@ -503,24 +700,64 @@ app.get('/api/slots', async (req, res) => {
 });
 
 app.post('/api/book', optionalAuth, async (req, res) => {
-    const { name, phone, email, cnp, type, date, time } = req.body;
-    if (!name || !phone || !email || !cnp || !type || !date || !time) {
-        return res.status(400).json({ error: 'Toate câmpurile sunt obligatorii.' });
+    const { name, phone, email, type, date, time } = req.body;
+    if (!name || !phone || !email || !type || !date || !time) {
+        return res.status(400).json({ error: 'Toate câmpurile obligatorii trebuie completate.' });
     }
-    if (!/^\d{13}$/.test(cnp)) {
-        return res.status(400).json({ error: 'CNP invalid (13 cifre).' });
+
+    if (!validateEmail(email)) {
+        return res.status(400).json({ error: 'Format email invalid.' });
     }
+
+    if (!validatePhone(phone)) {
+        return res.status(400).json({ error: 'Format telefon invalid.' });
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
+        return res.status(400).json({ error: 'Data sau ora sunt invalide.' });
+    }
+
+    const dateDay = new Date(date).getDay();
+    if (dateDay !== 3) {
+        return res.status(400).json({ error: 'Programările sunt disponibile doar miercurea.' });
+    }
+
     try {
-        const existing = await Appointment.findOne({ date, time });
-        if (existing) {
-            return res.status(409).json({ error: 'Interval deja rezervat.' });
+        const { hasDiagnosis, diagnosticFile, diagnosticFileMeta } = req.body;
+        if (diagnosticFile) {
+            return res.status(400).json({ error: 'Încărcarea directă de fișiere este dezactivată. Folosiți stocare externă securizată.' });
         }
-        const { hasDiagnosis, diagnosticFile, fileType } = req.body;
+
+        let safeDiagnosticFileMeta = null;
+        if (hasDiagnosis) {
+            if (!ENABLE_DIAGNOSTIC_UPLOAD && diagnosticFileMeta) {
+                return res.status(400).json({ error: 'Încărcarea documentelor este dezactivată momentan.' });
+            }
+
+            if (ENABLE_DIAGNOSTIC_UPLOAD && diagnosticFileMeta) {
+                if (!validateDiagnosticFileMeta(diagnosticFileMeta)) {
+                    return res.status(400).json({
+                        error: `Metadatele fișierului sunt invalide. Tipuri permise: ${Array.from(ALLOWED_DIAGNOSTIC_MIME_TYPES).join(', ')}; mărime maximă ${MAX_DIAGNOSTIC_FILE_SIZE_BYTES} bytes.`
+                    });
+                }
+                safeDiagnosticFileMeta = {
+                    key: diagnosticFileMeta.key,
+                    mime: diagnosticFileMeta.mime,
+                    size: Number(diagnosticFileMeta.size),
+                    uploadedAt: new Date()
+                };
+            }
+        }
+
         const newAppointment = new Appointment({
-            name, phone, email, cnp, type, date, time,
+            name,
+            phone: cleanPhone(phone),
+            email: email.toLowerCase().trim(),
+            type,
+            date,
+            time,
             hasDiagnosis: !!hasDiagnosis,
-            diagnosticFile,
-            fileType,
+            diagnosticFileMeta: safeDiagnosticFileMeta,
             userId: req.user ? req.user.id : null
         });
         await newAppointment.save();
@@ -531,7 +768,7 @@ app.post('/api/book', optionalAuth, async (req, res) => {
             email,
             type,
             time: `${date} ${time}`,
-            location: "Piața Alexandru Lahovari nr. 1, Sector 1, București"
+            location: "PiaÈ›a Alexandru Lahovari nr. 1, Sector 1, BucureÈ™ti"
         };
 
         const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
@@ -555,6 +792,9 @@ app.post('/api/book', optionalAuth, async (req, res) => {
 
         res.json({ success: true, message: 'Programare confirmată! Verificați e-mail-ul pentru invitație.' });
     } catch (err) {
+        if (err?.code === 11000) {
+            return res.status(409).json({ error: 'Interval deja rezervat.' });
+        }
         res.status(500).json({ error: 'Eroare la salvare.' });
     }
 });
@@ -567,8 +807,42 @@ app.post('/api/book', optionalAuth, async (req, res) => {
 // List appointments - Use JWT auth now
 app.get('/api/admin/appointments', requireAdmin, async (req, res) => {
     try {
-        const appointments = await Appointment.find().sort({ date: 1, time: 1 });
-        res.json(appointments);
+        const appointments = await Appointment.find().sort({ date: 1, time: 1 }).lean();
+        await writeAuditLog(req, 'appointments_list');
+        res.json(appointments.map(sanitizeAppointmentForAdminList));
+    } catch (err) {
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+app.get('/api/admin/appointments/:id', requireAdmin, async (req, res) => {
+    try {
+        const appointment = await Appointment.findById(req.params.id).lean();
+        if (!appointment) {
+            return res.status(404).json({ error: 'Programare negăsită.' });
+        }
+
+        await writeAuditLog(req, 'appointment_details_read', appointment._id);
+        res.json(sanitizeAppointmentForAdminList(appointment));
+    } catch (err) {
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+app.get('/api/admin/appointments/:id/file-url', requireAdmin, async (req, res) => {
+    try {
+        const appointment = await Appointment.findById(req.params.id).lean();
+        if (!appointment) {
+            return res.status(404).json({ error: 'Programare negăsită.' });
+        }
+
+        await writeAuditLog(req, 'appointment_file_download_requested', appointment._id);
+
+        if (!ENABLE_DIAGNOSTIC_UPLOAD || !appointment.diagnosticFileMeta?.key) {
+            return res.status(404).json({ error: 'Documentul nu este disponibil pentru descărcare.' });
+        }
+
+        return res.status(501).json({ error: 'Generarea URL-urilor semnate nu este configurată în acest mediu.' });
     } catch (err) {
         res.status(500).json({ error: 'Database error' });
     }
@@ -577,7 +851,7 @@ app.get('/api/admin/appointments', requireAdmin, async (req, res) => {
 app.post('/api/admin/resend-email/:id', requireAdmin, async (req, res) => {
     try {
         const appointment = await Appointment.findById(req.params.id);
-        if (!appointment) return res.status(404).json({ error: 'Programare negăsită.' });
+        if (!appointment) return res.status(404).json({ error: 'Programare negÄƒsitÄƒ.' });
         if (!appointment.email) return res.status(400).json({ error: 'Clientul nu are e-mail.' });
 
         const { name, email, type, date, time } = appointment;
@@ -586,7 +860,7 @@ app.post('/api/admin/resend-email/:id', requireAdmin, async (req, res) => {
             email,
             type,
             time: `${date} ${time}`,
-            location: "Piața Alexandru Lahovari nr. 1, Sector 1, București"
+            location: "PiaÈ›a Alexandru Lahovari nr. 1, Sector 1, BucureÈ™ti"
         };
 
         const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
@@ -602,8 +876,8 @@ app.post('/api/admin/resend-email/:id', requireAdmin, async (req, res) => {
         } catch (err) {
             console.error(`[MANUAL EMAIL CRITICAL] Execution failed:`, err?.stderr || err.message || err);
             res.status(500).json({
-                error: 'Trimiterea a eșuat.',
-                details: err?.stderr || err.message || 'Eroare necunoscută'
+                error: 'Trimiterea a eÈ™uat.',
+                details: err?.stderr || err.message || 'Eroare necunoscutÄƒ'
             });
         }
     } catch (err) {
@@ -628,7 +902,7 @@ app.get('/api/admin/stats', requireAdmin, async (req, res) => {
 app.post('/api/admin/reset', requireAdmin, async (req, res) => {
     try {
         await Appointment.deleteMany({});
-        res.json({ success: true, message: 'Baza de date a fost resetată.' });
+        res.json({ success: true, message: 'Baza de date a fost resetatÄƒ.' });
     } catch (err) {
         res.status(500).json({ error: 'Eroare la resetarea bazei de date.' });
     }
@@ -638,11 +912,11 @@ app.delete('/api/admin/appointment/:id', requireAdmin, async (req, res) => {
     try {
         const deleted = await Appointment.findByIdAndDelete(req.params.id);
         if (!deleted) {
-            return res.status(404).json({ error: 'Programare negăsită.' });
+            return res.status(404).json({ error: 'Programare negÄƒsitÄƒ.' });
         }
-        res.json({ success: true, message: 'Programarea pacientului a fost anulată.' });
+        res.json({ success: true, message: 'Programarea pacientului a fost anulatÄƒ.' });
     } catch (err) {
-        res.status(500).json({ error: 'Eroare la anularea programării.' });
+        res.status(500).json({ error: 'Eroare la anularea programÄƒrii.' });
     }
 });
 
@@ -650,17 +924,17 @@ app.delete('/api/admin/appointments/by-date', requireAdmin, async (req, res) => 
     try {
         const { date } = req.body || {};
         if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-            return res.status(400).json({ error: 'Data este invalidă. Folosiți formatul YYYY-MM-DD.' });
+            return res.status(400).json({ error: 'Data este invalidÄƒ. FolosiÈ›i formatul YYYY-MM-DD.' });
         }
 
         const result = await Appointment.deleteMany({ date });
         res.json({
             success: true,
             deletedCount: result.deletedCount || 0,
-            message: `Au fost anulate ${result.deletedCount || 0} programări pentru data ${date}.`
+            message: `Au fost anulate ${result.deletedCount || 0} programÄƒri pentru data ${date}.`
         });
     } catch (err) {
-        res.status(500).json({ error: 'Eroare la anularea programărilor pe zi.' });
+        res.status(500).json({ error: 'Eroare la anularea programÄƒrilor pe zi.' });
     }
 });
 
@@ -668,7 +942,7 @@ app.get('/api/admin/export', requireAdmin, async (req, res) => {
     try {
         const appointments = await Appointment.find().sort({ date: 1, time: 1 }).lean();
         const data = appointments.map(a => ({
-            Data: a.date, Ora: a.time, Nume: a.name, Email: a.email || '', Telefon: a.phone, CNP: a.cnp, Tip: a.type,
+            Data: a.date, Ora: a.time, Nume: a.name, Email: a.email || '', Telefon: a.phone, Tip: a.type,
             Email_Trimis: a.emailSent ? 'DA' : 'NU',
             Creat: a.createdAt ? a.createdAt.toISOString().split('T')[0] : ''
         }));
@@ -704,16 +978,16 @@ app.post('/api/admin/users/role', requireSuperAdmin, async (req, res) => {
         const { userId, role } = req.body;
 
         if (!userId || !role) {
-            return res.status(400).json({ error: 'UserId și Rolul sunt necesare.' });
+            return res.status(400).json({ error: 'UserId È™i Rolul sunt necesare.' });
         }
 
         const user = await User.findById(userId);
         if (!user) {
-            return res.status(404).json({ error: 'Utilizator negăsit.' });
+            return res.status(404).json({ error: 'Utilizator negÄƒsit.' });
         }
 
         // Prevent changing superadmin role via this endpoint
-        if (user.role === 'superadmin' || user.email === SUPER_ADMIN_EMAIL) {
+        if (user.role === 'superadmin') {
             return res.status(403).json({ error: 'Rolul de Super Admin nu poate fi schimbat.' });
         }
 
@@ -730,7 +1004,15 @@ app.post('/api/admin/users/role', requireSuperAdmin, async (req, res) => {
     }
 });
 
+app.use((err, req, res, next) => {
+    if (err && String(err.message || '').includes('CORS')) {
+        return res.status(403).json({ error: 'Origin not allowed.' });
+    }
+    return next(err);
+});
 
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT} (MongoDB + Auth + RBAC Enabled)`);
 });
+
+

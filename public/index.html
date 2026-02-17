@@ -536,9 +536,7 @@
                     guestEl.classList.add('hidden');
                     userEl.classList.remove('hidden');
 
-                    // Fail-safe: if email matches superadmin, force the role display
-                    const isSuper = user.email && user.email.toLowerCase() === 'alexynho2009@gmail.com';
-                    const roleToDisplay = isSuper ? 'superadmin' : (user.role || 'user');
+                    const roleToDisplay = user.role || 'user';
 
                     nameEl.textContent = `${user.displayName} [${roleToDisplay}]`;
 

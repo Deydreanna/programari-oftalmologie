@@ -1,64 +1,133 @@
-# Instrucțiuni de Instalare și Rulare
+# Ophthalmology Appointments
 
-Deoarece mediul curent nu are Node.js preinstalat, va trebui să urmați acești pași pe calculatorul dvs. pentru a rula aplicația.
+Secure booking and admin dashboard for ophthalmology appointments.
 
-## 1. Instalare Node.js
+## Security hardening summary
 
-Dacă nu aveți deja Node.js instalat:
+This repository now enforces:
+- fail-closed environment validation (`JWT_SECRET`, `MONGODB_URI`, `ALLOWED_ORIGINS`)
+- no superadmin escalation by email
+- superadmin bootstrap only through seed script
+- CORS allowlist from environment
+- rate limiting + login lockout/backoff
+- helmet security headers
+- unique `(date, time)` booking index to prevent double booking
+- redacted admin appointment responses + audit logs
+- no CNP persistence and no base64 file content persistence
 
-1. Mergeți la [nodejs.org](https://nodejs.org/).
-2. Descărcați și instalați versiunea **LTS** (Recommended for most users).
-3. După instalare, deschideți un terminal (Command Prompt sau PowerShell) și verificați dacă funcționează tastând:
+## Prerequisites
 
-   ```bash
-   node -v
-   npm -v
-   ```
+- Node.js 18+
+- MongoDB (local or hosted)
 
-## 2. Configurare Proiect
+## Install
 
-1. Deschideți terminalul în folderul proiectului (`e:\Antigravity`).
-2. Instalați dependențele necesare rulând comanda:
+```bash
+npm install
+```
 
-   ```bash
-   npm install
-   ```
+## Required environment variables
 
-   *Aceasta va instala: express, body-parser, cors, xlsx, nodemailer, node-cron.*
+Create `.env` in project root.
 
-## 3. Configurare Email (Opțional dar Recomandat)
+```bash
+MONGODB_URI=mongodb://localhost:27017/appointments
+JWT_SECRET=<at least 32 chars>
+ALLOWED_ORIGINS=https://drbaltaprog.vercel.app,http://localhost:3000
+```
 
-Pentru ca funcția de trimitere email să funcționeze, trebuie să editați fișierul `server.js`.
+Optional:
 
-1. Deschideți `server.js`.
-2. Căutați liniile (aprox. linia 130):
+```bash
+PORT=3000
+EMAIL_USER=...
+EMAIL_PASS=...
+EMAIL_SMTP_HOST=smtp.gmail.com
+EMAIL_SMTP_PORT=587
+EMAIL_SMTP_SECURE=false
+EMAIL_FROM_NAME=Prof. Dr. Florian Balta
+ENABLE_DIAGNOSTIC_UPLOAD=false
+```
 
-   ```javascript
-   user: process.env.EMAIL_USER || 'YOUR_EMAIL@gmail.com',
-   pass: process.env.EMAIL_PASS || 'YOUR_APP_PASSWORD'
-   ```
+## Generate a strong JWT secret
 
-3. Înlocuiți cu adresa dvs. de Gmail și [Parola de Aplicație](https://support.google.com/accounts/answer/185833?hl=ro) (nu parola normală de login).
-   *Alternativ, puteți configura variabile de mediu.*
+Node:
 
-## 4. Pornire Aplicație
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
 
-1. În terminal, rulați:
+OpenSSL:
 
-   ```bash
-   npm start
-   ```
+```bash
+openssl rand -base64 48
+```
 
-2. Veți vedea mesajul: `Server running on http://localhost:3000`.
+## Validate env before start
 
-## 5. Utilizare
+```bash
+npm run check:env
+```
 
-1. Deschideți un browser la adresa [http://localhost:3000](http://localhost:3000).
-2. Selectați data (doar zilele de Miercuri sunt valide).
-3. Alegeți un interval orar disponibil.
-4. Completați formularul și salvați.
+The server also validates env at startup and exits if invalid.
 
-## Functionalități Automate
+## Superadmin bootstrap (one-time safe flow)
 
-- **Raport Excel**: Este generat automat în fiecare Miercuri la ora 18:00 și trimis pe email.
-- **Testare Manuală Email**: Puteți forța trimiterea raportului accesând în browser: `http://localhost:3000/api/test-email`.
+Normal signup always creates role `user`.
+
+To create/update the first superadmin:
+
+```bash
+# in .env
+SUPERADMIN_EMAIL=admin@example.com
+SUPERADMIN_PASSWORD=<strong password, min 12 chars, upper/lower/number/symbol>
+
+# run seed
+npm run seed:superadmin
+```
+
+## Run locally
+
+```bash
+npm start
+```
+
+## Race-condition test for booking
+
+With the server running:
+
+```bash
+npm run test:race
+```
+
+Expected: one booking succeeds and one returns `409` (slot already booked).
+
+## Booking data minimization
+
+- `CNP` is no longer persisted in MongoDB.
+- Diagnostic file base64 content is not stored in MongoDB.
+- Current secure default is `ENABLE_DIAGNOSTIC_UPLOAD=false`, which disables online file upload until object storage + signed URLs are configured.
+
+## Diagnostic file storage strategy (required for production uploads)
+
+Use private object storage (S3-compatible/Supabase Storage), store only metadata in MongoDB, and expose downloads only via short-lived signed URLs.
+
+Recommended retention policy: auto-delete uploaded diagnostic files after 30-90 days based on clinical/legal policy.
+
+## Incident cleanup note (`users_db.json` exposure)
+
+`users_db.json` was removed from source control and added to `.gitignore`.
+Treat previous exposure as a security incident:
+- rotate affected passwords immediately
+- invalidate active sessions/tokens
+- notify stakeholders according to your policy
+
+## Vercel deployment notes
+
+Set environment variables in Vercel Project Settings:
+- `MONGODB_URI`
+- `JWT_SECRET`
+- `ALLOWED_ORIGINS` (include your production domain)
+- optional mail and upload vars
+
+If frontend and API share the same deployment domain, keep that domain in `ALLOWED_ORIGINS`.

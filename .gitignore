@@ -1,3 +1,4 @@
 node_modules
 .env
 appointments.json
+users_db.json

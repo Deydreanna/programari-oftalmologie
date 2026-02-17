@@ -500,10 +500,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const date = formDate.value;
         const time = formTime.value;
 
-        // Diagnostic File
-        let fileData = null;
+        // Diagnostic files are disabled server-side until secure object storage is configured.
         if (hasDiagnosis.checked && diagnosticFileInput.files[0]) {
-            fileData = await processFile(diagnosticFileInput.files[0]);
+            showToast('Info', 'Încărcarea documentelor este temporar indisponibilă online. Vă rugăm aduceți documentele la consultație.', 'error');
+            return;
         }
 
         if (phone.length < 10) {
@@ -526,9 +526,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     name, phone, email, cnp, type, date, time,
-                    hasDiagnosis: hasDiagnosis.checked,
-                    diagnosticFile: fileData ? fileData.base64 : null,
-                    fileType: fileData ? fileData.type : null
+                    hasDiagnosis: hasDiagnosis.checked
                 })
             });
 
@@ -588,8 +586,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     adminLoginBtn.addEventListener('click', () => {
         const user = AUTH.getUser();
-        const isSuperEmail = user && user.email && user.email.toLowerCase() === 'alexynho2009@gmail.com';
-        const isAdmin = user && (user.role === 'admin' || user.role === 'superadmin' || isSuperEmail);
+        const isAdmin = user && (user.role === 'admin' || user.role === 'superadmin');
 
         if (isAdmin) {
             openDashboard();
@@ -605,9 +602,9 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchAdminAppointments();
         fetchAdminStats();
 
-        // Show Manage Users button for superadmin OR the dedicated email
+        // Show Manage Users button only for superadmin
         const user = AUTH.getUser();
-        const isSuper = user && (user.role === 'superadmin' || (user.email && user.email.toLowerCase() === 'alexynho2009@gmail.com'));
+        const isSuper = user && user.role === 'superadmin';
         if (isSuper) {
             manageUsersBtn.classList.remove('hidden');
         }
@@ -709,8 +706,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 return app.name.toLowerCase().includes(filterTerm) ||
                     app.phone.includes(filterTerm) ||
-                    (app.email && app.email.toLowerCase().includes(filterTerm)) ||
-                    app.cnp.includes(filterTerm);
+                    (app.email && app.email.toLowerCase().includes(filterTerm));
             });
             renderTimeline(filtered);
             timelineHeaderCount.textContent = `(${filtered.length}) Programări`;
@@ -762,8 +758,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="text-brand-600/30">|</span>
                         <span class="text-brand-300"><strong class="font-inter text-[11px] uppercase text-brand-400/50">Tel:</strong> ${app.phone}</span>
                         <span class="text-brand-600/30">|</span>
-                        <span class="text-brand-300"><strong class="font-inter text-[11px] uppercase text-brand-400/50">CNP:</strong> ${app.cnp}</span>
-                        <span class="text-brand-600/30">|</span>
                         <span class="text-brand-300"><strong class="font-inter text-[11px] uppercase text-brand-400/50">Tip:</strong> ${app.type}</span>
                         <span class="text-brand-600/30">|</span>
                         <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-lg ${app.emailSent ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}" title="${app.emailSent ? 'Invitație expediată' : 'Eroare trimitere sau în procesare'}">
@@ -782,18 +776,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
                             Anuleaza
                         </button>
-                        ${app.diagnosticFile ? `
-                            <button class="ml-auto view-file-link bg-brand-600/20 px-3 py-1 rounded-lg text-xs font-bold text-brand-300 hover:bg-brand-600/40 transition-all">VEZI DOC</button>
+                        ${app.diagnosticFileMeta ? `
+                            <span class="ml-auto bg-brand-600/20 px-3 py-1 rounded-lg text-xs font-bold text-brand-300">DOC: ${app.diagnosticFileMeta.mime || 'metadata'}</span>
                         ` : ''}
                     </div>
                 `;
-
-                if (app.diagnosticFile) {
-                    card.querySelector('.view-file-link').onclick = (e) => {
-                        e.stopPropagation();
-                        openFileViewer(app.diagnosticFile, app.fileType);
-                    };
-                }
 
                 card.querySelector('.resend-email-btn').onclick = async (e) => {
                     e.stopPropagation();
