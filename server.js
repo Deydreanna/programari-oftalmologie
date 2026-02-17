@@ -7,12 +7,14 @@ const xlsx = require('xlsx');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const path = require('path');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-dev-secret';
 const SALT_ROUNDS = 12;
+const execFileAsync = promisify(execFile);
 
 // The Super Admin Email
 const SUPER_ADMIN_EMAIL = 'alexynho2009@gmail.com';
@@ -98,6 +100,38 @@ function generateToken(user) {
         JWT_SECRET,
         { expiresIn: '24h' }
     );
+}
+
+async function executeEmailScript(base64Data) {
+    const scriptPath = path.resolve(__dirname, 'scripts', 'email_service.py');
+    const configuredPython = process.env.EMAIL_PYTHON_PATH || process.env.PYTHON_PATH;
+    const defaultCandidates = process.platform === 'win32'
+        ? ['py', 'python', 'python3']
+        : ['python3', 'python'];
+    const pythonCandidates = configuredPython
+        ? [configuredPython, ...defaultCandidates]
+        : defaultCandidates;
+
+    let lastError = null;
+
+    for (const pythonCmd of [...new Set(pythonCandidates)]) {
+        try {
+            const result = await execFileAsync(pythonCmd, [scriptPath, '--json', base64Data], {
+                windowsHide: true,
+                timeout: 30000,
+                maxBuffer: 1024 * 1024
+            });
+
+            return { ...result, pythonCmd };
+        } catch (err) {
+            lastError = err;
+            const stderr = err?.stderr ? String(err.stderr).trim() : '';
+            const reason = stderr || err.message;
+            console.error(`[EMAIL] Failed with interpreter "${pythonCmd}": ${reason}`);
+        }
+    }
+
+    throw lastError || new Error('No compatible Python interpreter found.');
 }
 
 // Optional auth middleware
@@ -390,23 +424,14 @@ app.post('/api/book', optionalAuth, async (req, res) => {
             location: "Piața Alexandru Lahovari nr. 1, Sector 1, București"
         };
 
-        const scriptPath = path.resolve(__dirname, 'scripts', 'email_service.py');
         const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
-
-        // Force absolute path and cmd.exe for Windows reliability
-        const pythonPath = 'C:\\Python314\\python.exe';
-        const command = `"${pythonPath}" "${scriptPath}" --json ${base64Data}`;
 
         console.log(`[EMAIL] Dispatching invitation for ${email}...`);
 
-        exec(command, { shell: 'cmd.exe' }, async (error, stdout, stderr) => {
+        executeEmailScript(base64Data).then(async ({ stdout, stderr, pythonCmd }) => {
             if (stdout) console.log(`[EMAIL STDOUT]: ${stdout}`);
             if (stderr) console.error(`[EMAIL STDERR]: ${stderr}`);
-
-            if (error) {
-                console.error(`[EMAIL FAILURE] Process error for ${email}:`, error.message);
-                return;
-            }
+            console.log(`[EMAIL] Sent using interpreter: ${pythonCmd}`);
 
             try {
                 await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
@@ -414,6 +439,8 @@ app.post('/api/book', optionalAuth, async (req, res) => {
             } catch (updateErr) {
                 console.error('[EMAIL DB UPDATE ERROR]:', updateErr);
             }
+        }).catch(error => {
+            console.error(`[EMAIL FAILURE] Process error for ${email}:`, error?.stderr || error.message);
         });
 
         res.json({ success: true, message: 'Programare confirmată! Verificați e-mail-ul pentru invitație.' });
@@ -452,31 +479,21 @@ app.post('/api/admin/resend-email/:id', requireAdmin, async (req, res) => {
             location: "Piața Alexandru Lahovari nr. 1, Sector 1, București"
         };
 
-        const scriptPath = path.resolve(__dirname, 'scripts', 'email_service.py');
         const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
-
-        // Force absolute path and cmd.exe for Windows reliability
-        const pythonPath = 'C:\\Python314\\python.exe';
-        const command = `"${pythonPath}" "${scriptPath}" --json ${base64Data}`;
-
         console.log(`[MANUAL EMAIL] Executing manual invitation for ${email}...`);
 
-        const execPromise = (cmd) => new Promise((resolve, reject) => {
-            exec(cmd, { shell: 'cmd.exe' }, (error, stdout, stderr) => {
-                if (error) reject({ error, stdout, stderr });
-                else resolve({ stdout, stderr });
-            });
-        });
-
         try {
-            await execPromise(command);
+            const { stdout, stderr, pythonCmd } = await executeEmailScript(base64Data);
+            if (stdout) console.log(`[MANUAL EMAIL STDOUT]: ${stdout}`);
+            if (stderr) console.error(`[MANUAL EMAIL STDERR]: ${stderr}`);
+            console.log(`[MANUAL EMAIL] Sent using interpreter: ${pythonCmd}`);
             await Appointment.findByIdAndUpdate(appointment._id, { emailSent: true });
             res.json({ success: true, message: 'Email trimis cu succes!' });
         } catch (err) {
-            console.error(`[MANUAL EMAIL CRITICAL] Execution failed:`, err.stderr || err.error?.message || err);
+            console.error(`[MANUAL EMAIL CRITICAL] Execution failed:`, err?.stderr || err.message || err);
             res.status(500).json({
                 error: 'Trimiterea a eșuat.',
-                details: err.stderr || (err.error ? err.error.message : err.message) || 'Eroare necunoscută'
+                details: err?.stderr || err.message || 'Eroare necunoscută'
             });
         }
     } catch (err) {
