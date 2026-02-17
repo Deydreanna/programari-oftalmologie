@@ -664,20 +664,8 @@ app.delete('/api/admin/appointments/by-date', requireAdmin, async (req, res) => 
     }
 });
 
-app.get('/api/admin/export', async (req, res) => {
+app.get('/api/admin/export', requireAdmin, async (req, res) => {
     try {
-        const token = req.query.token;
-        if (!token) return res.status(401).send('Token lipsă.');
-
-        try {
-            const decoded = jwt.verify(token, JWT_SECRET);
-            if (decoded.role !== 'admin' && decoded.role !== 'superadmin') {
-                return res.status(403).send('Acces interzis.');
-            }
-        } catch (err) {
-            return res.status(401).send('Token invalid sau expirat.');
-        }
-
         const appointments = await Appointment.find().sort({ date: 1, time: 1 }).lean();
         const data = appointments.map(a => ({
             Data: a.date, Ora: a.time, Nume: a.name, Email: a.email || '', Telefon: a.phone, CNP: a.cnp, Tip: a.type,

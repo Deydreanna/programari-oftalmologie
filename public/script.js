@@ -993,8 +993,30 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    exportExcelBtn.addEventListener('click', () => {
-        window.location.href = `/api/admin/export?token=${AUTH.getToken()}`;
+    exportExcelBtn.addEventListener('click', async () => {
+        try {
+            const res = await fetch('/api/admin/export', {
+                headers: AUTH.getHeaders()
+            });
+
+            if (!res.ok) {
+                const errText = await res.text();
+                showToast('Eroare', errText || 'Nu s-a putut genera exportul Excel.', 'error');
+                return;
+            }
+
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'programari.xlsx';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (err) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        }
     });
 
     closeDashboard.addEventListener('click', () => {
