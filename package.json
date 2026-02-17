@@ -4,6 +4,9 @@
     "description": "Ophthalmology Appointment System",
     "main": "server.js",
     "scripts": {
+        "test": "npm run test:security",
+        "test:security": "node scripts/security-check.js",
+        "scan:secrets": "node scripts/scan-secrets.js",
         "start": "node server.js",
         "check:env": "node scripts/check-env.js",
         "seed:superadmin": "node scripts/seed-superadmin.js",

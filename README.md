@@ -5,15 +5,17 @@ Secure booking and admin dashboard for ophthalmology appointments.
 ## Security hardening summary
 
 This repository now enforces:
-- fail-closed environment validation (`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `MONGODB_URI`, `ALLOWED_ORIGINS`)
+- fail-closed environment validation (`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_STEPUP_SECRET`, `MONGODB_URI`, `ALLOWED_ORIGINS`)
 - no superadmin escalation by email
 - superadmin bootstrap only through seed script
 - CORS allowlist from environment
 - rate limiting + login lockout/backoff
 - helmet security headers
+- cookie-based sessions + CSRF double-submit protection
+- role separation (`viewer`, `scheduler`, `superadmin`) + step-up auth for destructive operations
 - unique `(date, time)` booking index to prevent double booking
-- redacted admin appointment responses + audit logs
-- no CNP persistence and no base64 file content persistence
+- expanded audit logs for auth/admin actions
+- no CNP collection/persistence and no base64 file content persistence
 
 ## Prerequisites
 
@@ -34,6 +36,7 @@ Create `.env` in project root.
 MONGODB_URI=mongodb://localhost:27017/appointments
 JWT_ACCESS_SECRET=<at least 32 chars>
 JWT_REFRESH_SECRET=<at least 32 chars>
+JWT_STEPUP_SECRET=<at least 32 chars>
 ALLOWED_ORIGINS=https://drbaltaprog.vercel.app,http://localhost:3000
 ```
 
@@ -43,6 +46,7 @@ Optional:
 PORT=3000
 ACCESS_TOKEN_TTL_MINUTES=15
 REFRESH_TOKEN_TTL_DAYS=30
+STEP_UP_TOKEN_TTL_MINUTES=5
 EMAIL_USER=...
 EMAIL_PASS=...
 EMAIL_SMTP_HOST=smtp.gmail.com
@@ -66,7 +70,7 @@ OpenSSL:
 openssl rand -base64 48
 ```
 
-Generate one secret for `JWT_ACCESS_SECRET` and a different one for `JWT_REFRESH_SECRET`.
+Generate separate secrets for `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, and `JWT_STEPUP_SECRET`.
 
 ## Validate env before start
 
@@ -78,7 +82,7 @@ The server also validates env at startup and exits if invalid.
 
 ## Superadmin bootstrap (one-time safe flow)
 
-Normal signup always creates role `user`.
+Normal signup always creates role `viewer`.
 
 To create/update the first superadmin:
 
@@ -97,41 +101,98 @@ npm run seed:superadmin
 npm start
 ```
 
-## Auth + CSRF curl checks
+## Verification
 
-Use your deployed HTTPS URL (required for `__Host-*` secure cookies).
+Run baseline security checks:
+
+```bash
+npm test
+npm run scan:secrets
+npm audit --audit-level=high
+```
+
+Quick grep checks:
+
+```bash
+# no unsafe dynamic HTML sinks in frontend
+rg -n "innerHTML\s*=|outerHTML|insertAdjacentHTML" public
+
+# no browser bearer-token usage / token storage
+rg -n "authToken|Authorization|Bearer\s+" public
+```
+
+Cookie + CSRF + RBAC curl checks (use HTTPS deployment):
 
 ```bash
 export BASE_URL="https://your-app.vercel.app"
-rm -f cookies.txt
+rm -f super.cookies viewer.cookies scheduler.cookies
 
-# 1) Login should set __Host-access, __Host-refresh, __Host-csrf
-curl -i -c cookies.txt -X POST "$BASE_URL/api/auth/login" \
+# 1) superadmin login -> should set __Host-access/__Host-refresh/__Host-csrf
+curl -i -c super.cookies -X POST "$BASE_URL/api/auth/login" \
   -H "Content-Type: application/json" \
-  --data '{"identifier":"admin@example.com","password":"your-password"}'
+  --data '{"identifier":"superadmin@example.com","password":"superadmin-password"}'
+grep "__Host-access\|__Host-refresh\|__Host-csrf" super.cookies
 
-# 2) /me should return 200 with user profile
-curl -i -b cookies.txt "$BASE_URL/api/auth/me"
+# 2) session check
+curl -i -b super.cookies "$BASE_URL/api/auth/me"
 
-# 3) Capture csrf token from cookie jar
-CSRF=$(awk '$6=="__Host-csrf"{print $7}' cookies.txt | tail -n 1)
+# 3) CSRF failure check (missing header => 403)
+curl -i -b super.cookies -X POST "$BASE_URL/api/auth/refresh"
 
-# 4) POST without CSRF should fail with 403
-curl -i -b cookies.txt -X POST "$BASE_URL/api/auth/logout"
-
-# 5) Refresh with CSRF should return 200 and renew access cookie
-curl -i -b cookies.txt -c cookies.txt -X POST "$BASE_URL/api/auth/refresh" \
+# 4) CSRF success check + refresh
+CSRF=$(awk '$6=="__Host-csrf"{print $7}' super.cookies | tail -n 1)
+curl -i -b super.cookies -c super.cookies -X POST "$BASE_URL/api/auth/refresh" \
   -H "X-CSRF-Token: $CSRF"
 
-# 6) CSRF rotates on refresh, read the latest value
-CSRF=$(awk '$6=="__Host-csrf"{print $7}' cookies.txt | tail -n 1)
-
-# 7) Logout with CSRF should return 200 and clear auth cookies
-curl -i -b cookies.txt -c cookies.txt -X POST "$BASE_URL/api/auth/logout" \
+# 5) logout with CSRF should clear session cookies; /me should then return 401
+curl -i -b super.cookies -c super.cookies -X POST "$BASE_URL/api/auth/logout" \
   -H "X-CSRF-Token: $CSRF"
+curl -i -b super.cookies "$BASE_URL/api/auth/me"
 
-# 8) /me should now return 401
-curl -i -b cookies.txt "$BASE_URL/api/auth/me"
+# 6) slots validation (invalid date format and invalid real date)
+curl -i "$BASE_URL/api/slots?date=2026/02/18"
+curl -i "$BASE_URL/api/slots?date=2026-02-31"
+
+# 7) viewer cannot delete/export/reset
+curl -i -c viewer.cookies -X POST "$BASE_URL/api/auth/login" \
+  -H "Content-Type: application/json" \
+  --data '{"identifier":"viewer@example.com","password":"viewer-password"}'
+V_CSRF=$(awk '$6=="__Host-csrf"{print $7}' viewer.cookies | tail -n 1)
+curl -i -b viewer.cookies -X DELETE "$BASE_URL/api/admin/appointment/REPLACE_ID" \
+  -H "X-CSRF-Token: $V_CSRF"
+curl -i -b viewer.cookies "$BASE_URL/api/admin/export"
+
+# 8) scheduler cannot reset/export (but can read + operational actions)
+curl -i -c scheduler.cookies -X POST "$BASE_URL/api/auth/login" \
+  -H "Content-Type: application/json" \
+  --data '{"identifier":"scheduler@example.com","password":"scheduler-password"}'
+S_CSRF=$(awk '$6=="__Host-csrf"{print $7}' scheduler.cookies | tail -n 1)
+curl -i -b scheduler.cookies -X POST "$BASE_URL/api/admin/reset" \
+  -H "X-CSRF-Token: $S_CSRF"
+curl -i -b scheduler.cookies "$BASE_URL/api/admin/export"
+
+# 9) security headers check
+curl -I "$BASE_URL/"
+curl -I "$BASE_URL/api/auth/me"
+```
+
+Expected security header highlights on production routes:
+- `Content-Security-Policy`
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy`
+- `Permissions-Policy`
+- `Strict-Transport-Security`
+- `Cache-Control: no-store` on `/api/*` and auth pages
+
+Browser check:
+- open DevTools -> Network -> select `/` and `/api/auth/me` responses
+- verify the headers above are present
+
+Optional git history secret scan:
+
+```bash
+git log -p -S "JWT_ACCESS_SECRET"
+git log -p -G "mongodb(\\+srv)?:\\/\\/"
 ```
 
 ## Race-condition test for booking
@@ -170,6 +231,7 @@ Set environment variables in Vercel Project Settings:
 - `MONGODB_URI`
 - `JWT_ACCESS_SECRET`
 - `JWT_REFRESH_SECRET`
+- `JWT_STEPUP_SECRET`
 - `ALLOWED_ORIGINS` (include your production domain)
 - optional mail and upload vars
 
