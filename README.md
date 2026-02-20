@@ -21,7 +21,7 @@ This repository now enforces:
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 20.x (LTS)
 - MongoDB (local or hosted)
 
 ## Install
@@ -234,6 +234,25 @@ git log -p -S "JWT_ACCESS_SECRET"
 git log -p -G "mongodb(\\+srv)?:\\/\\/"
 ```
 
+Charset/diacritics checks:
+
+```bash
+export BASE_URL="https://your-app.vercel.app"
+
+# 1) UTF-8 debug payload should render Romanian diacritics + emoji
+curl -i "$BASE_URL/debug/charset"
+
+# 2) POST text with Romanian diacritics; write/read must match
+curl -i -X POST "$BASE_URL/debug/charset" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  --data '{"text":"Mănăstire, țuică, șură, înger"}'
+```
+
+Expected:
+- response `Content-Type` includes `charset=utf-8`
+- response body preserves Romanian diacritics
+- debug roundtrip reports `dbRoundtripMatches: true`
+
 ## Race-condition test for booking
 
 With the server running:
@@ -276,6 +295,10 @@ Set environment variables in Vercel Project Settings:
 
 If frontend and API share the same deployment domain, keep that domain in `ALLOWED_ORIGINS`.
 `__Host-*` cookies require HTTPS, `Path=/`, `Secure`, and no `Domain` attribute.
+
+Pin Node runtime to avoid unstable UTF-8 behavior:
+- `package.json` uses `"engines": { "node": "20.x" }`
+- in Vercel Project Settings -> Node.js Version, set `20.x`
 
 xd
 hd

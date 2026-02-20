@@ -1,6 +1,5 @@
 require('dotenv').config();
 const express = require('express');
-const bodyParser = require('body-parser');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const helmet = require('helmet');
@@ -44,6 +43,7 @@ const STEP_UP_TOKEN_TTL_MINUTES = Number(process.env.STEP_UP_TOKEN_TTL_MINUTES |
 const ACCESS_COOKIE_NAME = '__Host-access';
 const REFRESH_COOKIE_NAME = '__Host-refresh';
 const CSRF_COOKIE_NAME = '__Host-csrf';
+const DEBUG_CHARSET_SAMPLE_TEXT = '\u0218\u021b\u0103\u00ee\u00e2\u0103 \u2013 test \u{1F600}';
 const ROLE = Object.freeze({
     VIEWER: 'viewer',
     SCHEDULER: 'scheduler',
@@ -123,6 +123,14 @@ auditLogSchema.index({ action: 1, timestamp: -1 });
 
 const AuditLog = mongoose.model('AuditLog', auditLogSchema);
 
+const charsetProbeSchema = new mongoose.Schema({
+    text: { type: String, required: true, trim: false },
+    createdAt: { type: Date, default: Date.now }
+}, { strict: 'throw' });
+charsetProbeSchema.index({ createdAt: -1 });
+
+const CharsetProbe = mongoose.model('CharsetProbe', charsetProbeSchema);
+
 mongoose.connect(MONGODB_URI)
     .then(async () => {
         await Appointment.syncIndexes();
@@ -168,10 +176,19 @@ app.use(cors({
     },
     credentials: false
 }));
-app.use(bodyParser.json({ limit: '10mb' }));
+app.use(express.json({
+    limit: '10mb',
+    strict: true,
+    type: ['application/json', 'application/*+json']
+}));
+app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 app.use('/api', (req, res, next) => {
     res.set('Cache-Control', 'no-store');
     res.set('Pragma', 'no-cache');
+    return next();
+});
+app.use(['/api', '/debug'], (req, res, next) => {
+    res.set('Content-Type', 'application/json; charset=utf-8');
     return next();
 });
 
@@ -203,10 +220,24 @@ app.use((req, res, next) => {
     return next();
 });
 
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public'), {
+    setHeaders: (res, filePath) => {
+        const lowerPath = String(filePath || '').toLowerCase();
+        if (lowerPath.endsWith('.html')) {
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        } else if (lowerPath.endsWith('.js')) {
+            res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+        } else if (lowerPath.endsWith('.css')) {
+            res.setHeader('Content-Type', 'text/css; charset=utf-8');
+        } else if (lowerPath.endsWith('.json')) {
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        }
+    }
+}));
 
 app.get('/adminpanel', (req, res) => {
     res.set('Cache-Control', 'no-store');
+    res.set('Content-Type', 'text/html; charset=utf-8');
     return res.sendFile(path.join(__dirname, 'public', 'adminpanel.html'));
 });
 
@@ -623,6 +654,9 @@ function shouldRequireCsrf(req) {
     if (req.path === '/api/auth/login') {
         return false;
     }
+    if (req.path === '/debug/charset') {
+        return false;
+    }
     return true;
 }
 
@@ -778,7 +812,7 @@ const strictAuthLimiter = rateLimit({
     max: 8,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Prea multe ÃƒÆ’Ã‚Â®ncercÃƒâ€žÃ†â€™ri. ReÃƒÆ’Ã‚Â®ncercaÃƒË†Ã¢â‚¬Âºi ÃƒÆ’Ã‚Â®n cÃƒÆ’Ã‚Â¢teva minute.' }
+    message: { error: 'Prea multe incercari. Reincercati in cateva minute.' }
 });
 
 const refreshLimiter = rateLimit({
@@ -794,7 +828,7 @@ const bookingLimiter = rateLimit({
     max: 30,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Prea multe programÃƒâ€žÃ†â€™ri trimise de la acest IP. ÃƒÆ’Ã…Â½ncercaÃƒË†Ã¢â‚¬Âºi mai tÃƒÆ’Ã‚Â¢rziu.' }
+    message: { error: 'Prea multe programari trimise de la acest IP. Incercati mai tarziu.' }
 });
 
 const adminLimiter = rateLimit({
@@ -1074,6 +1108,54 @@ app.use('/api/auth/signup', strictAuthLimiter);
 app.use('/api/auth/refresh', refreshLimiter);
 app.use('/api/book', bookingLimiter);
 app.use('/api/admin', adminLimiter);
+
+app.get('/debug/charset', async (req, res) => {
+    setAuthNoStore(res);
+    res.set('Content-Type', 'application/json; charset=utf-8');
+
+    const responseContentType = String(res.getHeader('Content-Type') || '');
+    console.log(`[DEBUG CHARSET] GET response Content-Type: ${responseContentType}`);
+
+    return res.status(200).json({
+        ok: true,
+        sample: DEBUG_CHARSET_SAMPLE_TEXT,
+        responseContentType
+    });
+});
+
+app.post('/debug/charset', async (req, res) => {
+    setAuthNoStore(res);
+    res.set('Content-Type', 'application/json; charset=utf-8');
+
+    const incomingText = typeof req.body?.text === 'string' ? req.body.text : DEBUG_CHARSET_SAMPLE_TEXT;
+    console.log('[DEBUG CHARSET] POST req.body:', req.body);
+
+    try {
+        const created = await CharsetProbe.create({ text: incomingText });
+        const loaded = await CharsetProbe.findById(created._id).lean();
+        const loadedText = loaded?.text || '';
+        const responseContentType = String(res.getHeader('Content-Type') || '');
+
+        console.log(`[DEBUG CHARSET] POST response Content-Type: ${responseContentType}`);
+        console.log(`[DEBUG CHARSET] DB write text: ${JSON.stringify(incomingText)}`);
+        console.log(`[DEBUG CHARSET] DB read text: ${JSON.stringify(loadedText)}`);
+
+        return res.status(200).json({
+            ok: true,
+            incomingText,
+            writtenText: created.text,
+            readText: loadedText,
+            dbRoundtripMatches: incomingText === loadedText,
+            responseContentType
+        });
+    } catch (error) {
+        console.error('[DEBUG CHARSET] POST failed:', error?.message || error);
+        return res.status(500).json({
+            ok: false,
+            error: 'Debug charset DB write/read failed.'
+        });
+    }
+});
 
 app.post('/api/auth/signup', async (req, res) => {
     setAuthNoStore(res);
@@ -1725,7 +1807,7 @@ app.get('/api/admin/export', requireSuperadminOnly, requireStepUp('appointments_
             targetType: 'appointment_collection',
             actorUser: req.user
         });
-        return res.status(500).send('Eroare la generarea Excel.');
+        return res.status(500).json({ error: 'Eroare la generarea Excel.' });
     }
 });
 

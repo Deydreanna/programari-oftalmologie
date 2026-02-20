@@ -265,7 +265,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 nameEl.textContent = app.name || '';
                 content.appendChild(nameEl);
 
-                if (app.type === 'Prima ConsultaÈ›ie') {
+                if (app.type === 'Prima Consultatie' || app.type === 'Prima Consultație') {
                     const badge = document.createElement('span');
                     badge.className = 'app-new-badge';
                     badge.textContent = 'NOU';

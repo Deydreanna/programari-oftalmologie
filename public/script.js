@@ -299,7 +299,7 @@
         btn.classList.add('selected');
         typeInput.value = btn.dataset.value;
 
-        if (btn.dataset.value === 'Prima ConsultaÃˆâ€ºie') {
+        if (btn.dataset.value === 'Prima Consultatie' || btn.dataset.value === 'Prima Consultație') {
             diagnosisSection.classList.remove('hidden');
             return;
         }

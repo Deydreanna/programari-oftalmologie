@@ -3,6 +3,9 @@
     "version": "1.0.0",
     "description": "Ophthalmology Appointment System",
     "main": "server.js",
+    "engines": {
+        "node": "20.x"
+    },
     "scripts": {
         "test": "npm run test:security",
         "test:security": "node scripts/security-check.js",

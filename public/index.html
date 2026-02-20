@@ -4,9 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ProgramÃ„Æ’ri Prof. Dr. Balta Florian Ã¢â‚¬â€ Oftalmologie</title>
+    <title>Programari Prof. Dr. Balta Florian - Oftalmologie</title>
     <meta name="description"
-        content="Sistem online de programÃ„Æ’ri pentru cabinetul de oftalmologie al Prof. Dr. Balta Florian. ProgrameazÃ„Æ’-te rapid Ãˆâ„¢i simplu.">
+        content="Sistem online de programari pentru cabinetul de oftalmologie al Prof. Dr. Balta Florian. Programeaza-te rapid si simplu.">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
@@ -80,14 +80,14 @@
                         d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V6z">
                     </path>
                 </svg>
-                ProgramÃ„Æ’ri Online
+                Programari Online
             </div>
             <h1 class="text-3xl md:text-5xl font-black text-brand-100 tracking-tight mb-3">
                 Prof. Dr. Balta Florian
             </h1>
             <p class="text-brand-300 font-medium text-base max-w-2xl mx-auto leading-relaxed">
-                Cabinetul 4, Ambulatoriul INSTITUTUL CLINIC DE URGENTE OFTALMOLOGICE Ã¢â‚¬Å¾PROF. DR. MIRCEA OLTEANU"
-                <br><span class="text-brand-400/70">PiaÃˆâ€ºa Alexandru Lahovari nr. 1, Sector 1, BucureÃˆâ„¢ti</span>
+                Cabinetul 4, Ambulatoriul INSTITUTUL CLINIC DE URGENTE OFTALMOLOGICE "PROF. DR. MIRCEA OLTEANU"
+                <br><span class="text-brand-400/70">Piata Alexandru Lahovari nr. 1, Sector 1, Bucuresti</span>
             </p>
         </div>
     </header>
@@ -125,7 +125,7 @@
         <!-- Step 1: Calendar -->
         <section id="step-calendar" class="step-section active-step">
             <div class="text-center mb-8">
-                <h2 class="text-2xl md:text-3xl font-bold text-brand-100 mb-2">SelecteazÃ„Æ’ Data ProgramÃ„Æ’rii</h2>
+                <h2 class="text-2xl md:text-3xl font-bold text-brand-100 mb-2">Selecteaza Data Programarii</h2>
                 <p class="text-brand-300/80 text-base">Zilele disponibile sunt marcate cu <span
                         class="text-brand-300 font-bold">verde</span> (doar miercuri).</p>
             </div>
@@ -133,14 +133,14 @@
                 <div id="calendar-card"
                     class="bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 overflow-hidden">
                     <div class="flex items-center justify-between px-6 py-5 bg-brand-700 border-b border-brand-600/20">
-                        <button id="prevMonth" class="nav-btn" aria-label="Luna anterioarÃ„Æ’">
+                        <button id="prevMonth" class="nav-btn" aria-label="Luna anterioara">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M15 19l-7-7 7-7"></path>
                             </svg>
                         </button>
                         <h3 id="currentMonthYear" class="text-lg font-bold text-brand-100"></h3>
-                        <button id="nextMonth" class="nav-btn" aria-label="Luna urmÃ„Æ’toare">
+                        <button id="nextMonth" class="nav-btn" aria-label="Luna urmatoare">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7">
                                 </path>
@@ -154,7 +154,7 @@
                         <span class="text-xs font-bold text-brand-300 uppercase py-2">Mi</span>
                         <span class="text-xs font-bold text-brand-400/50 uppercase py-2">Jo</span>
                         <span class="text-xs font-bold text-brand-400/50 uppercase py-2">Vi</span>
-                        <span class="text-xs font-bold text-brand-400/50 uppercase py-2">SÃƒÂ¢</span>
+                        <span class="text-xs font-bold text-brand-400/50 uppercase py-2">Sa</span>
                     </div>
                     <div id="calendarGrid" class="px-6 pb-6 grid grid-cols-7 gap-1 text-center">
                         <!-- Days rendered by JS -->
@@ -166,8 +166,8 @@
         <!-- Step 2: Time Slots -->
         <section id="step-slots" class="step-section hidden">
             <div class="text-center mb-8">
-                <h2 class="text-2xl md:text-3xl font-bold text-brand-100 mb-2">SelecteazÃ„Æ’ Intervalul Orar</h2>
-                <p class="text-brand-300/80 text-base">Data selectatÃ„Æ’: <span id="selectedDateDisplay"
+                <h2 class="text-2xl md:text-3xl font-bold text-brand-100 mb-2">Selecteaza Intervalul Orar</h2>
+                <p class="text-brand-300/80 text-base">Data selectata: <span id="selectedDateDisplay"
                         class="text-brand-300 font-bold"></span></p>
             </div>
             <div class="max-w-2xl mx-auto">
@@ -181,7 +181,7 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                                 d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                         </svg>
-                        <p class="text-brand-300/70 font-medium text-lg">Nu mai sunt locuri libere pentru aceastÃ„Æ’ datÃ„Æ’.
+                        <p class="text-brand-300/70 font-medium text-lg">Nu mai sunt locuri libere pentru aceasta data.
                         </p>
                     </div>
                 </div>
@@ -191,7 +191,7 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7">
                         </path>
                     </svg>
-                    ÃƒÅ½napoi la Calendar
+                    Inapoi la Calendar
                 </button>
             </div>
         </section>
@@ -199,7 +199,7 @@
         <!-- Step 3: Booking Form -->
         <section id="step-form" class="step-section hidden">
             <div class="text-center mb-8">
-                <h2 class="text-2xl md:text-3xl font-bold text-brand-100 mb-2">CompleteazÃ„Æ’ Datele Personale</h2>
+                <h2 class="text-2xl md:text-3xl font-bold text-brand-100 mb-2">Completeaza Datele Personale</h2>
                 <p class="text-brand-300/80 text-base">
                     <span id="formSummaryDate" class="text-brand-300 font-bold"></span> la ora
                     <span id="formSummaryTime" class="text-brand-300 font-bold"></span>
@@ -247,12 +247,12 @@
                                 </svg>
                                 Control
                             </button>
-                            <button type="button" class="type-btn" data-value="Prima ConsultaÃˆâ€ºie">
+                            <button type="button" class="type-btn" data-value="Prima Consultatie">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
                                 </svg>
-                                Prima ConsultaÃˆâ€ºie
+                                Prima Consultatie
                             </button>
                         </div>
                         <input type="hidden" id="type" value="Control">
@@ -263,13 +263,13 @@
                         <div class="flex items-center gap-3 p-4 bg-brand-600/15 rounded-xl border border-brand-600/30">
                             <input type="checkbox" id="hasDiagnosis"
                                 class="w-5 h-5 rounded border-brand-600 accent-brand-400 focus:ring-brand-400">
-                            <label for="hasDiagnosis" class="font-medium text-brand-100">AveÃˆâ€ºi un diagnostic
+                            <label for="hasDiagnosis" class="font-medium text-brand-100">Aveti un diagnostic
                                 anterior?</label>
                         </div>
 
                         <!-- Drag-and-Drop Upload Zone -->
                         <div id="fileUploadContainer" class="hidden">
-                            <label class="form-label">ÃƒÅ½ncÃ„Æ’rcaÃˆâ€ºi Document Medical (Max 5MB)</label>
+                            <label class="form-label">Incarcati Document Medical (Max 5MB)</label>
                             <div id="dropZone" class="drop-zone">
                                 <svg class="w-12 h-12 text-brand-600/50 mb-3" fill="none" stroke="currentColor"
                                     viewBox="0 0 24 24">
@@ -277,9 +277,9 @@
                                         d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12">
                                     </path>
                                 </svg>
-                                <p class="text-brand-300/80 font-medium">Trage fiÃˆâ„¢ierul aici sau <span
+                                <p class="text-brand-300/80 font-medium">Trage fisierul aici sau <span
                                         class="text-brand-300 font-bold cursor-pointer">alege manual</span></p>
-                                <p class="text-xs text-brand-400/50 mt-1">JPG, PNG sau PDF Ã¢â‚¬â€ max 5MB</p>
+                                <p class="text-xs text-brand-400/50 mt-1">JPG, PNG sau PDF - max 5MB</p>
                                 <input type="file" id="diagnosticFile" accept=".jpg,.jpeg,.png,.pdf" class="hidden">
                             </div>
                             <div id="filePreview"
@@ -307,9 +307,9 @@
                                 class="w-5 h-5 mt-0.5 rounded border-brand-600 accent-brand-400 focus:ring-brand-400">
                             <label for="gdprConsent" class="text-sm text-brand-300 leading-relaxed">
                                 Sunt de acord cu <strong class="text-brand-100">prelucrarea datelor personale</strong>
-                                ÃƒÂ®n conformitate cu
+                                in conformitate cu
                                 Regulamentul (UE) 2016/679 (GDPR). Datele vor fi folosite exclusiv pentru gestionarea
-                                programÃ„Æ’rilor medicale. <span class="text-red-400">*</span>
+                                programarilor medicale. <span class="text-red-400">*</span>
                             </label>
                         </div>
                     </div>
@@ -317,7 +317,7 @@
                     <!-- Submit -->
                     <button type="submit" id="submitBtn"
                         class="w-full bg-brand-400 text-brand-900 py-4 rounded-xl font-bold text-lg hover:bg-brand-300 active:bg-brand-100 transition-all duration-200 flex justify-center items-center gap-3 shadow-lg shadow-brand-400/20 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <span>ConfirmÃ„Æ’ Programarea</span>
+                        <span>Confirma Programarea</span>
                         <svg id="loadingSpinner" class="animate-spin h-6 w-6 text-brand-900 hidden"
                             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
@@ -334,7 +334,7 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7">
                             </path>
                         </svg>
-                        ÃƒÅ½napoi la Intervale Orare
+                        Inapoi la Intervale Orare
                     </button>
                 </form>
             </div>
@@ -343,7 +343,7 @@
 
     <!-- Footer with Admin Link -->
     <footer class="text-center py-8 text-sm border-t border-brand-600/20 bg-brand-800">
-        <p class="text-brand-400/50 mb-2">Ã‚Â© 2026 Prof. Dr. Balta Florian Ã¢â‚¬â€ Toate drepturile rezervate</p>
+        <p class="text-brand-400/50 mb-2">© 2026 Prof. Dr. Balta Florian - Toate drepturile rezervate</p>
         <a id="adminPanelLink" href="/adminpanel" class="hidden text-brand-400/50 hover:text-brand-300 transition-colors font-medium">Panou administrare</a>
     </footer>
 
