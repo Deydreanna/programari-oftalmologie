@@ -278,3 +278,4 @@ If frontend and API share the same deployment domain, keep that domain in `ALLOW
 `__Host-*` cookies require HTTPS, `Path=/`, `Secure`, and no `Domain` attribute.
 
 xd
+hd
