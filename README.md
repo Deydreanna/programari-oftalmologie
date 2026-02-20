@@ -276,3 +276,5 @@ Set environment variables in Vercel Project Settings:
 
 If frontend and API share the same deployment domain, keep that domain in `ALLOWED_ORIGINS`.
 `__Host-*` cookies require HTTPS, `Path=/`, `Secure`, and no `Domain` attribute.
+
+xd
