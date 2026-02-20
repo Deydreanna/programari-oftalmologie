@@ -101,7 +101,7 @@
       "dest": "/server.js"
     },
     {
-      "src": "/adminpanel/?",
+      "src": "/adminpanel",
       "dest": "/public/adminpanel.html"
     },
     {
