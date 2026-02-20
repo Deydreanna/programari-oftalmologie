@@ -22,6 +22,18 @@ const LOGIN_LOCKOUT_DURATION_MS = 15 * 60 * 1000;
 const MAX_DIAGNOSTIC_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_DIAGNOSTIC_MIME_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png']);
 const ENABLE_DIAGNOSTIC_UPLOAD = process.env.ENABLE_DIAGNOSTIC_UPLOAD === 'true';
+const TIME_HHMM_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const DEFAULT_DOCTOR_SLUG = 'prof-dr-balta-florian';
+const DEFAULT_DOCTOR_DISPLAY_NAME = 'Prof. Dr. Balta Florian';
+const DEFAULT_DOCTOR_SPECIALTY = 'Oftalmologie';
+const DEFAULT_BOOKING_SETTINGS = Object.freeze({
+    consultationDurationMinutes: 20,
+    workdayStart: '09:00',
+    workdayEnd: '14:00',
+    monthsToShow: 3,
+    timezone: 'Europe/Bucharest'
+});
+const DEFAULT_AVAILABILITY_WEEKDAYS = Object.freeze([3]);
 
 const baseEnvValidation = validateBaseEnv(process.env);
 if (!baseEnvValidation.ok) {
@@ -65,6 +77,33 @@ const CSRF_COOKIE_OPTIONS = Object.freeze({
 const loginAttempts = new Map();
 const refreshAttempts = new Map();
 
+function parseHHMMToMinutes(value) {
+    if (typeof value !== 'string') return NaN;
+    const match = value.match(TIME_HHMM_REGEX);
+    if (!match) return NaN;
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    return (hours * 60) + minutes;
+}
+
+function isValidHHMM(value) {
+    return TIME_HHMM_REGEX.test(String(value || ''));
+}
+
+function isValidWeekdayList(value) {
+    if (!Array.isArray(value) || value.length === 0) return false;
+    const normalized = new Set();
+    for (const weekday of value) {
+        if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return false;
+        normalized.add(weekday);
+    }
+    return normalized.size > 0;
+}
+
+function sanitizeInlineString(value) {
+    return String(value || '').replace(/\0/g, '').trim();
+}
+
 // =====================
 //  SCHEMAS
 // =====================
@@ -77,10 +116,59 @@ const userSchema = new mongoose.Schema({
     googleId: String,
     displayName: String,
     role: { type: String, enum: [ROLE.VIEWER, ROLE.SCHEDULER, ROLE.SUPERADMIN], default: ROLE.VIEWER },
+    managedDoctorIds: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Doctor' }], default: () => [] },
     createdAt: { type: Date, default: Date.now }
 }, { strict: 'throw' });
 
 const User = mongoose.model('User', userSchema);
+
+const doctorSchema = new mongoose.Schema({
+    slug: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    displayName: { type: String, required: true, trim: true },
+    specialty: { type: String, default: DEFAULT_DOCTOR_SPECIALTY, trim: true },
+    isActive: { type: Boolean, default: true },
+    bookingSettings: {
+        consultationDurationMinutes: { type: Number, default: DEFAULT_BOOKING_SETTINGS.consultationDurationMinutes },
+        workdayStart: { type: String, default: DEFAULT_BOOKING_SETTINGS.workdayStart },
+        workdayEnd: { type: String, default: DEFAULT_BOOKING_SETTINGS.workdayEnd },
+        monthsToShow: { type: Number, default: DEFAULT_BOOKING_SETTINGS.monthsToShow },
+        timezone: { type: String, default: DEFAULT_BOOKING_SETTINGS.timezone, trim: true }
+    },
+    availabilityRules: {
+        weekdays: { type: [Number], default: () => [...DEFAULT_AVAILABILITY_WEEKDAYS] }
+    },
+    blockedDates: { type: [String], default: () => [] },
+    createdByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    updatedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
+}, { strict: 'throw', timestamps: true });
+
+doctorSchema.path('slug').validate((value) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(String(value || '')), 'Doctor slug format is invalid.');
+doctorSchema.path('bookingSettings.consultationDurationMinutes').validate((value) => Number.isInteger(value) && value >= 5 && value <= 120, 'Invalid consultation duration.');
+doctorSchema.path('bookingSettings.workdayStart').validate((value) => isValidHHMM(value), 'Invalid workdayStart.');
+doctorSchema.path('bookingSettings.workdayEnd').validate((value) => isValidHHMM(value), 'Invalid workdayEnd.');
+doctorSchema.path('bookingSettings.monthsToShow').validate((value) => Number.isInteger(value) && value >= 1 && value <= 12, 'Invalid monthsToShow.');
+doctorSchema.path('availabilityRules.weekdays').validate((value) => isValidWeekdayList(value), 'Invalid availability weekdays.');
+doctorSchema.path('blockedDates').validate((value) => {
+    if (!Array.isArray(value)) return false;
+    const seen = new Set();
+    for (const item of value) {
+        if (typeof item !== 'string') return false;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(item)) return false;
+        if (seen.has(item)) return false;
+        seen.add(item);
+    }
+    return true;
+}, 'Invalid blockedDates.');
+doctorSchema.pre('validate', function doctorValidate(next) {
+    const start = parseHHMMToMinutes(this.bookingSettings?.workdayStart);
+    const end = parseHHMMToMinutes(this.bookingSettings?.workdayEnd);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+        return next(new Error('Doctor workday interval is invalid.'));
+    }
+    return next();
+});
+
+const Doctor = mongoose.model('Doctor', doctorSchema);
 
 // Appointment Schema
 const appointmentSchema = new mongoose.Schema({
@@ -99,10 +187,12 @@ const appointmentSchema = new mongoose.Schema({
         size: { type: Number, default: null },
         uploadedAt: { type: Date, default: null }
     },
+    doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true },
+    doctorSnapshotName: { type: String, default: '' },
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     createdAt: { type: Date, default: Date.now }
 }, { strict: 'throw' });
-appointmentSchema.index({ date: 1, time: 1 }, { unique: true });
+appointmentSchema.index({ doctorId: 1, date: 1, time: 1 }, { unique: true });
 
 const Appointment = mongoose.model('Appointment', appointmentSchema);
 
@@ -131,10 +221,72 @@ charsetProbeSchema.index({ createdAt: -1 });
 
 const CharsetProbe = mongoose.model('CharsetProbe', charsetProbeSchema);
 
+async function ensureDefaultDoctorAndBackfill() {
+    const defaultDoctor = await Doctor.findOneAndUpdate(
+        { slug: DEFAULT_DOCTOR_SLUG },
+        {
+            $setOnInsert: {
+                slug: DEFAULT_DOCTOR_SLUG,
+                displayName: DEFAULT_DOCTOR_DISPLAY_NAME,
+                specialty: DEFAULT_DOCTOR_SPECIALTY,
+                isActive: true,
+                bookingSettings: {
+                    consultationDurationMinutes: DEFAULT_BOOKING_SETTINGS.consultationDurationMinutes,
+                    workdayStart: DEFAULT_BOOKING_SETTINGS.workdayStart,
+                    workdayEnd: DEFAULT_BOOKING_SETTINGS.workdayEnd,
+                    monthsToShow: DEFAULT_BOOKING_SETTINGS.monthsToShow,
+                    timezone: DEFAULT_BOOKING_SETTINGS.timezone
+                },
+                availabilityRules: { weekdays: DEFAULT_AVAILABILITY_WEEKDAYS },
+                blockedDates: [],
+                createdByUserId: null,
+                updatedByUserId: null
+            }
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    const appointmentsBackfill = await Appointment.updateMany(
+        {
+            $or: [
+                { doctorId: { $exists: false } },
+                { doctorId: null }
+            ]
+        },
+        {
+            $set: {
+                doctorId: defaultDoctor._id,
+                doctorSnapshotName: defaultDoctor.displayName
+            }
+        }
+    );
+
+    const snapshotBackfill = await Appointment.updateMany(
+        { doctorSnapshotName: { $in: [null, ''] }, doctorId: { $exists: true, $ne: null } },
+        { $set: { doctorSnapshotName: defaultDoctor.displayName } }
+    );
+
+    const usersBackfill = await User.updateMany(
+        { managedDoctorIds: { $exists: false } },
+        { $set: { managedDoctorIds: [] } }
+    );
+
+    return {
+        defaultDoctorId: String(defaultDoctor._id),
+        appointmentsBackfilled: appointmentsBackfill.modifiedCount || 0,
+        snapshotsBackfilled: snapshotBackfill.modifiedCount || 0,
+        usersBackfilled: usersBackfill.modifiedCount || 0
+    };
+}
+
 mongoose.connect(MONGODB_URI)
     .then(async () => {
+        const migrationSummary = await ensureDefaultDoctorAndBackfill();
+        await Doctor.syncIndexes();
+        await User.syncIndexes();
         await Appointment.syncIndexes();
         console.log('Connected to MongoDB');
+        console.log('Startup migration summary:', migrationSummary);
     })
     .catch(err => console.error('MongoDB connection error:', err));
 
@@ -248,6 +400,8 @@ app.get('/adminpanel', (req, res) => {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^(\+?40|0)7\d{8}$/;
 const MONGODB_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
+const DOCTOR_SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const STRONG_PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{10,128}$/;
 
 function validateEmail(email) {
     return EMAIL_REGEX.test(email);
@@ -260,6 +414,10 @@ function validatePhone(phone) {
 
 function cleanPhone(phone) {
     return phone.replace(/[\s\-]/g, '');
+}
+
+function validateStrongPassword(password) {
+    return STRONG_PASSWORD_REGEX.test(String(password || ''));
 }
 
 function isEmail(identifier) {
@@ -345,7 +503,128 @@ function parseISODateField(value, fieldName) {
 }
 
 function parseTimeField(value, fieldName) {
-    return parseStringField(value, fieldName, { min: 5, max: 5, pattern: /^\d{2}:\d{2}$/ });
+    return parseStringField(value, fieldName, { min: 5, max: 5, pattern: TIME_HHMM_REGEX });
+}
+
+function parseObjectIdField(value, fieldName) {
+    const idValue = parseStringField(value, fieldName, { min: 24, max: 24 });
+    if (!MONGODB_OBJECT_ID_REGEX.test(idValue)) {
+        throw new Error(`${fieldName} is invalid.`);
+    }
+    return idValue;
+}
+
+function parseObjectIdArrayField(value, fieldName, { optional = false, maxLength = 20 } = {}) {
+    if (value === undefined && optional) return undefined;
+    if (!Array.isArray(value)) {
+        throw new Error(`${fieldName} must be an array.`);
+    }
+    if (value.length > maxLength) {
+        throw new Error(`${fieldName} exceeds max length.`);
+    }
+    const seen = new Set();
+    const normalized = [];
+    for (const item of value) {
+        const id = parseObjectIdField(item, fieldName);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        normalized.push(id);
+    }
+    return normalized;
+}
+
+function parseWeekdaysField(value, fieldName, { optional = false } = {}) {
+    if (value === undefined && optional) return undefined;
+    if (!Array.isArray(value) || value.length === 0) {
+        throw new Error(`${fieldName} must contain at least one weekday.`);
+    }
+    const unique = new Set();
+    const result = [];
+    for (const item of value) {
+        const numeric = Number(item);
+        if (!Number.isInteger(numeric) || numeric < 0 || numeric > 6) {
+            throw new Error(`${fieldName} contains an invalid weekday.`);
+        }
+        if (unique.has(numeric)) continue;
+        unique.add(numeric);
+        result.push(numeric);
+    }
+    return result;
+}
+
+function parseDoctorSlugField(value, fieldName = 'slug') {
+    return parseStringField(value, fieldName, {
+        min: 3,
+        max: 80,
+        pattern: DOCTOR_SLUG_REGEX
+    }).toLowerCase();
+}
+
+function parseConsultationDurationField(value, fieldName) {
+    const minutes = Number(value);
+    if (!Number.isInteger(minutes) || minutes < 5 || minutes > 120) {
+        throw new Error(`${fieldName} is invalid.`);
+    }
+    return minutes;
+}
+
+function parseMonthsToShowField(value, fieldName) {
+    const months = Number(value);
+    if (!Number.isInteger(months) || months < 1 || months > 12) {
+        throw new Error(`${fieldName} is invalid.`);
+    }
+    return months;
+}
+
+function parseDoctorBookingSettings(value, { optional = false } = {}) {
+    if (value === undefined && optional) return undefined;
+    const payload = ensureObjectStrict(value, ['consultationDurationMinutes', 'workdayStart', 'workdayEnd', 'monthsToShow', 'timezone']);
+    const consultationDurationMinutes = parseConsultationDurationField(payload.consultationDurationMinutes, 'bookingSettings.consultationDurationMinutes');
+    const workdayStart = parseTimeField(payload.workdayStart, 'bookingSettings.workdayStart');
+    const workdayEnd = parseTimeField(payload.workdayEnd, 'bookingSettings.workdayEnd');
+    const monthsToShow = parseMonthsToShowField(payload.monthsToShow, 'bookingSettings.monthsToShow');
+    const timezone = parseStringField(payload.timezone, 'bookingSettings.timezone', { min: 3, max: 64 });
+
+    const startMinutes = parseHHMMToMinutes(workdayStart);
+    const endMinutes = parseHHMMToMinutes(workdayEnd);
+    if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes) || endMinutes <= startMinutes) {
+        throw new Error('bookingSettings workday interval is invalid.');
+    }
+    if ((endMinutes - startMinutes) < consultationDurationMinutes) {
+        throw new Error('bookingSettings interval is shorter than consultation duration.');
+    }
+
+    return {
+        consultationDurationMinutes,
+        workdayStart,
+        workdayEnd,
+        monthsToShow,
+        timezone
+    };
+}
+
+function parseDoctorAvailabilityRules(value, { optional = false } = {}) {
+    if (value === undefined && optional) return undefined;
+    const payload = ensureObjectStrict(value, ['weekdays']);
+    return {
+        weekdays: parseWeekdaysField(payload.weekdays, 'availabilityRules.weekdays')
+    };
+}
+
+function parseDoctorBlockedDates(value, { optional = false } = {}) {
+    if (value === undefined && optional) return undefined;
+    if (!Array.isArray(value)) {
+        throw new Error('blockedDates must be an array.');
+    }
+    const unique = new Set();
+    const normalized = [];
+    for (const rawDate of value) {
+        const dateValue = parseISODateField(rawDate, 'blockedDates');
+        if (unique.has(dateValue)) continue;
+        unique.add(dateValue);
+        normalized.push(dateValue);
+    }
+    return normalized;
 }
 
 function parseDiagnosticFileMeta(value) {
@@ -369,7 +648,7 @@ const loginBodySchema = createSchema((input) => {
 });
 
 const adminCreateUserBodySchema = createSchema((input) => {
-    const payload = ensureObjectStrict(input, ['email', 'phone', 'password', 'displayName', 'role']);
+    const payload = ensureObjectStrict(input, ['email', 'phone', 'password', 'displayName', 'role', 'managedDoctorIds']);
     const email = parseStringField(payload.email, 'email', { min: 3, max: 254 });
     if (!validateEmail(email)) throw new Error('email format is invalid.');
 
@@ -379,24 +658,121 @@ const adminCreateUserBodySchema = createSchema((input) => {
         throw new Error('Invalid role.');
     }
 
+    const password = parseStringField(payload.password, 'password', { min: 10, max: 128, trim: false });
+    if (!validateStrongPassword(password)) {
+        throw new Error('Password must contain lower/upper letters and digits, minimum 10 chars.');
+    }
+
+    const managedDoctorIds = parseObjectIdArrayField(payload.managedDoctorIds || [], 'managedDoctorIds', { optional: true });
+
     return {
         email,
         phone: parseStringField(payload.phone, 'phone', { min: 10, max: 20 }),
-        password: parseStringField(payload.password, 'password', { min: 6, max: 128, trim: false }),
+        password,
         displayName: parseStringField(payload.displayName, 'displayName', { min: 2, max: 120 }),
-        role: normalizedRole
+        role: normalizedRole,
+        managedDoctorIds
     };
 });
 
-const slotsQuerySchema = createSchema((input) => {
+const adminUpdateUserBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['email', 'phone', 'password', 'displayName', 'role', 'managedDoctorIds']);
+    const output = {};
+
+    if (payload.email !== undefined) {
+        const email = parseStringField(payload.email, 'email', { min: 3, max: 254 });
+        if (!validateEmail(email)) throw new Error('email format is invalid.');
+        output.email = email;
+    }
+
+    if (payload.phone !== undefined) {
+        output.phone = parseStringField(payload.phone, 'phone', { min: 10, max: 20 });
+    }
+
+    if (payload.password !== undefined) {
+        const password = parseStringField(payload.password, 'password', { min: 10, max: 128, trim: false });
+        if (!validateStrongPassword(password)) {
+            throw new Error('Password must contain lower/upper letters and digits, minimum 10 chars.');
+        }
+        output.password = password;
+    }
+
+    if (payload.displayName !== undefined) {
+        output.displayName = parseStringField(payload.displayName, 'displayName', { min: 2, max: 120 });
+    }
+
+    if (payload.role !== undefined) {
+        const rawRole = parseStringField(payload.role, 'role', { min: 4, max: 16 }).toLowerCase();
+        const normalizedRole = normalizeRoleValue(rawRole);
+        if (![ROLE.VIEWER, ROLE.SCHEDULER, ROLE.SUPERADMIN].includes(normalizedRole)) {
+            throw new Error('Invalid role.');
+        }
+        output.role = normalizedRole;
+    }
+
+    if (payload.managedDoctorIds !== undefined) {
+        output.managedDoctorIds = parseObjectIdArrayField(payload.managedDoctorIds, 'managedDoctorIds');
+    }
+
+    if (Object.keys(output).length === 0) {
+        throw new Error('At least one field is required for update.');
+    }
+
+    return output;
+});
+
+const doctorCreateBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['slug', 'displayName', 'specialty', 'isActive', 'bookingSettings', 'availabilityRules', 'blockedDates']);
+    const bookingSettingsInput = payload.bookingSettings || DEFAULT_BOOKING_SETTINGS;
+    const availabilityRulesInput = payload.availabilityRules || { weekdays: DEFAULT_AVAILABILITY_WEEKDAYS };
+    return {
+        slug: parseDoctorSlugField(payload.slug, 'slug'),
+        displayName: parseStringField(payload.displayName, 'displayName', { min: 2, max: 120 }),
+        specialty: parseStringField(payload.specialty || DEFAULT_DOCTOR_SPECIALTY, 'specialty', { min: 2, max: 120 }),
+        isActive: parseBooleanField(payload.isActive, 'isActive', { optional: true }) ?? true,
+        bookingSettings: parseDoctorBookingSettings(bookingSettingsInput),
+        availabilityRules: parseDoctorAvailabilityRules(availabilityRulesInput),
+        blockedDates: parseDoctorBlockedDates(payload.blockedDates || [])
+    };
+});
+
+const doctorPatchBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['slug', 'displayName', 'specialty', 'isActive', 'bookingSettings', 'availabilityRules', 'blockedDates']);
+    const out = {};
+    if (payload.slug !== undefined) out.slug = parseDoctorSlugField(payload.slug, 'slug');
+    if (payload.displayName !== undefined) out.displayName = parseStringField(payload.displayName, 'displayName', { min: 2, max: 120 });
+    if (payload.specialty !== undefined) out.specialty = parseStringField(payload.specialty, 'specialty', { min: 2, max: 120 });
+    if (payload.isActive !== undefined) out.isActive = parseBooleanField(payload.isActive, 'isActive');
+    if (payload.bookingSettings !== undefined) out.bookingSettings = parseDoctorBookingSettings(payload.bookingSettings);
+    if (payload.availabilityRules !== undefined) out.availabilityRules = parseDoctorAvailabilityRules(payload.availabilityRules);
+    if (payload.blockedDates !== undefined) out.blockedDates = parseDoctorBlockedDates(payload.blockedDates);
+    if (Object.keys(out).length === 0) {
+        throw new Error('No updatable doctor fields provided.');
+    }
+    return out;
+});
+
+const doctorBlockDateBodySchema = createSchema((input) => {
     const payload = ensureObjectStrict(input, ['date']);
     return {
         date: parseISODateField(payload.date, 'date')
     };
 });
 
+const slotsQuerySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['date', 'doctor']);
+    const doctor = parseStringField(payload.doctor, 'doctor', { min: 2, max: 120 });
+    return {
+        date: parseISODateField(payload.date, 'date'),
+        doctor
+    };
+});
+
 const bookBodySchema = createSchema((input) => {
-    const payload = ensureObjectStrict(input, ['name', 'phone', 'email', 'type', 'date', 'time', 'hasDiagnosis', 'diagnosticFileMeta', 'diagnosticFile']);
+    const payload = ensureObjectStrict(input, ['name', 'phone', 'email', 'type', 'date', 'time', 'hasDiagnosis', 'diagnosticFileMeta', 'diagnosticFile', 'doctorId', 'doctorSlug']);
+    if (payload.doctorId === undefined && payload.doctorSlug === undefined) {
+        throw new Error('doctorId or doctorSlug is required.');
+    }
     const email = parseStringField(payload.email, 'email', { min: 3, max: 254 });
     if (!validateEmail(email)) throw new Error('email format is invalid.');
     return {
@@ -408,14 +784,15 @@ const bookBodySchema = createSchema((input) => {
         time: parseTimeField(payload.time, 'time'),
         hasDiagnosis: parseBooleanField(payload.hasDiagnosis, 'hasDiagnosis', { optional: true }),
         diagnosticFileMeta: parseDiagnosticFileMeta(payload.diagnosticFileMeta),
-        diagnosticFile: payload.diagnosticFile
+        diagnosticFile: payload.diagnosticFile,
+        doctorId: payload.doctorId !== undefined ? parseObjectIdField(payload.doctorId, 'doctorId') : undefined,
+        doctorSlug: payload.doctorSlug !== undefined ? parseDoctorSlugField(payload.doctorSlug, 'doctorSlug') : undefined
     };
 });
 
 const roleUpdateBodySchema = createSchema((input) => {
     const payload = ensureObjectStrict(input, ['userId', 'role']);
-    const userId = parseStringField(payload.userId, 'userId', { min: 24, max: 24 });
-    if (!MONGODB_OBJECT_ID_REGEX.test(userId)) throw new Error('Invalid userId.');
+    const userId = parseObjectIdField(payload.userId, 'userId');
     const role = parseStringField(payload.role, 'role', { min: 6, max: 10 });
     if (![ROLE.VIEWER, ROLE.SCHEDULER].includes(role)) throw new Error('Invalid role.');
     return { userId, role };
@@ -527,6 +904,22 @@ function verifyStepUpToken(token) {
     return payload;
 }
 
+function normalizeManagedDoctorIds(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const seen = new Set();
+    const normalized = [];
+    for (const item of value) {
+        const id = String(item || '');
+        if (!MONGODB_OBJECT_ID_REGEX.test(id)) continue;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        normalized.push(id);
+    }
+    return normalized;
+}
+
 function buildUserPayload(user) {
     return {
         id: user._id,
@@ -534,7 +927,8 @@ function buildUserPayload(user) {
         phone: user.phone,
         displayName: user.displayName,
         role: user.role,
-        createdAt: user.createdAt
+        createdAt: user.createdAt,
+        managedDoctorIds: normalizeManagedDoctorIds(user.managedDoctorIds)
     };
 }
 
@@ -543,7 +937,8 @@ function buildSessionUser(user) {
         id: user._id,
         email: user.email,
         role: user.role,
-        displayName: user.displayName
+        displayName: user.displayName,
+        managedDoctorIds: normalizeManagedDoctorIds(user.managedDoctorIds)
     };
 }
 
@@ -562,12 +957,162 @@ function normalizeRoleValue(rawRole) {
 
 async function ensureNormalizedRole(user) {
     if (!user) return null;
+    let shouldSave = false;
     const normalizedRole = normalizeRoleValue(user.role);
     if (normalizedRole !== user.role) {
         user.role = normalizedRole;
+        shouldSave = true;
+    }
+    if (!Array.isArray(user.managedDoctorIds)) {
+        user.managedDoctorIds = [];
+        shouldSave = true;
+    }
+    if (shouldSave) {
         await user.save();
     }
     return user;
+}
+
+function isSuperadminUser(user) {
+    return normalizeRoleValue(user?.role) === ROLE.SUPERADMIN;
+}
+
+function getUserManagedDoctorIds(user) {
+    return normalizeManagedDoctorIds(user?.managedDoctorIds || []);
+}
+
+function getScopedDoctorObjectIds(user) {
+    return getUserManagedDoctorIds(user).map((id) => new mongoose.Types.ObjectId(id));
+}
+
+function canUserAccessDoctor(user, doctorId) {
+    if (!doctorId) return false;
+    if (isSuperadminUser(user)) return true;
+    const wanted = String(doctorId);
+    return getUserManagedDoctorIds(user).includes(wanted);
+}
+
+function doctorScopeQueryForUser(user, fieldName = '_id') {
+    if (isSuperadminUser(user)) {
+        return {};
+    }
+    const doctorIds = getScopedDoctorObjectIds(user);
+    if (doctorIds.length === 0) {
+        return null;
+    }
+    return { [fieldName]: { $in: doctorIds } };
+}
+
+function toISODateUTC(date) {
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(date.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function getUtcDateFromISO(dateStr) {
+    const [year, month, day] = String(dateStr).split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day));
+}
+
+function isDateInDoctorRange(dateStr, monthsToShow) {
+    if (!isValidISODateString(dateStr)) return false;
+    const target = getUtcDateFromISO(dateStr);
+    const today = new Date();
+    const todayUtc = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    if (target < todayUtc) return false;
+
+    const maxDate = new Date(todayUtc);
+    maxDate.setUTCMonth(maxDate.getUTCMonth() + Number(monthsToShow || 1));
+    return target <= maxDate;
+}
+
+function generateDoctorSlots(doctor) {
+    const settings = doctor?.bookingSettings || DEFAULT_BOOKING_SETTINGS;
+    const start = parseHHMMToMinutes(settings.workdayStart);
+    const end = parseHHMMToMinutes(settings.workdayEnd);
+    const duration = Number(settings.consultationDurationMinutes);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isInteger(duration) || duration <= 0 || end <= start) {
+        return [];
+    }
+
+    const slots = [];
+    for (let minute = start; minute + duration <= end; minute += duration) {
+        const hour = Math.floor(minute / 60);
+        const min = minute % 60;
+        slots.push(`${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
+    }
+    return slots;
+}
+
+function sanitizeDoctorForPublic(doctor) {
+    return {
+        _id: doctor._id,
+        slug: doctor.slug,
+        displayName: doctor.displayName,
+        specialty: doctor.specialty || DEFAULT_DOCTOR_SPECIALTY,
+        bookingSettings: {
+            consultationDurationMinutes: doctor.bookingSettings?.consultationDurationMinutes,
+            workdayStart: doctor.bookingSettings?.workdayStart,
+            workdayEnd: doctor.bookingSettings?.workdayEnd,
+            monthsToShow: doctor.bookingSettings?.monthsToShow,
+            timezone: doctor.bookingSettings?.timezone
+        },
+        availabilityRules: {
+            weekdays: Array.isArray(doctor.availabilityRules?.weekdays) ? doctor.availabilityRules.weekdays : []
+        }
+    };
+}
+
+function sanitizeDoctorForAdmin(doctor, { includeAudit = false } = {}) {
+    const payload = {
+        _id: doctor._id,
+        slug: doctor.slug,
+        displayName: doctor.displayName,
+        specialty: doctor.specialty || DEFAULT_DOCTOR_SPECIALTY,
+        isActive: !!doctor.isActive,
+        bookingSettings: {
+            consultationDurationMinutes: doctor.bookingSettings?.consultationDurationMinutes,
+            workdayStart: doctor.bookingSettings?.workdayStart,
+            workdayEnd: doctor.bookingSettings?.workdayEnd,
+            monthsToShow: doctor.bookingSettings?.monthsToShow,
+            timezone: doctor.bookingSettings?.timezone
+        },
+        availabilityRules: {
+            weekdays: Array.isArray(doctor.availabilityRules?.weekdays) ? doctor.availabilityRules.weekdays : []
+        },
+        blockedDates: Array.isArray(doctor.blockedDates) ? doctor.blockedDates : [],
+        createdAt: doctor.createdAt,
+        updatedAt: doctor.updatedAt
+    };
+
+    if (includeAudit) {
+        payload.createdByUserId = doctor.createdByUserId || null;
+        payload.updatedByUserId = doctor.updatedByUserId || null;
+    }
+
+    return payload;
+}
+
+async function resolveDoctorByIdentifier(rawIdentifier, { requireActive = true } = {}) {
+    const normalized = sanitizeInlineString(rawIdentifier).toLowerCase();
+    if (!normalized) return null;
+
+    const query = MONGODB_OBJECT_ID_REGEX.test(normalized)
+        ? { _id: normalized }
+        : { slug: normalized };
+    if (requireActive) {
+        query.isActive = true;
+    }
+    return Doctor.findOne(query);
+}
+
+async function validateDoctorIdsExist(ids = []) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+        return true;
+    }
+    const count = await Doctor.countDocuments({ _id: { $in: ids } });
+    return count === ids.length;
 }
 
 function parseCookies(req) {
@@ -747,6 +1292,8 @@ function clearFailedRefreshAttempt(req) {
 function sanitizeAppointmentForAdminList(appointment) {
     return {
         _id: appointment._id,
+        doctorId: appointment.doctorId || null,
+        doctorSnapshotName: appointment.doctorSnapshotName || '',
         name: appointment.name,
         phone: appointment.phone,
         email: appointment.email || '',
@@ -1107,6 +1654,7 @@ app.use('/api/auth/login', strictAuthLimiter);
 app.use('/api/auth/signup', strictAuthLimiter);
 app.use('/api/auth/refresh', refreshLimiter);
 app.use('/api/book', bookingLimiter);
+app.use('/api/appointments', bookingLimiter);
 app.use('/api/admin', adminLimiter);
 
 app.get('/debug/charset', async (req, res) => {
@@ -1383,65 +1931,94 @@ app.post('/api/auth/step-up', requireAuthenticated, validateBody(stepUpBodySchem
 //  SLOTS API
 // =====================
 
-const generateSlots = () => {
-    const slots = [];
-    let start = 9 * 60;
-    const end = 14 * 60;
-    while (start < end) {
-        const hours = Math.floor(start / 60);
-        const mins = start % 60;
-        const timeStr = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
-        slots.push(timeStr);
-        start += 20;
-    }
-    return slots;
-};
-
-app.get('/api/slots', validateQuery(slotsQuerySchema), async (req, res) => {
-    const { date } = req.validatedQuery;
-    const day = new Date(`${date}T00:00:00Z`).getUTCDay();
-    if (day !== 3) {
-        return res.status(400).json({ error: 'Appointments are only available on Wednesdays.' });
-    }
-
-    const allSlots = generateSlots();
+app.get('/api/public/doctors', async (req, res) => {
     try {
-        const existingAppointments = await Appointment.find({ date });
-        const bookedTimes = existingAppointments.map((a) => a.time);
-        const availableSlots = allSlots.map((time) => ({
-            time,
-            available: !bookedTimes.includes(time)
-        }));
-        return res.json(availableSlots);
+        const doctors = await Doctor.find({ isActive: true }).sort({ displayName: 1 }).lean();
+        return res.json({
+            doctors: doctors.map(sanitizeDoctorForPublic)
+        });
     } catch (_) {
         return res.status(500).json({ error: 'Database error' });
     }
 });
 
-app.post('/api/book', optionalAuth, validateBody(bookBodySchema), async (req, res) => {
-    const { name, phone, email, type, date, time, hasDiagnosis, diagnosticFile, diagnosticFileMeta } = req.validatedBody;
+app.get('/api/slots', validateQuery(slotsQuerySchema), async (req, res) => {
+    const { date, doctor: doctorIdentifier } = req.validatedQuery;
+    try {
+        const doctor = await resolveDoctorByIdentifier(doctorIdentifier, { requireActive: true });
+        if (!doctor) {
+            return res.status(404).json({ error: 'Doctor not found.' });
+        }
+
+        if (!isDateInDoctorRange(date, doctor.bookingSettings?.monthsToShow)) {
+            return res.status(400).json({ error: 'Data selectata este in afara intervalului permis pentru acest medic.' });
+        }
+
+        const day = getUtcDateFromISO(date).getUTCDay();
+        const weekdays = Array.isArray(doctor.availabilityRules?.weekdays) ? doctor.availabilityRules.weekdays : DEFAULT_AVAILABILITY_WEEKDAYS;
+        if (!weekdays.includes(day)) {
+            return res.status(400).json({ error: 'Medicul selectat nu are disponibilitate in aceasta zi.' });
+        }
+
+        const allSlots = generateDoctorSlots(doctor);
+        const isBlockedDate = Array.isArray(doctor.blockedDates) && doctor.blockedDates.includes(date);
+
+        const existingAppointments = await Appointment.find({ date, doctorId: doctor._id }).select('time').lean();
+        const bookedTimes = existingAppointments.map((a) => a.time);
+        const availableSlots = allSlots.map((time) => ({
+            time,
+            available: !isBlockedDate && !bookedTimes.includes(time)
+        }));
+
+        return res.json({
+            doctor: sanitizeDoctorForPublic(doctor),
+            date,
+            blocked: !!isBlockedDate,
+            slots: availableSlots
+        });
+    } catch (_) {
+        return res.status(500).json({ error: 'Database error' });
+    }
+});
+
+async function handleAppointmentBooking(req, res) {
+    const { name, phone, email, type, date, time, hasDiagnosis, diagnosticFile, diagnosticFileMeta, doctorId, doctorSlug } = req.validatedBody;
 
     if (!validatePhone(phone)) {
         return res.status(400).json({ error: 'Format telefon invalid.' });
     }
 
-    const [hours, minutes] = String(time).split(':').map(Number);
-    const minutesOfDay = (hours * 60) + minutes;
-    if (Number.isNaN(minutesOfDay) || minutesOfDay < 9 * 60 || minutesOfDay > 13 * 60 + 40 || minutes % 20 !== 0) {
-        return res.status(400).json({ error: 'Ora selectata este invalida.' });
-    }
-
-    const dateDay = new Date(`${date}T00:00:00Z`).getUTCDay();
-    if (dateDay !== 3) {
-        return res.status(400).json({ error: 'Programarile sunt disponibile doar miercurea.' });
-    }
-
     try {
+        const doctorLookup = doctorId || doctorSlug;
+        const doctor = await resolveDoctorByIdentifier(doctorLookup, { requireActive: true });
+        if (!doctor) {
+            return res.status(404).json({ error: 'Medicul selectat nu exista sau nu este activ.' });
+        }
+
+        if (!isDateInDoctorRange(date, doctor.bookingSettings?.monthsToShow)) {
+            return res.status(400).json({ error: 'Data selectata este in afara intervalului permis pentru acest medic.' });
+        }
+
+        const appointmentDay = getUtcDateFromISO(date).getUTCDay();
+        const weekdays = Array.isArray(doctor.availabilityRules?.weekdays) ? doctor.availabilityRules.weekdays : DEFAULT_AVAILABILITY_WEEKDAYS;
+        if (!weekdays.includes(appointmentDay)) {
+            return res.status(400).json({ error: 'Medicul selectat nu are disponibilitate in aceasta zi.' });
+        }
+
+        if (Array.isArray(doctor.blockedDates) && doctor.blockedDates.includes(date)) {
+            return res.status(409).json({ error: 'Ziua selectata este indisponibila pentru medicul ales.' });
+        }
+
+        const allowedSlots = generateDoctorSlots(doctor);
+        if (!allowedSlots.includes(time)) {
+            return res.status(400).json({ error: 'Ora selectata este invalida pentru medicul ales.' });
+        }
+
         if (diagnosticFile) {
             return res.status(400).json({ error: 'Incarcarea directa de fisiere este dezactivata. Folositi stocare externa securizata.' });
         }
 
-        let safeDiagnosticFileMeta = null;
+        let safeDiagnosticFileMeta;
         if (hasDiagnosis) {
             if (!ENABLE_DIAGNOSTIC_UPLOAD && diagnosticFileMeta) {
                 return res.status(400).json({ error: 'Incarcarea documentelor este dezactivata momentan.' });
@@ -1462,17 +2039,23 @@ app.post('/api/book', optionalAuth, validateBody(bookBodySchema), async (req, re
             }
         }
 
-        const newAppointment = new Appointment({
+        const newAppointmentPayload = {
             name,
             phone: cleanPhone(phone),
             email: email.toLowerCase().trim(),
             type,
             date,
             time,
+            doctorId: doctor._id,
+            doctorSnapshotName: doctor.displayName,
             hasDiagnosis: !!hasDiagnosis,
-            diagnosticFileMeta: safeDiagnosticFileMeta,
             userId: req.user ? req.user._id : null
-        });
+        };
+        if (safeDiagnosticFileMeta) {
+            newAppointmentPayload.diagnosticFileMeta = safeDiagnosticFileMeta;
+        }
+
+        const newAppointment = new Appointment(newAppointmentPayload);
         await newAppointment.save();
 
         const appointmentData = {
@@ -1500,12 +2083,58 @@ app.post('/api/book', optionalAuth, validateBody(bookBodySchema), async (req, re
 
         return res.json({ success: true, message: 'Programare confirmata! Verificati e-mail-ul pentru invitatie.' });
     } catch (err) {
+        console.error('Booking save failed:', err?.message || err, err?.code || '');
         if (err?.code === 11000) {
             return res.status(409).json({ error: 'Interval deja rezervat.' });
         }
         return res.status(500).json({ error: 'Eroare la salvare.' });
     }
-});
+}
+
+app.post('/api/book', optionalAuth, validateBody(bookBodySchema), handleAppointmentBooking);
+app.post('/api/appointments', optionalAuth, validateBody(bookBodySchema), handleAppointmentBooking);
+
+function getAdminDoctorScopeQuery(user, fieldName = 'doctorId') {
+    const scope = doctorScopeQueryForUser(user, fieldName);
+    if (scope === null) {
+        return null;
+    }
+    return scope;
+}
+
+function sanitizeUserForAdmin(userDoc, doctorMap = new Map()) {
+    const managedDoctorIds = normalizeManagedDoctorIds(userDoc.managedDoctorIds);
+    return {
+        _id: userDoc._id,
+        email: userDoc.email,
+        phone: userDoc.phone,
+        displayName: userDoc.displayName,
+        role: normalizeRoleValue(userDoc.role),
+        managedDoctorIds,
+        managedDoctors: managedDoctorIds
+            .map((id) => doctorMap.get(id))
+            .filter(Boolean),
+        createdAt: userDoc.createdAt
+    };
+}
+
+async function assertManagedDoctorsExist(managedDoctorIds) {
+    const ids = (managedDoctorIds || []).map((id) => new mongoose.Types.ObjectId(id));
+    return validateDoctorIdsExist(ids);
+}
+
+async function loadDoctorsMapByIds(rawIds = []) {
+    const ids = normalizeManagedDoctorIds(rawIds);
+    if (ids.length === 0) {
+        return new Map();
+    }
+    const doctors = await Doctor.find({ _id: { $in: ids } }).select('_id slug displayName').lean();
+    const map = new Map();
+    for (const doctor of doctors) {
+        map.set(String(doctor._id), { _id: doctor._id, slug: doctor.slug, displayName: doctor.displayName });
+    }
+    return map;
+}
 
 
 // =====================
@@ -1517,7 +2146,12 @@ app.get('/api/admin/appointments', requireViewerSchedulerOrSuperadmin, async (re
     setAuthNoStore(res);
 
     try {
-        const appointments = await Appointment.find().sort({ date: 1, time: 1 }).lean();
+        const scopeQuery = getAdminDoctorScopeQuery(req.user, 'doctorId');
+        if (scopeQuery === null) {
+            return res.status(403).json({ error: 'Nu aveti niciun medic asignat.' });
+        }
+
+        const appointments = await Appointment.find(scopeQuery).sort({ date: 1, time: 1 }).lean();
         await writeAuditLog(req, {
             action: 'appointments_list_view',
             result: 'success',
@@ -1543,6 +2177,9 @@ app.get('/api/admin/appointments/:id', requireViewerSchedulerOrSuperadmin, async
         const appointment = await Appointment.findById(appointmentId).lean();
         if (!appointment) {
             return res.status(404).json({ error: 'Programare negasita.' });
+        }
+        if (!canUserAccessDoctor(req.user, appointment.doctorId)) {
+            return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
         }
 
         await writeAuditLog(req, {
@@ -1570,6 +2207,9 @@ app.get('/api/admin/appointments/:id/file-url', requireSchedulerOrSuperadmin, as
         const appointment = await Appointment.findById(appointmentId).lean();
         if (!appointment) {
             return res.status(404).json({ error: 'Programare negasita.' });
+        }
+        if (!canUserAccessDoctor(req.user, appointment.doctorId)) {
+            return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
         }
 
         await writeAuditLog(req, {
@@ -1601,6 +2241,9 @@ app.post('/api/admin/resend-email/:id', requireSchedulerOrSuperadmin, async (req
     try {
         const appointment = await Appointment.findById(appointmentId);
         if (!appointment) return res.status(404).json({ error: 'Programare negasita.' });
+        if (!canUserAccessDoctor(req.user, appointment.doctorId)) {
+            return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
+        }
         if (!appointment.email) return res.status(400).json({ error: 'Clientul nu are e-mail.' });
 
         const { name, email, type, date, time } = appointment;
@@ -1644,7 +2287,7 @@ app.post('/api/admin/resend-email/:id', requireSchedulerOrSuperadmin, async (req
     }
 });
 
-app.get('/api/admin/stats', requireViewerSchedulerOrSuperadmin, async (req, res) => {
+app.get('/api/admin/stats', requireSuperadminOnly, async (req, res) => {
     setAuthNoStore(res);
 
     try {
@@ -1768,6 +2411,7 @@ app.get('/api/admin/export', requireSuperadminOnly, requireStepUp('appointments_
         }];
 
         const data = appointments.map((a) => ({
+            Medic: a.doctorSnapshotName || '',
             Data: a.date,
             Ora: a.time,
             Tip: a.type,
@@ -1812,6 +2456,206 @@ app.get('/api/admin/export', requireSuperadminOnly, requireStepUp('appointments_
 });
 
 // =====================
+//  DOCTOR MANAGEMENT
+// =====================
+
+app.get('/api/admin/doctors', requireViewerSchedulerOrSuperadmin, async (req, res) => {
+    setAuthNoStore(res);
+
+    try {
+        const scopeQuery = doctorScopeQueryForUser(req.user);
+        if (scopeQuery === null) {
+            return res.status(403).json({ error: 'Nu aveti niciun medic asignat.' });
+        }
+
+        const doctors = await Doctor.find(scopeQuery).sort({ displayName: 1 }).lean();
+        await writeAuditLog(req, {
+            action: 'doctor_list_view',
+            result: 'success',
+            targetType: 'doctor_collection',
+            actorUser: req.user,
+            metadata: { count: doctors.length }
+        });
+        return res.json(doctors.map((doctor) => sanitizeDoctorForAdmin(doctor, { includeAudit: isSuperadminUser(req.user) })));
+    } catch (_) {
+        return res.status(500).json({ error: 'Database error' });
+    }
+});
+
+app.post('/api/admin/doctors', requireSuperadminOnly, validateBody(doctorCreateBodySchema), async (req, res) => {
+    setAuthNoStore(res);
+
+    try {
+        const payload = req.validatedBody;
+        const doctor = new Doctor({
+            slug: payload.slug,
+            displayName: sanitizeInlineString(payload.displayName),
+            specialty: sanitizeInlineString(payload.specialty),
+            isActive: !!payload.isActive,
+            bookingSettings: payload.bookingSettings,
+            availabilityRules: payload.availabilityRules,
+            blockedDates: payload.blockedDates,
+            createdByUserId: req.user._id,
+            updatedByUserId: req.user._id
+        });
+        await doctor.save();
+
+        await writeAuditLog(req, {
+            action: 'doctor_create',
+            result: 'success',
+            targetType: 'doctor',
+            targetId: String(doctor._id),
+            actorUser: req.user,
+            metadata: { slug: doctor.slug }
+        });
+        return res.status(201).json({ success: true, doctor: sanitizeDoctorForAdmin(doctor.toObject(), { includeAudit: true }) });
+    } catch (error) {
+        await writeAuditLog(req, {
+            action: 'doctor_create',
+            result: 'failure',
+            targetType: 'doctor',
+            actorUser: req.user
+        });
+        if (error?.code === 11000) {
+            return res.status(409).json({ error: 'Slug-ul medicului exista deja.' });
+        }
+        return res.status(500).json({ error: 'Eroare la crearea medicului.' });
+    }
+});
+
+app.patch('/api/admin/doctors/:id', requireSuperadminOnly, validateBody(doctorPatchBodySchema), async (req, res) => {
+    setAuthNoStore(res);
+
+    const doctorId = String(req.params.id || '').trim();
+    if (!MONGODB_OBJECT_ID_REGEX.test(doctorId)) {
+        return res.status(400).json({ error: 'Medic invalid.' });
+    }
+
+    try {
+        const updates = req.validatedBody;
+        const updateDoc = {};
+        if (updates.slug !== undefined) updateDoc.slug = updates.slug;
+        if (updates.displayName !== undefined) updateDoc.displayName = sanitizeInlineString(updates.displayName);
+        if (updates.specialty !== undefined) updateDoc.specialty = sanitizeInlineString(updates.specialty);
+        if (updates.isActive !== undefined) updateDoc.isActive = updates.isActive;
+        if (updates.bookingSettings !== undefined) updateDoc.bookingSettings = updates.bookingSettings;
+        if (updates.availabilityRules !== undefined) updateDoc.availabilityRules = updates.availabilityRules;
+        if (updates.blockedDates !== undefined) updateDoc.blockedDates = updates.blockedDates;
+        updateDoc.updatedByUserId = req.user._id;
+
+        const doctor = await Doctor.findByIdAndUpdate(doctorId, { $set: updateDoc }, { new: true, runValidators: true });
+        if (!doctor) {
+            return res.status(404).json({ error: 'Medic negasit.' });
+        }
+
+        await Appointment.updateMany(
+            { doctorId: doctor._id, doctorSnapshotName: { $ne: doctor.displayName } },
+            { $set: { doctorSnapshotName: doctor.displayName } }
+        );
+
+        await writeAuditLog(req, {
+            action: 'doctor_update',
+            result: 'success',
+            targetType: 'doctor',
+            targetId: doctorId,
+            actorUser: req.user,
+            metadata: { fields: Object.keys(updateDoc) }
+        });
+        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(doctor.toObject(), { includeAudit: true }) });
+    } catch (error) {
+        await writeAuditLog(req, {
+            action: 'doctor_update',
+            result: 'failure',
+            targetType: 'doctor',
+            targetId: doctorId,
+            actorUser: req.user
+        });
+        if (error?.code === 11000) {
+            return res.status(409).json({ error: 'Slug-ul medicului exista deja.' });
+        }
+        return res.status(500).json({ error: 'Eroare la actualizarea medicului.' });
+    }
+});
+
+app.post('/api/admin/doctors/:id/block-date', requireSuperadminOnly, validateBody(doctorBlockDateBodySchema), async (req, res) => {
+    setAuthNoStore(res);
+
+    const doctorId = String(req.params.id || '').trim();
+    if (!MONGODB_OBJECT_ID_REGEX.test(doctorId)) {
+        return res.status(400).json({ error: 'Medic invalid.' });
+    }
+
+    try {
+        const { date } = req.validatedBody;
+        const doctor = await Doctor.findByIdAndUpdate(
+            doctorId,
+            {
+                $addToSet: { blockedDates: date },
+                $set: { updatedByUserId: req.user._id }
+            },
+            { new: true, runValidators: true }
+        );
+
+        if (!doctor) {
+            return res.status(404).json({ error: 'Medic negasit.' });
+        }
+
+        await writeAuditLog(req, {
+            action: 'doctor_block_date',
+            result: 'success',
+            targetType: 'doctor',
+            targetId: doctorId,
+            actorUser: req.user,
+            metadata: { date }
+        });
+        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(doctor.toObject(), { includeAudit: true }) });
+    } catch (_) {
+        return res.status(500).json({ error: 'Eroare la blocarea zilei.' });
+    }
+});
+
+app.delete('/api/admin/doctors/:id/block-date/:date', requireSuperadminOnly, async (req, res) => {
+    setAuthNoStore(res);
+
+    const doctorId = String(req.params.id || '').trim();
+    if (!MONGODB_OBJECT_ID_REGEX.test(doctorId)) {
+        return res.status(400).json({ error: 'Medic invalid.' });
+    }
+
+    const rawDate = String(req.params.date || '').trim();
+    if (!isValidISODateString(rawDate)) {
+        return res.status(400).json({ error: 'Data invalida.' });
+    }
+
+    try {
+        const doctor = await Doctor.findByIdAndUpdate(
+            doctorId,
+            {
+                $pull: { blockedDates: rawDate },
+                $set: { updatedByUserId: req.user._id }
+            },
+            { new: true, runValidators: true }
+        );
+        if (!doctor) {
+            return res.status(404).json({ error: 'Medic negasit.' });
+        }
+
+        await writeAuditLog(req, {
+            action: 'doctor_unblock_date',
+            result: 'success',
+            targetType: 'doctor',
+            targetId: doctorId,
+            actorUser: req.user,
+            metadata: { date: rawDate }
+        });
+
+        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(doctor.toObject(), { includeAudit: true }) });
+    } catch (_) {
+        return res.status(500).json({ error: 'Eroare la reactivarea zilei.' });
+    }
+});
+
+// =====================
 //  USER MANAGEMENT (SUPER ADMIN)
 // =====================
 
@@ -1819,7 +2663,7 @@ app.post('/api/admin/users', requireSuperadminOnly, validateBody(adminCreateUser
     setAuthNoStore(res);
 
     try {
-        const { email, phone, password, displayName, role } = req.validatedBody;
+        const { email, phone, password, displayName, role, managedDoctorIds } = req.validatedBody;
 
         if (!validatePhone(phone)) {
             return res.status(400).json({ error: 'Format telefon invalid. Folositi formatul 07xx xxx xxx.' });
@@ -1827,6 +2671,11 @@ app.post('/api/admin/users', requireSuperadminOnly, validateBody(adminCreateUser
 
         const normalizedEmail = String(email).toLowerCase();
         const cleanedPhone = cleanPhone(phone);
+        const normalizedDoctorIds = normalizeManagedDoctorIds(managedDoctorIds || []);
+        const doctorIdsExist = await assertManagedDoctorsExist(normalizedDoctorIds);
+        if (!doctorIdsExist) {
+            return res.status(400).json({ error: 'Unul sau mai multi doctori asignati nu exista.' });
+        }
 
         const existingEmail = await User.findOne({ email: normalizedEmail });
         if (existingEmail) {
@@ -1844,29 +2693,24 @@ app.post('/api/admin/users', requireSuperadminOnly, validateBody(adminCreateUser
             phone: cleanedPhone,
             password: hashedPassword,
             displayName: displayName.trim(),
-            role
+            role,
+            managedDoctorIds: normalizedDoctorIds.map((id) => new mongoose.Types.ObjectId(id))
         });
 
         await user.save();
+        const doctorsMap = await loadDoctorsMapByIds(normalizedDoctorIds);
         await writeAuditLog(req, {
             action: 'user_create',
             result: 'success',
             targetType: 'user',
             targetId: String(user._id),
             actorUser: req.user,
-            metadata: { role }
+            metadata: { role, managedDoctorIds: normalizedDoctorIds }
         });
 
         return res.status(201).json({
             success: true,
-            user: {
-                _id: user._id,
-                email: user.email,
-                phone: user.phone,
-                displayName: user.displayName,
-                role: normalizeRoleValue(user.role),
-                createdAt: user.createdAt
-            }
+            user: sanitizeUserForAdmin(user.toObject(), doctorsMap)
         });
     } catch (_) {
         await writeAuditLog(req, {
@@ -1884,10 +2728,9 @@ app.get('/api/admin/users', requireSuperadminOnly, async (req, res) => {
 
     try {
         const users = await User.find().select('-password').sort({ createdAt: -1 }).lean();
-        const normalizedUsers = users.map((user) => ({
-            ...user,
-            role: normalizeRoleValue(user.role)
-        }));
+        const allDoctorIds = users.flatMap((user) => normalizeManagedDoctorIds(user.managedDoctorIds));
+        const doctorMap = await loadDoctorsMapByIds(allDoctorIds);
+        const normalizedUsers = users.map((user) => sanitizeUserForAdmin(user, doctorMap));
         await writeAuditLog(req, {
             action: 'users_list_view',
             result: 'success',
@@ -1935,6 +2778,161 @@ app.post('/api/admin/users/role', requireSuperadminOnly, requireStepUp('user_rol
             action: 'user_role_change',
             result: 'failure',
             targetType: 'user',
+            actorUser: req.user
+        });
+        return res.status(500).json({ error: 'Database error' });
+    }
+});
+
+app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_update'), validateBody(adminUpdateUserBodySchema), async (req, res) => {
+    setAuthNoStore(res);
+
+    const userId = String(req.params.id || '').trim();
+    if (!MONGODB_OBJECT_ID_REGEX.test(userId)) {
+        return res.status(400).json({ error: 'Utilizator invalid.' });
+    }
+
+    try {
+        const existingUser = await User.findById(userId);
+        if (!existingUser) {
+            return res.status(404).json({ error: 'Utilizator negasit.' });
+        }
+
+        const updates = req.validatedBody;
+        const changedFields = [];
+
+        if (updates.email !== undefined) {
+            const normalizedEmail = updates.email.toLowerCase();
+            const duplicate = await User.findOne({ email: normalizedEmail, _id: { $ne: existingUser._id } });
+            if (duplicate) {
+                return res.status(409).json({ error: 'Acest email este deja inregistrat.' });
+            }
+            existingUser.email = normalizedEmail;
+            changedFields.push('email');
+        }
+
+        if (updates.phone !== undefined) {
+            if (!validatePhone(updates.phone)) {
+                return res.status(400).json({ error: 'Format telefon invalid.' });
+            }
+            const cleanedPhone = cleanPhone(updates.phone);
+            const duplicatePhone = await User.findOne({ phone: cleanedPhone, _id: { $ne: existingUser._id } });
+            if (duplicatePhone) {
+                return res.status(409).json({ error: 'Acest numar de telefon este deja inregistrat.' });
+            }
+            existingUser.phone = cleanedPhone;
+            changedFields.push('phone');
+        }
+
+        if (updates.displayName !== undefined) {
+            existingUser.displayName = sanitizeInlineString(updates.displayName);
+            changedFields.push('displayName');
+        }
+
+        if (updates.role !== undefined) {
+            if (String(existingUser._id) === String(req.user._id) && updates.role !== ROLE.SUPERADMIN) {
+                return res.status(403).json({ error: 'Nu va puteti schimba propriul rol din superadmin.' });
+            }
+
+            if (existingUser.role === ROLE.SUPERADMIN && updates.role !== ROLE.SUPERADMIN) {
+                const superadminCount = await User.countDocuments({ role: ROLE.SUPERADMIN });
+                if (superadminCount <= 1) {
+                    return res.status(403).json({ error: 'Nu puteti retrograda ultimul superadmin.' });
+                }
+            }
+
+            existingUser.role = updates.role;
+            changedFields.push('role');
+        }
+
+        if (updates.password !== undefined) {
+            existingUser.password = await bcrypt.hash(updates.password, SALT_ROUNDS);
+            changedFields.push('password');
+        }
+
+        if (updates.managedDoctorIds !== undefined) {
+            const normalizedDoctorIds = normalizeManagedDoctorIds(updates.managedDoctorIds);
+            const exists = await assertManagedDoctorsExist(normalizedDoctorIds);
+            if (!exists) {
+                return res.status(400).json({ error: 'Unul sau mai multi doctori asignati nu exista.' });
+            }
+            existingUser.managedDoctorIds = normalizedDoctorIds.map((id) => new mongoose.Types.ObjectId(id));
+            changedFields.push('managedDoctorIds');
+        }
+
+        if (changedFields.length === 0) {
+            return res.status(400).json({ error: 'Nicio schimbare valida.' });
+        }
+
+        await existingUser.save();
+        const doctorsMap = await loadDoctorsMapByIds(existingUser.managedDoctorIds);
+
+        await writeAuditLog(req, {
+            action: 'user_update',
+            result: 'success',
+            targetType: 'user',
+            targetId: String(existingUser._id),
+            actorUser: req.user,
+            metadata: { changedFields }
+        });
+
+        return res.json({
+            success: true,
+            user: sanitizeUserForAdmin(existingUser.toObject(), doctorsMap)
+        });
+    } catch (_) {
+        await writeAuditLog(req, {
+            action: 'user_update',
+            result: 'failure',
+            targetType: 'user',
+            targetId: userId,
+            actorUser: req.user
+        });
+        return res.status(500).json({ error: 'Database error' });
+    }
+});
+
+app.delete('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_delete'), async (req, res) => {
+    setAuthNoStore(res);
+
+    const userId = String(req.params.id || '').trim();
+    if (!MONGODB_OBJECT_ID_REGEX.test(userId)) {
+        return res.status(400).json({ error: 'Utilizator invalid.' });
+    }
+
+    if (String(userId) === String(req.user._id)) {
+        return res.status(403).json({ error: 'Nu va puteti sterge propriul cont.' });
+    }
+
+    try {
+        const target = await User.findById(userId);
+        if (!target) {
+            return res.status(404).json({ error: 'Utilizator negasit.' });
+        }
+
+        if (target.role === ROLE.SUPERADMIN) {
+            const superadminCount = await User.countDocuments({ role: ROLE.SUPERADMIN });
+            if (superadminCount <= 1) {
+                return res.status(403).json({ error: 'Nu puteti sterge ultimul superadmin.' });
+            }
+        }
+
+        await User.deleteOne({ _id: target._id });
+        await writeAuditLog(req, {
+            action: 'user_delete',
+            result: 'success',
+            targetType: 'user',
+            targetId: String(target._id),
+            actorUser: req.user
+        });
+
+        return res.json({ success: true, message: 'Utilizator sters.' });
+    } catch (_) {
+        await writeAuditLog(req, {
+            action: 'user_delete',
+            result: 'failure',
+            targetType: 'user',
+            targetId: userId,
             actorUser: req.user
         });
         return res.status(500).json({ error: 'Database error' });

@@ -99,7 +99,7 @@
                 <!-- Step 1 -->
                 <div class="flex items-center gap-2" id="stepIndicator1">
                     <div class="step-dot active" id="stepDot1">1</div>
-                    <span class="text-sm font-semibold text-brand-300 hidden sm:inline">Alege Data</span>
+                    <span class="text-sm font-semibold text-brand-300 hidden sm:inline">Alege Medic si Data</span>
                 </div>
                 <div class="step-line" id="stepLine1"></div>
                 <!-- Step 2 -->
@@ -125,9 +125,15 @@
         <!-- Step 1: Calendar -->
         <section id="step-calendar" class="step-section active-step">
             <div class="text-center mb-8">
-                <h2 class="text-2xl md:text-3xl font-bold text-brand-100 mb-2">Selecteaza Data Programarii</h2>
-                <p class="text-brand-300/80 text-base">Zilele disponibile sunt marcate cu <span
-                        class="text-brand-300 font-bold">verde</span> (doar miercuri).</p>
+                <h2 class="text-2xl md:text-3xl font-bold text-brand-100 mb-2">Selecteaza Medicul si Data Programarii</h2>
+                <p class="text-brand-300/80 text-base">Alege medicul, apoi selecteaza o data disponibila in calendar.</p>
+            </div>
+            <div class="max-w-lg mx-auto mb-5">
+                <label for="doctorSelect" class="form-label">Medic <span class="text-red-400">*</span></label>
+                <select id="doctorSelect" class="form-input" required>
+                    <option value="">Selecteaza un medic...</option>
+                </select>
+                <p id="doctorSelectHint" class="text-xs text-brand-400/70 mt-2">Lista medicilor activi se incarca...</p>
             </div>
             <div class="max-w-lg mx-auto">
                 <div id="calendar-card"
@@ -167,6 +173,8 @@
         <section id="step-slots" class="step-section hidden">
             <div class="text-center mb-8">
                 <h2 class="text-2xl md:text-3xl font-bold text-brand-100 mb-2">Selecteaza Intervalul Orar</h2>
+                <p class="text-brand-300/80 text-base">Medic: <span id="selectedDoctorDisplay"
+                        class="text-brand-300 font-bold"></span></p>
                 <p class="text-brand-300/80 text-base">Data selectata: <span id="selectedDateDisplay"
                         class="text-brand-300 font-bold"></span></p>
             </div>
@@ -201,6 +209,7 @@
             <div class="text-center mb-8">
                 <h2 class="text-2xl md:text-3xl font-bold text-brand-100 mb-2">Completeaza Datele Personale</h2>
                 <p class="text-brand-300/80 text-base">
+                    Medic: <span id="formSummaryDoctor" class="text-brand-300 font-bold"></span><br>
                     <span id="formSummaryDate" class="text-brand-300 font-bold"></span> la ora
                     <span id="formSummaryTime" class="text-brand-300 font-bold"></span>
                 </p>
@@ -210,6 +219,8 @@
                     class="bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 p-6 md:p-8 space-y-5">
                     <input type="hidden" id="formDate">
                     <input type="hidden" id="formTime">
+                    <input type="hidden" id="formDoctorId">
+                    <input type="hidden" id="formDoctorSlug">
 
                     <!-- Name Fields -->
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">

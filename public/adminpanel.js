@@ -17,11 +17,16 @@ document.addEventListener('DOMContentLoaded', () => {
         prevAdminDate: byId('prevAdminDate'),
         nextAdminDate: byId('nextAdminDate'),
         timelineHeaderCount: byId('timelineHeaderCount'),
+        appointmentDoctorFilter: byId('appointmentDoctorFilter'),
         manageUsersBtn: byId('manageUsersBtn'),
+        manageDoctorsBtn: byId('manageDoctorsBtn'),
         userManagerContainer: byId('userManagerContainer'),
+        doctorManagerContainer: byId('doctorManagerContainer'),
         timelineContainer: byId('timelineContainer'),
         backToTimeline: byId('backToTimeline'),
+        backToTimelineFromDoctors: byId('backToTimelineFromDoctors'),
         userTableBody: byId('userTableBody'),
+        doctorTableBody: byId('doctorTableBody'),
         resetDatabaseBtn: byId('resetDatabaseBtn'),
         cancelDayAppointmentsBtn: byId('cancelDayAppointmentsBtn'),
         adminActionButtons: byId('adminActionButtons'),
@@ -32,7 +37,19 @@ document.addEventListener('DOMContentLoaded', () => {
         newUserPhone: byId('newUserPhone'),
         newUserPassword: byId('newUserPassword'),
         newUserRole: byId('newUserRole'),
+        newUserManagedDoctors: byId('newUserManagedDoctors'),
         createUserSubmit: byId('createUserSubmit'),
+        createDoctorForm: byId('createDoctorForm'),
+        createDoctorSubmit: byId('createDoctorSubmit'),
+        doctorSlug: byId('doctorSlug'),
+        doctorDisplayName: byId('doctorDisplayName'),
+        doctorSpecialty: byId('doctorSpecialty'),
+        doctorIsActive: byId('doctorIsActive'),
+        doctorWorkdayStart: byId('doctorWorkdayStart'),
+        doctorWorkdayEnd: byId('doctorWorkdayEnd'),
+        doctorDuration: byId('doctorDuration'),
+        doctorMonthsToShow: byId('doctorMonthsToShow'),
+        doctorWeekdays: byId('doctorWeekdays'),
         toast: byId('toast'),
         toastTitle: byId('toastTitle'),
         toastMessage: byId('toastMessage')
@@ -45,38 +62,21 @@ document.addEventListener('DOMContentLoaded', () => {
     let initialized = false;
     let adminActiveDate = new Date();
     adminActiveDate.setHours(0, 0, 0, 0);
-    while (adminActiveDate.getDay() !== 3) {
-        adminActiveDate.setDate(adminActiveDate.getDate() + 1);
-    }
+
+    let doctorsCache = [];
+    let appointmentsCache = [];
+    let usersCache = [];
+    let searchTerm = '';
 
     const isStaffRole = (role) => role === 'viewer' || role === 'scheduler' || role === 'superadmin';
     const isSuperadmin = () => (AUTH.getUser()?.role || '') === 'superadmin';
     const isSchedulerOrSuperadmin = () => ['scheduler', 'superadmin'].includes(AUTH.getUser()?.role || '');
 
-    function updateAuthUI(user) {
-        if (!user) {
-            el.authGuest.classList.remove('hidden');
-            el.authUser.classList.add('hidden');
-            return;
-        }
-
-        el.authGuest.classList.add('hidden');
-        el.authUser.classList.remove('hidden');
-        el.authUserName.textContent = `${user.displayName} [${user.role || 'viewer'}]`;
-    }
-
-    function showScreen(mode) {
-        el.adminApp.classList.add('hidden');
-        el.adminAuthRequired.classList.add('hidden');
-        el.adminAccessDenied.classList.add('hidden');
-
-        if (mode === 'auth') {
-            el.adminAuthRequired.classList.remove('hidden');
-        } else if (mode === 'denied') {
-            el.adminAccessDenied.classList.remove('hidden');
-        } else {
-            el.adminApp.classList.remove('hidden');
-        }
+    function toISODate(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
     }
 
     function clearNode(node) {
@@ -129,18 +129,41 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function updateAuthUI(user) {
+        if (!user) {
+            el.authGuest.classList.remove('hidden');
+            el.authUser.classList.add('hidden');
+            return;
+        }
+
+        el.authGuest.classList.add('hidden');
+        el.authUser.classList.remove('hidden');
+        el.authUserName.textContent = `${user.displayName} [${user.role || 'viewer'}]`;
+    }
+
+    function showScreen(mode) {
+        el.adminApp.classList.add('hidden');
+        el.adminAuthRequired.classList.add('hidden');
+        el.adminAccessDenied.classList.add('hidden');
+
+        if (mode === 'auth') {
+            el.adminAuthRequired.classList.remove('hidden');
+        } else if (mode === 'denied') {
+            el.adminAccessDenied.classList.remove('hidden');
+        } else {
+            el.adminApp.classList.remove('hidden');
+        }
+    }
+
     function getAdminActiveDateISO() {
-        const y = adminActiveDate.getFullYear();
-        const m = String(adminActiveDate.getMonth() + 1).padStart(2, '0');
-        const d = String(adminActiveDate.getDate()).padStart(2, '0');
-        return `${y}-${m}-${d}`;
+        return toISODate(adminActiveDate);
     }
 
     function updateAdminDateDisplay() {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const isToday = adminActiveDate.getTime() === today.getTime();
-        const dateStr = new Intl.DateTimeFormat('ro-RO', { day: 'numeric', month: 'long' }).format(adminActiveDate);
+        const dateStr = new Intl.DateTimeFormat('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' }).format(adminActiveDate);
         el.currentAdminDateDisplay.textContent = (isToday ? 'Azi, ' : '') + dateStr;
     }
 
@@ -156,13 +179,16 @@ document.addEventListener('DOMContentLoaded', () => {
         searchInput.className = 'px-4 py-2 rounded-xl bg-brand-800 border border-brand-600/30 text-brand-100 placeholder-brand-400/50 text-sm focus:outline-none focus:border-brand-400 transition-all w-full md:w-64 order-first md:order-none';
 
         searchInput.addEventListener('input', () => {
-            fetchAdminAppointments(searchInput.value.toLowerCase());
+            searchTerm = searchInput.value.toLowerCase();
+            renderTimelineForCurrentFilters();
         });
 
         el.adminActionButtons.prepend(searchInput);
     }
 
     async function fetchAdminStats() {
+        if (!isSuperadmin()) return;
+
         const storageIndicator = byId('storage-indicator');
         const storageBar = byId('storage-bar');
         const storageText = byId('storage-text');
@@ -173,63 +199,107 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const res = await AUTH.apiFetch('/api/admin/stats');
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
             if (!res.ok) {
                 return;
             }
 
             storageIndicator.classList.remove('hidden');
-            storageBar.style.width = `${Math.min(data.percentUsed, 100)}%`;
+            storageBar.style.width = `${Math.min(Number(data.percentUsed) || 0, 100)}%`;
             storageText.textContent = `${data.usedSizeMB} MB / ${data.totalSizeMB} MB (${data.percentUsed}%)`;
 
-            storageBar.classList.toggle('bg-red-500', data.percentUsed > 80);
-            storageBar.classList.toggle('bg-medical-500', data.percentUsed <= 80);
-        } catch (error) {
-            console.error('Error fetching stats:', error);
+            storageBar.classList.toggle('bg-red-500', Number(data.percentUsed) > 80);
+            storageBar.classList.toggle('bg-brand-400', Number(data.percentUsed) <= 80);
+        } catch (_) {
+            // no-op
         }
     }
 
-    async function fetchAdminAppointments(filterTerm = '') {
-        setSingleMessage(el.timelineGrid, 'Se incarca programarile...', 'p-10 text-center text-gray-400 font-medium font-inter');
+    function fillDoctorSelectors() {
+        if (el.appointmentDoctorFilter) {
+            const currentValue = el.appointmentDoctorFilter.value;
+            clearNode(el.appointmentDoctorFilter);
 
-        try {
-            const res = await AUTH.apiFetch('/api/admin/appointments');
-            const appointments = await res.json().catch(() => null);
+            const allOption = document.createElement('option');
+            allOption.value = '';
+            allOption.textContent = 'Toți medicii';
+            el.appointmentDoctorFilter.appendChild(allOption);
 
-            if (!res.ok) {
-                throw new Error(appointments?.error || `Server error: ${res.status}`);
-            }
-
-            const activeDate = getAdminActiveDateISO();
-            const filtered = appointments.filter((app) => {
-                if (app.date !== activeDate) return false;
-                if (!filterTerm) return true;
-
-                return app.name.toLowerCase().includes(filterTerm)
-                    || app.phone.includes(filterTerm)
-                    || (app.email && app.email.toLowerCase().includes(filterTerm));
+            doctorsCache.forEach((doctor) => {
+                const option = document.createElement('option');
+                option.value = String(doctor._id);
+                option.textContent = `${doctor.displayName} (${doctor.slug})`;
+                el.appointmentDoctorFilter.appendChild(option);
             });
 
-            renderTimeline(filtered);
-            el.timelineHeaderCount.textContent = `(${filtered.length}) Programari`;
-        } catch (error) {
-            console.error('Admin Fetch Error:', error);
-            setSingleMessage(el.timelineGrid, String(error?.message || 'Eroare la incarcare.'), 'p-10 text-center text-red-400 font-medium');
+            if ([...el.appointmentDoctorFilter.options].some((opt) => opt.value === currentValue)) {
+                el.appointmentDoctorFilter.value = currentValue;
+            }
         }
+
+        if (el.newUserManagedDoctors) {
+            const selectedValues = new Set(Array.from(el.newUserManagedDoctors.selectedOptions).map((opt) => opt.value));
+            clearNode(el.newUserManagedDoctors);
+            doctorsCache.forEach((doctor) => {
+                const option = document.createElement('option');
+                option.value = String(doctor._id);
+                option.textContent = `${doctor.displayName} (${doctor.slug})`;
+                option.selected = selectedValues.has(option.value);
+                el.newUserManagedDoctors.appendChild(option);
+            });
+        }
+    }
+
+    async function fetchDoctors() {
+        try {
+            const res = await AUTH.apiFetch('/api/admin/doctors');
+            const data = await res.json().catch(() => []);
+            if (!res.ok) {
+                doctorsCache = [];
+                fillDoctorSelectors();
+                return;
+            }
+            doctorsCache = Array.isArray(data) ? data : [];
+            fillDoctorSelectors();
+            renderDoctorsTable();
+        } catch (_) {
+            doctorsCache = [];
+            fillDoctorSelectors();
+        }
+    }
+    function getFilteredAppointments() {
+        const activeDate = getAdminActiveDateISO();
+        const doctorFilter = String(el.appointmentDoctorFilter?.value || '');
+
+        return appointmentsCache
+            .filter((app) => app.date === activeDate)
+            .filter((app) => !doctorFilter || String(app.doctorId || '') === doctorFilter)
+            .filter((app) => {
+                if (!searchTerm) return true;
+                return String(app.name || '').toLowerCase().includes(searchTerm)
+                    || String(app.phone || '').toLowerCase().includes(searchTerm)
+                    || String(app.email || '').toLowerCase().includes(searchTerm)
+                    || String(app.doctorSnapshotName || '').toLowerCase().includes(searchTerm);
+            });
     }
 
     function renderTimeline(appointments) {
         clearNode(el.timelineGrid);
+
+        if (!appointments.length) {
+            setSingleMessage(el.timelineGrid, 'Nu exista programari pentru filtrele selectate.', 'p-10 text-center text-brand-400 font-medium');
+            return;
+        }
+
         const allowResend = isSchedulerOrSuperadmin();
         const allowDelete = isSuperadmin();
 
-        const clinicHours = [];
-        for (let hour = 9; hour < 14; hour += 1) {
-            for (let min = 0; min < 60; min += 20) {
-                if (hour === 13 && min > 40) break;
-                clinicHours.push(`${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
+        const sorted = [...appointments].sort((a, b) => {
+            if (a.time === b.time) {
+                return String(a.name || '').localeCompare(String(b.name || ''));
             }
-        }
+            return String(a.time || '').localeCompare(String(b.time || ''));
+        });
 
         const labeled = (label, value) => {
             const wrapper = document.createElement('span');
@@ -242,127 +312,111 @@ document.addEventListener('DOMContentLoaded', () => {
             return wrapper;
         };
 
-        clinicHours.forEach((time) => {
+        sorted.forEach((app) => {
             const row = document.createElement('div');
             row.className = 'timeline-row';
 
             const hourLabel = document.createElement('div');
             hourLabel.className = 'timeline-hour';
-            hourLabel.textContent = time;
+            hourLabel.textContent = app.time || '--:--';
 
             const slotsArea = document.createElement('div');
             slotsArea.className = 'timeline-slots';
 
-            appointments.filter((app) => app.time === time).forEach((app) => {
-                const card = document.createElement('div');
-                card.className = `appointment-card ${app.type === 'Control' ? 'app-type-control' : 'app-type-prima'}`;
+            const card = document.createElement('div');
+            card.className = `appointment-card ${(app.type === 'Control') ? 'app-type-control' : 'app-type-prima'}`;
 
-                const content = document.createElement('div');
-                content.className = 'flex items-center gap-3 flex-wrap';
+            const content = document.createElement('div');
+            content.className = 'flex items-center gap-3 flex-wrap';
 
-                const nameEl = document.createElement('span');
-                nameEl.className = 'font-bold text-brand-100';
-                nameEl.textContent = app.name || '';
-                content.appendChild(nameEl);
+            const nameEl = document.createElement('span');
+            nameEl.className = 'font-bold text-brand-100';
+            nameEl.textContent = app.name || '';
+            content.appendChild(nameEl);
 
-                if (app.type === 'Prima Consultatie' || app.type === 'Prima Consultație') {
-                    const badge = document.createElement('span');
-                    badge.className = 'app-new-badge';
-                    badge.textContent = 'NOU';
-                    content.appendChild(badge);
-                }
+            if (app.type === 'Prima Consultatie' || app.type === 'Prima Consultație') {
+                const badge = document.createElement('span');
+                badge.className = 'app-new-badge';
+                badge.textContent = 'NOU';
+                content.appendChild(badge);
+            }
 
-                content.appendChild(labeled('Email', app.email || '-'));
-                content.appendChild(labeled('Tel', app.phone || '-'));
-                content.appendChild(labeled('Tip', app.type || '-'));
+            content.appendChild(labeled('Medic', app.doctorSnapshotName || '-'));
+            content.appendChild(labeled('Email', app.email || '-'));
+            content.appendChild(labeled('Tel', app.phone || '-'));
+            content.appendChild(labeled('Tip', app.type || '-'));
 
-                const status = document.createElement('span');
-                status.className = `px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase ${app.emailSent ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`;
-                status.textContent = app.emailSent ? 'Trimis' : 'Netrimis';
-                content.appendChild(status);
+            const status = document.createElement('span');
+            status.className = `px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase ${app.emailSent ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`;
+            status.textContent = app.emailSent ? 'Trimis' : 'Netrimis';
+            content.appendChild(status);
 
-                let resendBtn = null;
-                if (allowResend) {
-                    resendBtn = document.createElement('button');
-                    resendBtn.className = 'resend-email-btn bg-brand-400/10 hover:bg-brand-400/20 text-brand-400 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all';
-                    resendBtn.textContent = 'Trimite Manual';
-                    content.appendChild(resendBtn);
-                }
+            if (allowResend) {
+                const resendBtn = document.createElement('button');
+                resendBtn.className = 'resend-email-btn bg-brand-400/10 hover:bg-brand-400/20 text-brand-400 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all';
+                resendBtn.textContent = 'Trimite Manual';
 
-                let cancelBtn = null;
-                if (allowDelete) {
-                    cancelBtn = document.createElement('button');
-                    cancelBtn.className = 'cancel-appointment-btn bg-red-500/10 hover:bg-red-500/20 text-red-300 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all';
-                    cancelBtn.textContent = 'Anuleaza';
-                    content.appendChild(cancelBtn);
-                }
-
-                if (app.diagnosticFileMeta) {
-                    const docTag = document.createElement('span');
-                    docTag.className = 'ml-auto bg-brand-600/20 px-3 py-1 rounded-lg text-xs font-bold text-brand-300';
-                    docTag.textContent = `DOC: ${app.diagnosticFileMeta.mime || 'metadata'}`;
-                    content.appendChild(docTag);
-                }
-
-                if (resendBtn) {
-                    resendBtn.onclick = async (event) => {
-                        event.stopPropagation();
-                        resendBtn.disabled = true;
-                        const originalText = resendBtn.textContent;
-                        resendBtn.textContent = 'Se trimite...';
-
-                        try {
-                            const res = await AUTH.apiFetch(`/api/admin/resend-email/${app._id}`, { method: 'POST' });
-                            const data = await res.json();
-                            if (res.ok) {
-                                showToast('Succes', data.message);
-                                setTimeout(() => fetchAdminAppointments(''), 1200);
-                            } else {
-                                const message = data.details ? `${data.error}: ${data.details}` : (data.error || 'Eroare server');
-                                showToast('Eroare', message, 'error');
-                            }
-                        } catch (_) {
-                            showToast('Eroare', 'Eroare de conexiune.', 'error');
-                        } finally {
-                            resendBtn.disabled = false;
-                            resendBtn.textContent = originalText;
+                resendBtn.onclick = async (event) => {
+                    event.stopPropagation();
+                    resendBtn.disabled = true;
+                    const originalText = resendBtn.textContent;
+                    resendBtn.textContent = 'Se trimite...';
+                    try {
+                        const res = await AUTH.apiFetch(`/api/admin/resend-email/${app._id}`, { method: 'POST' });
+                        const data = await res.json().catch(() => ({}));
+                        if (res.ok) {
+                            showToast('Succes', data.message || 'Email trimis.');
+                            await fetchAdminAppointments();
+                        } else {
+                            showToast('Eroare', data.error || 'Eroare la trimitere.', 'error');
                         }
-                    };
-                }
+                    } catch (_) {
+                        showToast('Eroare', 'Eroare de conexiune.', 'error');
+                    } finally {
+                        resendBtn.disabled = false;
+                        resendBtn.textContent = originalText;
+                    }
+                };
 
-                if (cancelBtn) {
-                    cancelBtn.onclick = async (event) => {
-                        event.stopPropagation();
-                        const confirm1 = confirm(`Esti sigur ca vrei sa anulezi programarea pacientului ${app.name || ''}?`);
-                        if (!confirm1) return;
-                        const confirm2 = confirm('CONFIRMARE FINALA: Programarea va fi stearsa definitiv. Continuam?');
-                        if (!confirm2) return;
+                content.appendChild(resendBtn);
+            }
 
-                        const stepUpToken = await requestStepUp('appointment_delete', 'stergerea programarii');
-                        if (!stepUpToken) return;
+            if (allowDelete) {
+                const cancelBtn = document.createElement('button');
+                cancelBtn.className = 'cancel-appointment-btn bg-red-500/10 hover:bg-red-500/20 text-red-300 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all';
+                cancelBtn.textContent = 'Anuleaza';
 
-                        try {
-                            const res = await AUTH.apiFetch(`/api/admin/appointment/${app._id}`, {
-                                method: 'DELETE',
-                                headers: { 'X-Step-Up-Token': stepUpToken }
-                            });
-                            const data = await res.json();
-                            if (res.ok) {
-                                showToast('Succes', data.message || 'Programarea a fost anulata.');
-                                fetchAdminAppointments();
-                                fetchAdminStats();
-                            } else {
-                                showToast('Eroare', data.error || 'Nu s-a putut anula programarea.', 'error');
-                            }
-                        } catch (_) {
-                            showToast('Eroare', 'Eroare de conexiune.', 'error');
+                cancelBtn.onclick = async (event) => {
+                    event.stopPropagation();
+                    const confirmDelete = window.confirm(`Esti sigur ca vrei sa anulezi programarea pacientului ${app.name || ''}?`);
+                    if (!confirmDelete) return;
+
+                    const stepUpToken = await requestStepUp('appointment_delete', 'stergerea programarii');
+                    if (!stepUpToken) return;
+
+                    try {
+                        const res = await AUTH.apiFetch(`/api/admin/appointment/${app._id}`, {
+                            method: 'DELETE',
+                            headers: { 'X-Step-Up-Token': stepUpToken }
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (res.ok) {
+                            showToast('Succes', data.message || 'Programare anulata.');
+                            await fetchAdminAppointments();
+                            fetchAdminStats();
+                        } else {
+                            showToast('Eroare', data.error || 'Nu s-a putut anula programarea.', 'error');
                         }
-                    };
-                }
+                    } catch (_) {
+                        showToast('Eroare', 'Eroare de conexiune.', 'error');
+                    }
+                };
 
-                card.appendChild(content);
-                slotsArea.appendChild(card);
-            });
+                content.appendChild(cancelBtn);
+            }
+
+            card.appendChild(content);
+            slotsArea.appendChild(card);
 
             row.appendChild(hourLabel);
             row.appendChild(slotsArea);
@@ -370,12 +424,35 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function renderTimelineForCurrentFilters() {
+        const filtered = getFilteredAppointments();
+        el.timelineHeaderCount.textContent = `(${filtered.length}) Programari`;
+        renderTimeline(filtered);
+    }
+
+    async function fetchAdminAppointments() {
+        setSingleMessage(el.timelineGrid, 'Se incarca programarile...', 'p-10 text-center text-gray-400 font-medium font-inter');
+
+        try {
+            const res = await AUTH.apiFetch('/api/admin/appointments');
+            const data = await res.json().catch(() => []);
+
+            if (!res.ok) {
+                throw new Error(data?.error || `Server error: ${res.status}`);
+            }
+
+            appointmentsCache = Array.isArray(data) ? data : [];
+            renderTimelineForCurrentFilters();
+        } catch (error) {
+            setSingleMessage(el.timelineGrid, String(error?.message || 'Eroare la incarcare.'), 'p-10 text-center text-red-400 font-medium');
+        }
+    }
+
     async function fetchUsers() {
         clearNode(el.userTableBody);
-
         const loadingRow = document.createElement('tr');
         const loadingCell = document.createElement('td');
-        loadingCell.colSpan = 4;
+        loadingCell.colSpan = 6;
         loadingCell.className = 'p-10 text-center text-brand-400';
         loadingCell.textContent = 'Se incarca lista de utilizatori...';
         loadingRow.appendChild(loadingCell);
@@ -383,27 +460,104 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const res = await AUTH.apiFetch('/api/admin/users');
-            const users = await res.json();
+            const data = await res.json().catch(() => []);
             if (!res.ok) {
-                showToast('Eroare', users.error || 'Eroare la preluare utilizatori.', 'error');
+                showToast('Eroare', data.error || 'Eroare la preluare utilizatori.', 'error');
                 return;
             }
-            renderUsers(users);
+            usersCache = Array.isArray(data) ? data : [];
+            renderUsers(usersCache);
         } catch (_) {
             showToast('Eroare', 'Eroare de conexiune server.', 'error');
         }
     }
 
+    async function openEditUserDialog(user) {
+        const displayName = window.prompt('Nume afisat:', user.displayName || '');
+        if (displayName === null) return;
+        const email = window.prompt('Email:', user.email || '');
+        if (email === null) return;
+        const phone = window.prompt('Telefon:', user.phone || '');
+        if (phone === null) return;
+        const role = window.prompt('Rol (viewer/scheduler/superadmin):', user.role || 'viewer');
+        if (role === null) return;
+
+        const currentManaged = Array.isArray(user.managedDoctorIds) ? user.managedDoctorIds.join(',') : '';
+        const doctorOptions = doctorsCache.map((doctor) => `${doctor._id} => ${doctor.displayName}`).join('\\n');
+        const doctorIdsInput = window.prompt(`Doctor IDs asignati (separate prin virgula):\\n${doctorOptions}`, currentManaged);
+        if (doctorIdsInput === null) return;
+
+        const newPassword = window.prompt('Parola noua (lasati gol pentru neschimbat):', '');
+        if (newPassword === null) return;
+
+        const managedDoctorIds = doctorIdsInput
+            .split(',')
+            .map((v) => v.trim())
+            .filter(Boolean);
+
+        const payload = {
+            displayName: displayName.trim(),
+            email: email.trim(),
+            phone: phone.trim(),
+            role: role.trim(),
+            managedDoctorIds
+        };
+        if (newPassword.trim()) {
+            payload.password = newPassword;
+        }
+
+        const stepUpToken = await requestStepUp('user_update', 'modificarea utilizatorului');
+        if (!stepUpToken) return;
+
+        try {
+            const res = await AUTH.apiFetch(`/api/admin/users/${user._id}`, {
+                method: 'PATCH',
+                headers: { 'X-Step-Up-Token': stepUpToken },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showToast('Succes', 'Utilizator actualizat.');
+                await fetchUsers();
+            } else {
+                showToast('Eroare', data.error || 'Nu s-a putut actualiza utilizatorul.', 'error');
+            }
+        } catch (_) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        }
+    }
+
+    async function deleteUser(user) {
+        const confirmed = window.confirm(`Esti sigur ca vrei sa stergi utilizatorul ${user.displayName || user.email}?`);
+        if (!confirmed) return;
+
+        const stepUpToken = await requestStepUp('user_delete', 'stergerea utilizatorului');
+        if (!stepUpToken) return;
+
+        try {
+            const res = await AUTH.apiFetch(`/api/admin/users/${user._id}`, {
+                method: 'DELETE',
+                headers: { 'X-Step-Up-Token': stepUpToken }
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showToast('Succes', data.message || 'Utilizator sters.');
+                await fetchUsers();
+            } else {
+                showToast('Eroare', data.error || 'Nu s-a putut sterge utilizatorul.', 'error');
+            }
+        } catch (_) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        }
+    }
+
     function renderUsers(users) {
         clearNode(el.userTableBody);
-        const currentUser = AUTH.getUser() || {};
 
+        const currentUser = AUTH.getUser() || {};
         users.forEach((user) => {
             const row = document.createElement('tr');
             row.className = 'border-b border-brand-600/10 hover:bg-brand-600/5 transition-colors';
-
-            const isSelf = user.email === currentUser.email;
-            const isSuperAdminUser = user.role === 'superadmin';
 
             const nameCell = document.createElement('td');
             nameCell.className = 'py-4 font-medium';
@@ -419,63 +573,46 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const roleCell = document.createElement('td');
             roleCell.className = 'py-4 text-center';
+            roleCell.textContent = user.role || 'viewer';
 
-            const roleBtn = document.createElement('button');
-            roleBtn.className = `role-toggle-btn w-12 h-6 rounded-full relative transition-all duration-300 ${user.role === 'scheduler' ? 'bg-brand-400' : (isSuperAdminUser ? 'bg-medical-500' : 'bg-brand-700')}`;
+            const doctorsCell = document.createElement('td');
+            doctorsCell.className = 'py-4 text-brand-300';
+            const managedDoctors = Array.isArray(user.managedDoctors) ? user.managedDoctors : [];
+            doctorsCell.textContent = managedDoctors.length
+                ? managedDoctors.map((doctor) => doctor.displayName).join(', ')
+                : '-';
 
-            if (isSelf || isSuperAdminUser) {
-                roleBtn.disabled = true;
-                roleBtn.style.opacity = '0.5';
-                roleBtn.style.cursor = 'not-allowed';
+            const actionsCell = document.createElement('td');
+            actionsCell.className = 'py-4 text-right';
+            const actionWrap = document.createElement('div');
+            actionWrap.className = 'flex items-center gap-2 justify-end';
+
+            const editBtn = document.createElement('button');
+            editBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            editBtn.textContent = 'Editeaza';
+            editBtn.onclick = () => openEditUserDialog(user);
+
+            actionWrap.appendChild(editBtn);
+
+            const isSelf = String(user.email || '') === String(currentUser.email || '');
+            if (!isSelf) {
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'admin-action-btn bg-red-900/30 text-red-300 border-red-800/40 hover:bg-red-900/50';
+                deleteBtn.textContent = 'Sterge';
+                deleteBtn.onclick = () => deleteUser(user);
+                actionWrap.appendChild(deleteBtn);
             }
 
-            const knob = document.createElement('div');
-            knob.className = `w-4 h-4 bg-brand-900 rounded-full absolute top-1 transition-all duration-300 ${user.role === 'scheduler' ? 'left-7' : 'left-1'}`;
-            roleBtn.appendChild(knob);
-            roleCell.appendChild(roleBtn);
-
-            if (isSuperAdminUser) {
-                const superTag = document.createElement('span');
-                superTag.className = 'block text-[10px] uppercase font-bold text-medical-500 mt-1';
-                superTag.textContent = 'Super Admin';
-                roleCell.appendChild(superTag);
-            }
-
-            if (!isSelf && !isSuperAdminUser) {
-                roleBtn.title = user.role === 'scheduler' ? 'Schimba la viewer' : 'Schimba la scheduler';
-                roleBtn.onclick = async () => {
-                    const newRole = user.role === 'scheduler' ? 'viewer' : 'scheduler';
-                    const stepUpToken = await requestStepUp('user_role_change', 'modificarea rolului utilizatorului');
-                    if (!stepUpToken) return;
-                    toggleUserRole(user._id, newRole, stepUpToken);
-                };
-            }
+            actionsCell.appendChild(actionWrap);
 
             row.appendChild(nameCell);
             row.appendChild(emailCell);
             row.appendChild(phoneCell);
             row.appendChild(roleCell);
+            row.appendChild(doctorsCell);
+            row.appendChild(actionsCell);
             el.userTableBody.appendChild(row);
         });
-    }
-
-    async function toggleUserRole(userId, role, stepUpToken) {
-        try {
-            const res = await AUTH.apiFetch('/api/admin/users/role', {
-                method: 'POST',
-                headers: { 'X-Step-Up-Token': stepUpToken },
-                body: JSON.stringify({ userId, role })
-            });
-            const data = await res.json();
-            if (res.ok) {
-                showToast('Succes', data.message);
-                fetchUsers();
-            } else {
-                showToast('Eroare', data.error || 'Eroare server.', 'error');
-            }
-        } catch (_) {
-            showToast('Eroare', 'Eroare de conexiune.', 'error');
-        }
     }
 
     async function createUser() {
@@ -484,12 +621,15 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const managedDoctorIds = Array.from(el.newUserManagedDoctors.selectedOptions).map((opt) => opt.value);
+
         const payload = {
             displayName: el.newUserDisplayName.value.trim(),
             email: el.newUserEmail.value.trim(),
             phone: el.newUserPhone.value.trim(),
             password: el.newUserPassword.value,
-            role: el.newUserRole.value
+            role: el.newUserRole.value,
+            managedDoctorIds
         };
 
         if (!payload.displayName || !payload.email || !payload.phone || !payload.password) {
@@ -497,8 +637,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        if (payload.password.length < 6) {
-            showToast('Eroare', 'Parola trebuie sa aiba cel putin 6 caractere.', 'error');
+        if (payload.password.length < 10) {
+            showToast('Eroare', 'Parola trebuie sa aiba minim 10 caractere.', 'error');
             return;
         }
 
@@ -509,7 +649,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify(payload)
             });
             const data = await res.json().catch(() => ({}));
-
             if (!res.ok) {
                 showToast('Eroare', data.error || 'Nu s-a putut crea utilizatorul.', 'error');
                 return;
@@ -517,15 +656,268 @@ document.addEventListener('DOMContentLoaded', () => {
 
             showToast('Succes', `Utilizatorul ${data.user?.displayName || payload.displayName} a fost creat.`);
             el.createUserForm.reset();
-
-            if (!el.userManagerContainer.classList.contains('hidden')) {
-                fetchUsers();
-            }
+            await fetchUsers();
         } catch (_) {
             showToast('Eroare', 'Eroare de conexiune.', 'error');
         } finally {
             el.createUserSubmit.disabled = false;
         }
+    }
+    function weekdaysToArray(input) {
+        return String(input || '')
+            .split(',')
+            .map((item) => Number(item.trim()))
+            .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
+    }
+
+    async function createDoctor() {
+        const weekdays = weekdaysToArray(el.doctorWeekdays.value);
+        if (!weekdays.length) {
+            showToast('Eroare', 'Introdu cel putin o zi valida (0-6).', 'error');
+            return;
+        }
+
+        const payload = {
+            slug: el.doctorSlug.value.trim().toLowerCase(),
+            displayName: el.doctorDisplayName.value.trim(),
+            specialty: el.doctorSpecialty.value.trim() || 'Oftalmologie',
+            isActive: el.doctorIsActive.value === 'true',
+            bookingSettings: {
+                consultationDurationMinutes: Number(el.doctorDuration.value),
+                workdayStart: el.doctorWorkdayStart.value,
+                workdayEnd: el.doctorWorkdayEnd.value,
+                monthsToShow: Number(el.doctorMonthsToShow.value),
+                timezone: 'Europe/Bucharest'
+            },
+            availabilityRules: { weekdays },
+            blockedDates: []
+        };
+
+        if (!payload.slug || !payload.displayName) {
+            showToast('Eroare', 'Slug si nume afisat sunt obligatorii.', 'error');
+            return;
+        }
+
+        el.createDoctorSubmit.disabled = true;
+        try {
+            const res = await AUTH.apiFetch('/api/admin/doctors', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showToast('Eroare', data.error || 'Nu s-a putut crea medicul.', 'error');
+                return;
+            }
+            showToast('Succes', 'Medic creat.');
+            el.createDoctorForm.reset();
+            await fetchDoctors();
+        } catch (_) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        } finally {
+            el.createDoctorSubmit.disabled = false;
+        }
+    }
+
+    async function patchDoctor(doctorId, payload, successMsg) {
+        try {
+            const res = await AUTH.apiFetch(`/api/admin/doctors/${doctorId}`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showToast('Eroare', data.error || 'Nu s-a putut actualiza medicul.', 'error');
+                return false;
+            }
+            showToast('Succes', successMsg || 'Medic actualizat.');
+            await fetchDoctors();
+            await fetchAdminAppointments();
+            return true;
+        } catch (_) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+            return false;
+        }
+    }
+
+    async function openEditDoctorDialog(doctor) {
+        const displayName = window.prompt('Nume afisat:', doctor.displayName || '');
+        if (displayName === null) return;
+        const specialty = window.prompt('Specialitate:', doctor.specialty || 'Oftalmologie');
+        if (specialty === null) return;
+
+        const start = window.prompt('Ora inceput (HH:mm):', doctor.bookingSettings?.workdayStart || '09:00');
+        if (start === null) return;
+        const end = window.prompt('Ora sfarsit (HH:mm):', doctor.bookingSettings?.workdayEnd || '14:00');
+        if (end === null) return;
+        const duration = window.prompt('Durata consultatie (minute):', String(doctor.bookingSettings?.consultationDurationMinutes || 20));
+        if (duration === null) return;
+        const monthsToShow = window.prompt('Luni vizibile:', String(doctor.bookingSettings?.monthsToShow || 3));
+        if (monthsToShow === null) return;
+        const weekdays = window.prompt('Zile disponibile (0-6, separate prin virgula):', String((doctor.availabilityRules?.weekdays || []).join(',')));
+        if (weekdays === null) return;
+        const isActiveRaw = window.prompt('Activ? (true/false):', String(!!doctor.isActive));
+        if (isActiveRaw === null) return;
+
+        const weekdaysList = weekdaysToArray(weekdays);
+        if (!weekdaysList.length) {
+            showToast('Eroare', 'Lista de zile este invalida.', 'error');
+            return;
+        }
+
+        await patchDoctor(doctor._id, {
+            displayName: displayName.trim(),
+            specialty: specialty.trim(),
+            isActive: isActiveRaw.trim().toLowerCase() === 'true',
+            bookingSettings: {
+                consultationDurationMinutes: Number(duration),
+                workdayStart: start.trim(),
+                workdayEnd: end.trim(),
+                monthsToShow: Number(monthsToShow),
+                timezone: doctor.bookingSettings?.timezone || 'Europe/Bucharest'
+            },
+            availabilityRules: { weekdays: weekdaysList }
+        }, 'Medic actualizat.');
+    }
+
+    async function blockDoctorDate(doctor) {
+        const date = window.prompt('Data de blocat (YYYY-MM-DD):');
+        if (!date) return;
+
+        try {
+            const res = await AUTH.apiFetch(`/api/admin/doctors/${doctor._id}/block-date`, {
+                method: 'POST',
+                body: JSON.stringify({ date: date.trim() })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showToast('Eroare', data.error || 'Nu s-a putut bloca data.', 'error');
+                return;
+            }
+            showToast('Succes', `Ziua ${date} a fost blocata pentru ${doctor.displayName}.`);
+            await fetchDoctors();
+        } catch (_) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        }
+    }
+
+    async function unblockDoctorDate(doctor) {
+        const date = window.prompt('Data de reactivat (YYYY-MM-DD):');
+        if (!date) return;
+
+        try {
+            const res = await AUTH.apiFetch(`/api/admin/doctors/${doctor._id}/block-date/${date.trim()}`, {
+                method: 'DELETE'
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showToast('Eroare', data.error || 'Nu s-a putut reactiva data.', 'error');
+                return;
+            }
+            showToast('Succes', `Ziua ${date} a fost reactivata pentru ${doctor.displayName}.`);
+            await fetchDoctors();
+        } catch (_) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        }
+    }
+
+    function renderDoctorsTable() {
+        if (!el.doctorTableBody) return;
+
+        clearNode(el.doctorTableBody);
+        if (!doctorsCache.length) {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 6;
+            cell.className = 'p-10 text-center text-brand-400';
+            cell.textContent = 'Nu exista medici disponibili.';
+            row.appendChild(cell);
+            el.doctorTableBody.appendChild(row);
+            return;
+        }
+
+        doctorsCache.forEach((doctor) => {
+            const row = document.createElement('tr');
+            row.className = 'border-b border-brand-600/10 hover:bg-brand-600/5 transition-colors';
+
+            const nameCell = document.createElement('td');
+            nameCell.className = 'py-4 font-medium';
+            nameCell.textContent = doctor.displayName || '';
+
+            const slugCell = document.createElement('td');
+            slugCell.className = 'py-4 text-brand-400';
+            slugCell.textContent = doctor.slug || '';
+
+            const scheduleCell = document.createElement('td');
+            scheduleCell.className = 'py-4 text-brand-300';
+            scheduleCell.textContent = `${doctor.bookingSettings?.workdayStart || '-'}-${doctor.bookingSettings?.workdayEnd || '-'} / ${doctor.bookingSettings?.consultationDurationMinutes || '-'} min`;
+
+            const weekdaysCell = document.createElement('td');
+            weekdaysCell.className = 'py-4 text-brand-300';
+            weekdaysCell.textContent = Array.isArray(doctor.availabilityRules?.weekdays)
+                ? doctor.availabilityRules.weekdays.join(', ')
+                : '-';
+
+            const activeCell = document.createElement('td');
+            activeCell.className = 'py-4 text-brand-300';
+            activeCell.textContent = doctor.isActive ? 'Da' : 'Nu';
+
+            const actionsCell = document.createElement('td');
+            actionsCell.className = 'py-4 text-right';
+            const actionWrap = document.createElement('div');
+            actionWrap.className = 'flex items-center gap-2 justify-end';
+
+            const editBtn = document.createElement('button');
+            editBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            editBtn.textContent = 'Editeaza';
+            editBtn.onclick = () => openEditDoctorDialog(doctor);
+            actionWrap.appendChild(editBtn);
+
+            const blockBtn = document.createElement('button');
+            blockBtn.className = 'admin-action-btn bg-orange-900/30 text-orange-300 border-orange-800/40 hover:bg-orange-900/50';
+            blockBtn.textContent = 'Blocheaza zi';
+            blockBtn.onclick = () => blockDoctorDate(doctor);
+            actionWrap.appendChild(blockBtn);
+
+            const unblockBtn = document.createElement('button');
+            unblockBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            unblockBtn.textContent = 'Reactiveaza zi';
+            unblockBtn.onclick = () => unblockDoctorDate(doctor);
+            actionWrap.appendChild(unblockBtn);
+
+            const toggleBtn = document.createElement('button');
+            toggleBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            toggleBtn.textContent = doctor.isActive ? 'Dezactiveaza' : 'Activeaza';
+            toggleBtn.onclick = () => patchDoctor(doctor._id, { isActive: !doctor.isActive }, 'Status medic actualizat.');
+            actionWrap.appendChild(toggleBtn);
+
+            actionsCell.appendChild(actionWrap);
+
+            row.appendChild(nameCell);
+            row.appendChild(slugCell);
+            row.appendChild(scheduleCell);
+            row.appendChild(weekdaysCell);
+            row.appendChild(activeCell);
+            row.appendChild(actionsCell);
+            el.doctorTableBody.appendChild(row);
+        });
+    }
+    function showTimelineSection() {
+        el.userManagerContainer.classList.add('hidden');
+        el.doctorManagerContainer.classList.add('hidden');
+        el.timelineContainer.classList.remove('hidden');
+    }
+
+    function showUserSection() {
+        el.timelineContainer.classList.add('hidden');
+        el.doctorManagerContainer.classList.add('hidden');
+        el.userManagerContainer.classList.remove('hidden');
+    }
+
+    function showDoctorSection() {
+        el.timelineContainer.classList.add('hidden');
+        el.userManagerContainer.classList.add('hidden');
+        el.doctorManagerContainer.classList.remove('hidden');
     }
 
     function registerEvents() {
@@ -535,35 +927,55 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         el.prevAdminDate.onclick = () => {
-            adminActiveDate.setDate(adminActiveDate.getDate() - 7);
+            adminActiveDate.setDate(adminActiveDate.getDate() - 1);
             updateAdminDateDisplay();
-            fetchAdminAppointments();
+            renderTimelineForCurrentFilters();
         };
 
         el.nextAdminDate.onclick = () => {
-            adminActiveDate.setDate(adminActiveDate.getDate() + 7);
+            adminActiveDate.setDate(adminActiveDate.getDate() + 1);
             updateAdminDateDisplay();
-            fetchAdminAppointments();
+            renderTimelineForCurrentFilters();
         };
 
-        el.manageUsersBtn.addEventListener('click', () => {
+        el.appointmentDoctorFilter?.addEventListener('change', () => {
+            renderTimelineForCurrentFilters();
+        });
+
+        el.manageUsersBtn.addEventListener('click', async () => {
             if (!isSuperadmin()) {
                 showToast('Acces interzis', 'Doar superadmin poate gestiona utilizatorii.', 'error');
                 return;
             }
-            el.timelineContainer.classList.add('hidden');
-            el.userManagerContainer.classList.remove('hidden');
-            fetchUsers();
+            showUserSection();
+            await fetchUsers();
         });
 
-        el.backToTimeline.addEventListener('click', () => {
-            el.userManagerContainer.classList.add('hidden');
-            el.timelineContainer.classList.remove('hidden');
+        el.manageDoctorsBtn?.addEventListener('click', async () => {
+            if (!isSuperadmin()) {
+                showToast('Acces interzis', 'Doar superadmin poate gestiona medicii.', 'error');
+                return;
+            }
+            showDoctorSection();
+            await fetchDoctors();
+        });
+
+        el.backToTimeline?.addEventListener('click', () => {
+            showTimelineSection();
+        });
+
+        el.backToTimelineFromDoctors?.addEventListener('click', () => {
+            showTimelineSection();
         });
 
         el.createUserForm.addEventListener('submit', async (event) => {
             event.preventDefault();
             createUser();
+        });
+
+        el.createDoctorForm?.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            createDoctor();
         });
 
         el.resetDatabaseBtn.addEventListener('click', async () => {
@@ -572,10 +984,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            const confirm1 = confirm('Esti sigur ca vrei sa stergi TOATE programarile?');
-            if (!confirm1) return;
-            const confirm2 = confirm('CONFIRMARE FINALA: Toate datele vor fi sterse definitiv. Continuam?');
-            if (!confirm2) return;
+            const confirmReset = window.confirm('Esti sigur ca vrei sa stergi TOATE programarile?');
+            if (!confirmReset) return;
 
             const stepUpToken = await requestStepUp('appointments_reset', 'resetarea bazei de date');
             if (!stepUpToken) return;
@@ -585,13 +995,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     method: 'POST',
                     headers: { 'X-Step-Up-Token': stepUpToken }
                 });
-                const data = await res.json();
+                const data = await res.json().catch(() => ({}));
                 if (res.ok) {
-                    showToast('Succes', 'Baza de date a fost resetata.');
-                    fetchAdminAppointments();
+                    showToast('Succes', data.message || 'Baza de date a fost resetata.');
+                    await fetchAdminAppointments();
                     fetchAdminStats();
                 } else {
-                    showToast('Eroare', data.error || 'Nu s-a putut reseta.', 'error');
+                    showToast('Eroare', data.error || 'Nu s-a putut reseta baza de date.', 'error');
                 }
             } catch (_) {
                 showToast('Eroare', 'Eroare de conexiune.', 'error');
@@ -600,32 +1010,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
         el.cancelDayAppointmentsBtn.addEventListener('click', async () => {
             if (!isSuperadmin()) {
-                showToast('Acces interzis', 'Doar superadmin poate anula programarile unei zile.', 'error');
+                showToast('Acces interzis', 'Doar superadmin poate bloca zile.', 'error');
+                return;
+            }
+
+            const doctorId = String(el.appointmentDoctorFilter?.value || '');
+            if (!doctorId) {
+                showToast('Atentie', 'Selecteaza un medic din filtru pentru a bloca ziua.', 'error');
                 return;
             }
 
             const selectedDate = getAdminActiveDateISO();
-            const confirm1 = confirm(`Esti sigur ca vrei sa anulezi TOATE programarile din ${selectedDate}?`);
-            if (!confirm1) return;
-            const confirm2 = confirm('CONFIRMARE FINALA: Toate programarile din ziua selectata vor fi sterse definitiv. Continuam?');
-            if (!confirm2) return;
-
-            const stepUpToken = await requestStepUp('appointments_delete_by_date', 'stergerea programarilor pe zi');
-            if (!stepUpToken) return;
+            const confirmed = window.confirm(`Blocam ziua ${selectedDate} pentru medicul selectat?`);
+            if (!confirmed) return;
 
             try {
-                const res = await AUTH.apiFetch('/api/admin/appointments/by-date', {
-                    method: 'DELETE',
-                    headers: { 'X-Step-Up-Token': stepUpToken },
+                const res = await AUTH.apiFetch(`/api/admin/doctors/${doctorId}/block-date`, {
+                    method: 'POST',
                     body: JSON.stringify({ date: selectedDate })
                 });
-                const data = await res.json();
+                const data = await res.json().catch(() => ({}));
                 if (res.ok) {
-                    showToast('Succes', data.message || 'Programarile din ziua selectata au fost anulate.');
-                    fetchAdminAppointments();
-                    fetchAdminStats();
+                    showToast('Succes', `Ziua ${selectedDate} a fost blocata.`);
+                    await fetchDoctors();
                 } else {
-                    showToast('Eroare', data.error || 'Nu s-au putut anula programarile zilei.', 'error');
+                    showToast('Eroare', data.error || 'Nu s-a putut bloca ziua.', 'error');
                 }
             } catch (_) {
                 showToast('Eroare', 'Eroare de conexiune.', 'error');
@@ -671,7 +1080,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function initAdminPanel() {
+    async function initAdminPanel() {
         if (initialized) {
             return;
         }
@@ -679,15 +1088,21 @@ document.addEventListener('DOMContentLoaded', () => {
         initialized = true;
         setupAdminSearch();
         updateAdminDateDisplay();
-        fetchAdminAppointments();
+
+        await fetchDoctors();
+        await fetchAdminAppointments();
         fetchAdminStats();
 
         const superadmin = isSuperadmin();
         el.manageUsersBtn.classList.toggle('hidden', !superadmin);
+        el.manageDoctorsBtn?.classList.toggle('hidden', !superadmin);
         el.resetDatabaseBtn.classList.toggle('hidden', !superadmin);
         el.cancelDayAppointmentsBtn.classList.toggle('hidden', !superadmin);
         el.exportExcelBtn.classList.toggle('hidden', !superadmin);
         el.createUserCard.classList.toggle('hidden', !superadmin);
+        if (el.createDoctorForm) {
+            el.createDoctorForm.parentElement.classList.toggle('hidden', !superadmin);
+        }
 
         registerEvents();
     }
@@ -709,7 +1124,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         showScreen('admin');
-        initAdminPanel();
+        await initAdminPanel();
     }
 
     bootstrap();
