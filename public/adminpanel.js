@@ -67,10 +67,24 @@ document.addEventListener('DOMContentLoaded', () => {
     let appointmentsCache = [];
     let usersCache = [];
     let searchTerm = '';
+    let eventsBound = false;
 
     const isStaffRole = (role) => role === 'viewer' || role === 'scheduler' || role === 'superadmin';
     const isSuperadmin = () => (AUTH.getUser()?.role || '') === 'superadmin';
     const isSchedulerOrSuperadmin = () => ['scheduler', 'superadmin'].includes(AUTH.getUser()?.role || '');
+
+    async function safeLogoutAndRedirect() {
+        try {
+            await AUTH.logout();
+        } catch (_) {
+            // no-op
+        }
+        window.location.href = '/login.html';
+    }
+
+    if (el.logoutBtn) {
+        el.logoutBtn.addEventListener('click', safeLogoutAndRedirect);
+    }
 
     function toISODate(date) {
         const y = date.getFullYear();
@@ -921,10 +935,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function registerEvents() {
-        el.logoutBtn.addEventListener('click', async () => {
-            await AUTH.logout();
-            window.location.href = '/login.html';
-        });
+        if (eventsBound) {
+            return;
+        }
+        eventsBound = true;
 
         el.prevAdminDate.onclick = () => {
             adminActiveDate.setDate(adminActiveDate.getDate() - 1);
@@ -1108,23 +1122,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function bootstrap() {
-        updateAuthUI(AUTH.getUser());
+        try {
+            updateAuthUI(AUTH.getUser());
 
-        const verifiedUser = await AUTH.verify();
-        updateAuthUI(verifiedUser);
+            const verifyWithTimeout = Promise.race([
+                AUTH.verify(),
+                new Promise((resolve) => setTimeout(() => resolve(null), 12000))
+            ]);
 
-        if (!verifiedUser) {
+            const verifiedUser = await verifyWithTimeout;
+            updateAuthUI(verifiedUser);
+
+            if (!verifiedUser) {
+                showScreen('auth');
+                return;
+            }
+
+            if (!isStaffRole(verifiedUser.role || '')) {
+                showScreen('denied');
+                return;
+            }
+
+            showScreen('admin');
+            await initAdminPanel();
+        } catch (error) {
+            console.error('Admin bootstrap failed:', error);
             showScreen('auth');
-            return;
+            showToast('Eroare', 'Panoul nu a putut fi initializat. Reincarca pagina.', 'error');
         }
-
-        if (!isStaffRole(verifiedUser.role || '')) {
-            showScreen('denied');
-            return;
-        }
-
-        showScreen('admin');
-        await initAdminPanel();
     }
 
     bootstrap();

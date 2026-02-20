@@ -76,6 +76,8 @@ const CSRF_COOKIE_OPTIONS = Object.freeze({
 });
 const loginAttempts = new Map();
 const refreshAttempts = new Map();
+let mongoBootstrapPromise = null;
+let mongoBootstrapped = false;
 
 function parseHHMMToMinutes(value) {
     if (typeof value !== 'string') return NaN;
@@ -279,16 +281,36 @@ async function ensureDefaultDoctorAndBackfill() {
     };
 }
 
-mongoose.connect(MONGODB_URI)
-    .then(async () => {
-        const migrationSummary = await ensureDefaultDoctorAndBackfill();
-        await Doctor.syncIndexes();
-        await User.syncIndexes();
-        await Appointment.syncIndexes();
-        console.log('Connected to MongoDB');
-        console.log('Startup migration summary:', migrationSummary);
-    })
-    .catch(err => console.error('MongoDB connection error:', err));
+async function ensureMongoReady() {
+    if (mongoBootstrapped && mongoose.connection.readyState === 1) {
+        return;
+    }
+
+    if (!mongoBootstrapPromise) {
+        mongoBootstrapPromise = mongoose.connect(MONGODB_URI)
+            .then(async () => {
+                if (!mongoBootstrapped) {
+                    const migrationSummary = await ensureDefaultDoctorAndBackfill();
+                    await Doctor.syncIndexes();
+                    await User.syncIndexes();
+                    await Appointment.syncIndexes();
+                    mongoBootstrapped = true;
+                    console.log('Connected to MongoDB');
+                    console.log('Startup migration summary:', migrationSummary);
+                }
+            })
+            .catch((error) => {
+                mongoBootstrapPromise = null;
+                throw error;
+            });
+    }
+
+    await mongoBootstrapPromise;
+}
+
+ensureMongoReady().catch((err) => {
+    console.error('MongoDB connection error:', err);
+});
 
 // =====================
 //  MIDDLEWARE
@@ -342,6 +364,15 @@ app.use('/api', (req, res, next) => {
 app.use(['/api', '/debug'], (req, res, next) => {
     res.set('Content-Type', 'application/json; charset=utf-8');
     return next();
+});
+app.use(['/api', '/debug'], async (req, res, next) => {
+    try {
+        await ensureMongoReady();
+        return next();
+    } catch (error) {
+        console.error('MongoDB unavailable for request:', error?.message || error);
+        return res.status(503).json({ error: 'Database unavailable. Please retry shortly.' });
+    }
 });
 
 app.use((req, res, next) => {
@@ -1937,7 +1968,8 @@ app.get('/api/public/doctors', async (req, res) => {
         return res.json({
             doctors: doctors.map(sanitizeDoctorForPublic)
         });
-    } catch (_) {
+    } catch (error) {
+        console.error('Public doctors list error:', error?.message || error);
         return res.status(500).json({ error: 'Database error' });
     }
 });
@@ -2477,7 +2509,8 @@ app.get('/api/admin/doctors', requireViewerSchedulerOrSuperadmin, async (req, re
             metadata: { count: doctors.length }
         });
         return res.json(doctors.map((doctor) => sanitizeDoctorForAdmin(doctor, { includeAudit: isSuperadminUser(req.user) })));
-    } catch (_) {
+    } catch (error) {
+        console.error('Admin doctors list error:', error?.message || error);
         return res.status(500).json({ error: 'Database error' });
     }
 });
