@@ -10,6 +10,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
+const path = require('path');
 const { validateBaseEnv, parseAllowedOrigins } = require('./scripts/env-utils');
 
 const app = express();
@@ -204,6 +205,11 @@ app.use((req, res, next) => {
 
 app.use(express.static('public'));
 
+app.get('/adminpanel', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    return res.sendFile(path.join(__dirname, 'public', 'adminpanel.html'));
+});
+
 // =====================
 //  VALIDATION HELPERS
 // =====================
@@ -331,15 +337,23 @@ const loginBodySchema = createSchema((input) => {
     };
 });
 
-const signupBodySchema = createSchema((input) => {
-    const payload = ensureObjectStrict(input, ['email', 'phone', 'password', 'displayName']);
+const adminCreateUserBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['email', 'phone', 'password', 'displayName', 'role']);
     const email = parseStringField(payload.email, 'email', { min: 3, max: 254 });
     if (!validateEmail(email)) throw new Error('email format is invalid.');
+
+    const rawRole = parseStringField(payload.role, 'role', { min: 4, max: 16 }).toLowerCase();
+    const normalizedRole = normalizeRoleValue(rawRole);
+    if (![ROLE.VIEWER, ROLE.SCHEDULER].includes(normalizedRole)) {
+        throw new Error('Invalid role.');
+    }
+
     return {
         email,
         phone: parseStringField(payload.phone, 'phone', { min: 10, max: 20 }),
         password: parseStringField(payload.password, 'password', { min: 6, max: 128, trim: false }),
-        displayName: parseStringField(payload.displayName, 'displayName', { min: 2, max: 120 })
+        displayName: parseStringField(payload.displayName, 'displayName', { min: 2, max: 120 }),
+        role: normalizedRole
     };
 });
 
@@ -1061,58 +1075,20 @@ app.use('/api/auth/refresh', refreshLimiter);
 app.use('/api/book', bookingLimiter);
 app.use('/api/admin', adminLimiter);
 
-app.post('/api/auth/signup', validateBody(signupBodySchema), async (req, res) => {
+app.post('/api/auth/signup', async (req, res) => {
     setAuthNoStore(res);
-
     try {
-        const { email, phone, password, displayName } = req.validatedBody;
-
-        if (!validatePhone(phone)) {
-            return res.status(400).json({ error: 'Format telefon invalid. Folositi formatul 07xx xxx xxx.' });
-        }
-
-        const cleanedPhone = cleanPhone(phone);
-        const normalizedEmail = String(email).toLowerCase();
-
-        const existingEmail = await User.findOne({ email: normalizedEmail });
-        if (existingEmail) {
-            return res.status(409).json({ error: 'Acest email este deja inregistrat.' });
-        }
-
-        const existingPhone = await User.findOne({ phone: cleanedPhone });
-        if (existingPhone) {
-            return res.status(409).json({ error: 'Acest numar de telefon este deja inregistrat.' });
-        }
-
-        const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
-
-        const user = new User({
-            email: normalizedEmail,
-            phone: cleanedPhone,
-            password: hashedPassword,
-            displayName: displayName.trim(),
-            role: ROLE.VIEWER
-        });
-
-        await user.save();
-        setSessionCookies(res, user, { rotateRefresh: true, rotateCsrf: true });
         await writeAuditLog(req, {
-            action: 'auth_signup_success',
-            result: 'success',
-            targetType: 'user',
-            targetId: String(user._id),
-            actorUser: user
+            action: 'auth_signup_blocked',
+            result: 'denied',
+            targetType: 'endpoint',
+            targetId: '/api/auth/signup',
+            actorUser: null
         });
-
-        return res.status(201).json({
-            ok: true,
-            user: buildSessionUser(user)
-        });
-
-    } catch (err) {
-        console.error('Signup error:', err.message);
-        return res.status(500).json({ error: 'Eroare la inregistrare.' });
+    } catch (_) {
+        // no-op: signup is disabled even if audit logging fails
     }
+    return res.status(403).json({ error: 'Inregistrarea publica este dezactivata. Solicitati cont unui superadmin.' });
 });
 
 app.post('/api/auth/login', validateBody(loginBodySchema), async (req, res) => {
@@ -1756,6 +1732,70 @@ app.get('/api/admin/export', requireSuperadminOnly, requireStepUp('appointments_
 // =====================
 //  USER MANAGEMENT (SUPER ADMIN)
 // =====================
+
+app.post('/api/admin/users', requireSuperadminOnly, validateBody(adminCreateUserBodySchema), async (req, res) => {
+    setAuthNoStore(res);
+
+    try {
+        const { email, phone, password, displayName, role } = req.validatedBody;
+
+        if (!validatePhone(phone)) {
+            return res.status(400).json({ error: 'Format telefon invalid. Folositi formatul 07xx xxx xxx.' });
+        }
+
+        const normalizedEmail = String(email).toLowerCase();
+        const cleanedPhone = cleanPhone(phone);
+
+        const existingEmail = await User.findOne({ email: normalizedEmail });
+        if (existingEmail) {
+            return res.status(409).json({ error: 'Acest email este deja inregistrat.' });
+        }
+
+        const existingPhone = await User.findOne({ phone: cleanedPhone });
+        if (existingPhone) {
+            return res.status(409).json({ error: 'Acest numar de telefon este deja inregistrat.' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+        const user = new User({
+            email: normalizedEmail,
+            phone: cleanedPhone,
+            password: hashedPassword,
+            displayName: displayName.trim(),
+            role
+        });
+
+        await user.save();
+        await writeAuditLog(req, {
+            action: 'user_create',
+            result: 'success',
+            targetType: 'user',
+            targetId: String(user._id),
+            actorUser: req.user,
+            metadata: { role }
+        });
+
+        return res.status(201).json({
+            success: true,
+            user: {
+                _id: user._id,
+                email: user.email,
+                phone: user.phone,
+                displayName: user.displayName,
+                role: normalizeRoleValue(user.role),
+                createdAt: user.createdAt
+            }
+        });
+    } catch (_) {
+        await writeAuditLog(req, {
+            action: 'user_create',
+            result: 'failure',
+            targetType: 'user',
+            actorUser: req.user
+        });
+        return res.status(500).json({ error: 'Database error' });
+    }
+});
 
 app.get('/api/admin/users', requireSuperadminOnly, async (req, res) => {
     setAuthNoStore(res);

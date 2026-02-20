@@ -74,6 +74,15 @@
           "value": "no-store"
         }
       ]
+    },
+    {
+      "source": "/adminpanel",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
     }
   ],
   "builds": [
@@ -90,6 +99,10 @@
     {
       "src": "/api/(.*)",
       "dest": "/server.js"
+    },
+    {
+      "src": "/adminpanel/?",
+      "dest": "/public/adminpanel.html"
     },
     {
       "src": "/(.*)",

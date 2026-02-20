@@ -1,11 +1,11 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ro">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Autentificare — Prof. Dr. Balta Florian</title>
-    <meta name="description" content="Autentifică-te pentru a accesa sistemul de programări oftalmologice.">
+    <title>Autentificare â€” Prof. Dr. Balta Florian</title>
+    <meta name="description" content="AutentificÄƒ-te pentru a accesa sistemul de programÄƒri oftalmologice.">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
@@ -102,7 +102,7 @@
                 <h1 class="text-2xl md:text-3xl font-black text-brand-100 tracking-tight">
                     Prof. Dr. Balta Florian
                 </h1>
-                <p class="text-brand-400/60 text-sm font-medium mt-1">Programări Oftalmologie</p>
+                <p class="text-brand-400/60 text-sm font-medium mt-1">ProgramÄƒri Oftalmologie</p>
             </a>
         </div>
     </header>
@@ -155,7 +155,7 @@
 
                     <!-- Password -->
                     <div>
-                        <label for="password" class="form-label">Parolă</label>
+                        <label for="password" class="form-label">ParolÄƒ</label>
                         <div class="relative">
                             <span class="input-icon">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -165,7 +165,7 @@
                                 </svg>
                             </span>
                             <input type="password" id="password" required class="form-input input-with-icon"
-                                placeholder="Introduceți parola" autocomplete="current-password"
+                                placeholder="IntroduceÈ›i parola" autocomplete="current-password"
                                 style="padding-right: 48px;">
                             <button type="button" class="password-toggle" onclick="togglePassword('password', this)">
                                 <svg class="w-5 h-5 eye-open" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -182,7 +182,7 @@
                     <!-- Submit -->
                     <button type="submit" id="loginBtn"
                         class="w-full bg-brand-400 text-brand-900 py-4 rounded-xl font-bold text-lg hover:bg-brand-300 active:bg-brand-100 transition-all duration-200 flex justify-center items-center gap-3 shadow-lg shadow-brand-400/20 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <span>Autentifică-te</span>
+                        <span>AutentificÄƒ-te</span>
                         <svg id="loginSpinner" class="animate-spin h-5 w-5 text-brand-900 hidden"
                             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
@@ -204,23 +204,17 @@
                 <!-- Continue without auth -->
                 <a href="/"
                     class="block w-full text-center py-3 rounded-xl border border-brand-600/30 text-brand-300 font-semibold hover:bg-brand-700 transition-colors text-sm">
-                    Continuă fără cont →
+                    ContinuÄƒ fÄƒrÄƒ cont â†’
                 </a>
 
-                <!-- Signup Link -->
-                <p class="text-center text-brand-400/60 text-sm mt-6">
-                    Nu ai cont?
-                    <a href="/signup.html" class="text-brand-300 font-semibold hover:text-brand-100 transition-colors">
-                        Creează un cont
-                    </a>
-                </p>
+                <p class="text-center text-brand-400/60 text-sm mt-6">Conturile noi se creeaza doar de un superadmin din panoul de administrare.</p>
             </div>
         </div>
     </main>
 
     <!-- Footer -->
     <footer class="text-center py-6 text-xs text-brand-400/40 border-t border-brand-600/20 bg-brand-800">
-        © 2026 Prof. Dr. Balta Florian — Toate drepturile rezervate
+        Â© 2026 Prof. Dr. Balta Florian â€” Toate drepturile rezervate
     </footer>
 
     <script src="auth.js"></script>
@@ -253,7 +247,7 @@
             const password = document.getElementById('password').value;
 
             if (!identifier || !password) {
-                showError('Completați toate câmpurile.');
+                showError('CompletaÈ›i toate cÃ¢mpurile.');
                 return;
             }
 
@@ -275,7 +269,7 @@
 
                 AUTH.setUser(data.user || null);
 
-                successMessage.textContent = 'Autentificare reușită! Redirecționare...';
+                successMessage.textContent = 'Autentificare reuÈ™itÄƒ! RedirecÈ›ionare...';
                 successMessage.classList.remove('hidden');
 
                 setTimeout(() => {
@@ -284,7 +278,7 @@
 
             } catch (err) {
                 console.error('Login error:', err);
-                showError('Eroare de conexiune. Încercați din nou.');
+                showError('Eroare de conexiune. ÃŽncercaÈ›i din nou.');
             } finally {
                 loginBtn.disabled = false;
                 loginSpinner.classList.add('hidden');
@@ -301,3 +295,4 @@
 </body>
 
 </html>
+

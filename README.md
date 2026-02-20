@@ -8,6 +8,8 @@ This repository now enforces:
 - fail-closed environment validation (`JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_STEPUP_SECRET`, `MONGODB_URI`, `ALLOWED_ORIGINS`)
 - no superadmin escalation by email
 - superadmin bootstrap only through seed script
+- dedicated admin panel at `/adminpanel`
+- public self-signup disabled
 - CORS allowlist from environment
 - rate limiting + login lockout/backoff
 - helmet security headers
@@ -82,7 +84,8 @@ The server also validates env at startup and exits if invalid.
 
 ## Superadmin bootstrap (one-time safe flow)
 
-Normal signup always creates role `viewer`.
+Public signup is disabled. New users are created only by `superadmin` in `/adminpanel`.
+For first-time setup use the seed flow below.
 
 To create/update the first superadmin:
 
@@ -187,6 +190,42 @@ Expected security header highlights on production routes:
 Browser check:
 - open DevTools -> Network -> select `/` and `/api/auth/me` responses
 - verify the headers above are present
+
+## Quick sanity checks for admin/signup changes
+
+```bash
+export BASE_URL="https://your-app.vercel.app"
+
+# 1) public signup blocked
+curl -i -X POST "$BASE_URL/api/auth/signup" \
+  -H "Content-Type: application/json" \
+  --data '{"email":"public@example.com","phone":"0712345678","password":"Password123!","displayName":"Public User"}'
+# expected: 403 (or 404 if you choose to hide route)
+
+# 2) login as non-superadmin then try create-user -> 403
+curl -i -c viewer.cookies -X POST "$BASE_URL/api/auth/login" \
+  -H "Content-Type: application/json" \
+  --data '{"identifier":"viewer@example.com","password":"viewer-password"}'
+V_CSRF=$(awk '$6=="__Host-csrf"{print $7}' viewer.cookies | tail -n 1)
+curl -i -b viewer.cookies -X POST "$BASE_URL/api/admin/users" \
+  -H "Content-Type: application/json" \
+  -H "X-CSRF-Token: $V_CSRF" \
+  --data '{"email":"new.user@example.com","phone":"0711111111","password":"Password123!","displayName":"New User","role":"viewer"}'
+
+# 3) login as superadmin then create-user -> 201
+curl -i -c super.cookies -X POST "$BASE_URL/api/auth/login" \
+  -H "Content-Type: application/json" \
+  --data '{"identifier":"superadmin@example.com","password":"superadmin-password"}'
+S_CSRF=$(awk '$6=="__Host-csrf"{print $7}' super.cookies | tail -n 1)
+curl -i -b super.cookies -X POST "$BASE_URL/api/admin/users" \
+  -H "Content-Type: application/json" \
+  -H "X-CSRF-Token: $S_CSRF" \
+  --data '{"email":"new.admin@example.com","phone":"0722222222","password":"Password123!","displayName":"New Admin","role":"scheduler"}'
+
+# 4) admin panel route exists and is separate from homepage
+curl -I "$BASE_URL/"
+curl -I "$BASE_URL/adminpanel"
+```
 
 Optional git history secret scan:
 

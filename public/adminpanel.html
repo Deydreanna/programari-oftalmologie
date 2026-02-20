@@ -1,0 +1,189 @@
+﻿<!DOCTYPE html>
+<html lang="ro">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panou Administrare - Prof. Dr. Balta Florian</title>
+    <meta name="description" content="Panou administrare programari. Acces pe baza de rol.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            900: '#1D1E18',
+                            800: '#2A2B23',
+                            700: '#3A3B32',
+                            600: '#6B8F71',
+                            500: '#7DA383',
+                            400: '#AAD2BA',
+                            300: '#B9F5D8',
+                            200: '#CCFAE5',
+                            100: '#D9FFF5',
+                            50: '#EDFFF9',
+                        },
+                    },
+                    fontSize: {
+                        'base': ['17px', '1.6'],
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+
+<body class="bg-brand-900 text-brand-100 font-sans antialiased min-h-screen" style="font-size: 17px;">
+    <header class="bg-brand-800 border-b border-brand-600/20 shadow-lg">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+                <a href="/" class="text-2xl font-black text-brand-100 tracking-tight hover:text-brand-300 transition-colors">Prof. Dr. Balta Florian</a>
+                <p class="text-sm text-brand-400/70 mt-1">Panou administrare programari</p>
+            </div>
+            <div id="authGuest" class="flex items-center gap-3">
+                <a href="/login.html" class="px-4 py-2 rounded-lg text-sm font-semibold text-brand-300 hover:text-brand-100 hover:bg-brand-700 transition-all">Autentificare</a>
+                <a href="/" class="px-4 py-2 rounded-lg text-sm font-semibold text-brand-300 hover:text-brand-100 hover:bg-brand-700 transition-all">Programari</a>
+            </div>
+            <div id="authUser" class="hidden flex items-center gap-3">
+                <span id="authUserName" class="text-sm font-semibold text-brand-300"></span>
+                <button id="logoutBtn" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-brand-400/70 border border-brand-600/30 hover:bg-brand-700 hover:text-brand-100 transition-all">Deconectare</button>
+                <a href="/" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-brand-400/70 border border-brand-600/30 hover:bg-brand-700 hover:text-brand-100 transition-all">Programari</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 md:px-8 py-8 md:py-10">
+        <section id="adminAuthRequired" class="hidden max-w-2xl mx-auto bg-brand-800 rounded-2xl border border-brand-600/20 p-8 text-center">
+            <h1 class="text-2xl font-black text-brand-100 mb-3">Autentificare necesara</h1>
+            <p class="text-brand-300 mb-6">Panoul de administrare este disponibil doar utilizatorilor autentificati.</p>
+            <a href="/login.html" class="inline-flex items-center justify-center px-5 py-3 rounded-xl bg-brand-400 text-brand-900 font-bold hover:bg-brand-300 transition-colors">Mergi la autentificare</a>
+        </section>
+
+        <section id="adminAccessDenied" class="hidden max-w-2xl mx-auto bg-brand-800 rounded-2xl border border-brand-600/20 p-8 text-center">
+            <h1 class="text-2xl font-black text-brand-100 mb-3">Acces interzis</h1>
+            <p class="text-brand-300 mb-6">Contul curent nu are rol valid pentru panoul de administrare.</p>
+            <a href="/" class="inline-flex items-center justify-center px-5 py-3 rounded-xl bg-brand-400 text-brand-900 font-bold hover:bg-brand-300 transition-colors">Inapoi la pagina principala</a>
+        </section>
+
+        <section id="adminApp" class="hidden">
+            <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-8">
+                <div>
+                    <h2 class="text-2xl md:text-3xl font-black text-brand-100">Panou Administrare</h2>
+                    <div id="storage-indicator" class="hidden mt-2">
+                        <div class="flex items-center gap-3">
+                            <div class="w-32 bg-brand-700 rounded-full h-1.5 overflow-hidden">
+                                <div id="storage-bar" class="bg-brand-400 h-full transition-all duration-1000" style="width: 0%"></div>
+                            </div>
+                            <p id="storage-text" class="text-xs text-brand-300/70 font-medium">Se incarca...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button id="prevAdminDate" class="nav-btn" aria-label="Data anterioara">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                        </svg>
+                    </button>
+                    <div class="px-5 py-2.5 bg-brand-800 border border-brand-600/30 rounded-xl font-bold text-brand-100 text-sm">
+                        <span id="currentAdminDateDisplay">Azi</span>
+                    </div>
+                    <button id="nextAdminDate" class="nav-btn" aria-label="Data urmatoare">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <div id="adminActionButtons" class="flex flex-wrap gap-2">
+                    <button id="manageUsersBtn" class="hidden admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Gestionare Utilizatori</button>
+                    <button id="exportExcelBtn" class="admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Export Excel</button>
+                    <button id="resetDatabaseBtn" class="admin-action-btn bg-red-900/30 text-red-300 border-red-800/40 hover:bg-red-900/50">Reseteaza</button>
+                    <button id="cancelDayAppointmentsBtn" class="admin-action-btn bg-orange-900/30 text-orange-300 border-orange-800/40 hover:bg-orange-900/50">Anuleaza Ziua</button>
+                    <button id="closeDashboard" class="admin-action-btn bg-brand-800 text-brand-400 border-brand-600/30 hover:bg-brand-700">Inapoi</button>
+                </div>
+            </div>
+
+            <div id="timelineContainer" class="bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 h-[calc(100vh-260px)] overflow-hidden flex flex-col">
+                <div class="bg-brand-700 px-6 py-3 border-b border-brand-600/20 flex justify-between items-center shrink-0">
+                    <span class="text-sm font-bold text-brand-100">Programari Zilnice</span>
+                    <span id="timelineHeaderCount" class="text-xs font-semibold text-brand-300 bg-brand-600/20 px-3 py-1 rounded-full">(0) Programari</span>
+                </div>
+                <div class="flex-1 overflow-y-auto relative custom-scrollbar">
+                    <div id="timelineGrid" class="flex flex-col min-h-full"></div>
+                </div>
+            </div>
+
+            <div id="userManagerContainer" class="hidden mt-6 bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 overflow-hidden flex flex-col">
+                <div class="bg-brand-700 px-6 py-3 border-b border-brand-600/20 flex justify-between items-center shrink-0">
+                    <span class="text-sm font-bold text-brand-100">Gestionare Utilizatori</span>
+                    <button id="backToTimeline" class="text-xs text-brand-400 font-bold hover:text-brand-100 transition-colors">Inapoi la programari</button>
+                </div>
+
+                <div id="createUserCard" class="hidden p-6 border-b border-brand-600/20 bg-brand-800/80">
+                    <h3 class="text-lg font-bold text-brand-100 mb-3">Creeaza utilizator nou</h3>
+                    <form id="createUserForm" class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+                        <div class="md:col-span-2">
+                            <label for="newUserDisplayName" class="form-label">Nume</label>
+                            <input id="newUserDisplayName" type="text" class="form-input" required>
+                        </div>
+                        <div>
+                            <label for="newUserEmail" class="form-label">Email</label>
+                            <input id="newUserEmail" type="email" class="form-input" required>
+                        </div>
+                        <div>
+                            <label for="newUserPhone" class="form-label">Telefon</label>
+                            <input id="newUserPhone" type="text" class="form-input" required>
+                        </div>
+                        <div>
+                            <label for="newUserPassword" class="form-label">Parola</label>
+                            <input id="newUserPassword" type="password" minlength="6" class="form-input" required>
+                        </div>
+                        <div>
+                            <label for="newUserRole" class="form-label">Rol</label>
+                            <select id="newUserRole" class="form-input" required>
+                                <option value="viewer">Regular</option>
+                                <option value="scheduler">Admin</option>
+                            </select>
+                        </div>
+                        <div class="md:col-span-5">
+                            <button id="createUserSubmit" type="submit" class="admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Creeaza utilizator</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="flex-1 overflow-y-auto custom-scrollbar p-6">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead>
+                                <tr class="text-brand-400 border-b border-brand-600/20">
+                                    <th class="pb-3 font-semibold">Nume</th>
+                                    <th class="pb-3 font-semibold">Email</th>
+                                    <th class="pb-3 font-semibold">Telefon</th>
+                                    <th class="pb-3 font-semibold text-center">Rol</th>
+                                </tr>
+                            </thead>
+                            <tbody id="userTableBody" class="text-brand-100"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="toast" class="fixed bottom-5 right-5 bg-brand-800 shadow-xl rounded-xl p-5 transform translate-y-20 opacity-0 transition-all duration-300 max-w-sm z-50 border-l-4 border border-brand-600/20">
+        <h4 id="toastTitle" class="font-bold text-brand-100"></h4>
+        <p id="toastMessage" class="text-sm text-brand-300 mt-1"></p>
+    </div>
+
+    <script src="auth.js"></script>
+    <script src="adminpanel.js"></script>
+</body>
+
+</html>
