@@ -248,6 +248,9 @@ DB_PROVIDER=mongo
 - `ACCESS_TOKEN_TTL_MINUTES`
 - `REFRESH_TOKEN_TTL_DAYS`
 - `STEP_UP_TOKEN_TTL_MINUTES`
+- `SUPERADMIN_EMAIL` (or `SUPERADMIN_IDENTIFIER`) + `SUPERADMIN_PASSWORD`
+  - if set, startup bootstraps/updates a Postgres superadmin account with these credentials
+  - use only one identifier var (`SUPERADMIN_EMAIL` preferred)
 
 ### Deploy sequence
 

@@ -690,6 +690,66 @@ function isEmail(identifier) {
     return identifier.includes('@');
 }
 
+function resolveBootstrapSuperadminEmail() {
+    const candidate = String(
+        process.env.SUPERADMIN_EMAIL
+        || process.env.SUPERADMIN_IDENTIFIER
+        || ''
+    ).trim().toLowerCase();
+    return candidate;
+}
+
+async function ensureBootstrapSuperadmin() {
+    if (!USERS_IN_POSTGRES) {
+        return { skipped: true, reason: 'users are not stored in postgres for current DB_PROVIDER' };
+    }
+
+    const email = resolveBootstrapSuperadminEmail();
+    const password = typeof process.env.SUPERADMIN_PASSWORD === 'string'
+        ? process.env.SUPERADMIN_PASSWORD
+        : '';
+
+    if (!email && !password) {
+        return { skipped: true, reason: 'SUPERADMIN_EMAIL/SUPERADMIN_IDENTIFIER and SUPERADMIN_PASSWORD not set' };
+    }
+
+    if (!email || !password) {
+        throw new Error(
+            'SUPERADMIN_EMAIL (or SUPERADMIN_IDENTIFIER) and SUPERADMIN_PASSWORD must both be set to bootstrap superadmin.'
+        );
+    }
+
+    if (!validateEmail(email)) {
+        throw new Error('SUPERADMIN_EMAIL (or SUPERADMIN_IDENTIFIER) must be a valid email address.');
+    }
+
+    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+    const result = await pgUsers.withTransaction(async (client) => {
+        const existing = await pgUsers.findUserByEmail(email, client);
+        if (existing) {
+            const updated = await pgUsers.updateUserByPublicId(existing._id, {
+                passwordHash: hashedPassword,
+                role: ROLE.SUPERADMIN,
+                displayName: existing.displayName || 'Super Admin'
+            }, client);
+            return { action: 'updated', email: updated.email };
+        }
+
+        const created = await pgUsers.createUser({
+            email,
+            phone: null,
+            passwordHash: hashedPassword,
+            displayName: 'Super Admin',
+            role: ROLE.SUPERADMIN,
+            managedDoctorIds: []
+        }, client);
+        return { action: 'created', email: created.email };
+    });
+
+    console.log(`[AUTH] Superadmin bootstrap ${result.action}: ${result.email}`);
+    return result;
+}
+
 function isValidISODateString(value) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
 
@@ -3796,12 +3856,16 @@ async function validatePostgresStartupHealth() {
 async function bootstrapServer() {
     try {
         await validatePostgresStartupHealth();
+        const superadminBootstrap = await ensureBootstrapSuperadmin();
+        if (superadminBootstrap?.skipped) {
+            console.log(`[AUTH] Superadmin bootstrap skipped: ${superadminBootstrap.reason}.`);
+        }
         if (POSTGRES_ENABLED && !MONGO_RUNTIME_ENABLED) {
             const migrationSummary = await ensureDefaultDoctorAndBackfill();
             console.log('Startup migration summary:', migrationSummary);
         }
     } catch (error) {
-        console.error(`[POSTGRES] Startup health check failed: ${redactPostgresUrlInText(error?.message || String(error))}`);
+        console.error(`[BOOTSTRAP] Startup initialization failed: ${redactPostgresUrlInText(error?.message || String(error))}`);
         process.exit(1);
     }
 
