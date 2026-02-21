@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const path = require('path');
 const { validateBaseEnv, normalizeDbProvider, isPostgresProvider } = require('./scripts/env-utils');
 const { runPostgresHealthCheck, redactPostgresUrlInText } = require('./db/postgres');
+const pgUsers = require('./db/users-postgres');
 const {
     buildMongoTlsPolicy,
     buildMongoDriverTlsOptions,
@@ -47,6 +48,8 @@ const mongoTlsPolicy = buildMongoTlsPolicy(process.env);
 const baseEnvValidation = validateBaseEnv(process.env);
 const DB_PROVIDER = baseEnvValidation.parsed.dbProvider || normalizeDbProvider(process.env.DB_PROVIDER) || 'mongo';
 const POSTGRES_ENABLED = isPostgresProvider(DB_PROVIDER);
+const USERS_IN_POSTGRES = POSTGRES_ENABLED;
+const DUAL_MONGO_USER_FALLBACK = DB_PROVIDER === 'dual';
 const startupValidationErrors = Array.from(new Set([
     ...baseEnvValidation.errors,
     ...mongoTlsPolicy.validationErrors
@@ -294,16 +297,20 @@ async function ensureDefaultDoctorAndBackfill() {
         { $set: { doctorSnapshotName: defaultDoctor.displayName } }
     );
 
-    const usersBackfill = await User.updateMany(
-        { managedDoctorIds: { $exists: false } },
-        { $set: { managedDoctorIds: [] } }
-    );
+    let usersBackfillCount = 0;
+    if (!USERS_IN_POSTGRES) {
+        const usersBackfill = await User.updateMany(
+            { managedDoctorIds: { $exists: false } },
+            { $set: { managedDoctorIds: [] } }
+        );
+        usersBackfillCount = usersBackfill.modifiedCount || 0;
+    }
 
     return {
         defaultDoctorId: String(defaultDoctor._id),
         appointmentsBackfilled: appointmentsBackfill.modifiedCount || 0,
         snapshotsBackfilled: snapshotBackfill.modifiedCount || 0,
-        usersBackfilled: usersBackfill.modifiedCount || 0
+        usersBackfilled: usersBackfillCount
     };
 }
 
@@ -405,7 +412,9 @@ async function ensureMongoReady() {
                 if (!mongoBootstrapped) {
                     const migrationSummary = await ensureDefaultDoctorAndBackfill();
                     await Doctor.syncIndexes();
-                    await User.syncIndexes();
+                    if (!USERS_IN_POSTGRES) {
+                        await User.syncIndexes();
+                    }
                     await Appointment.syncIndexes();
                     mongoBootstrapped = true;
                     const tlsDiagnostics = getMongoTlsDiagnosticsSnapshot();
@@ -556,6 +565,7 @@ app.get('/adminpanel', (req, res) => {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^(\+?40|0)7\d{8}$/;
 const MONGODB_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
+const POSTGRES_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DOCTOR_SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const STRONG_PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{10,128}$/;
 
@@ -665,6 +675,19 @@ function parseTimeField(value, fieldName) {
 function parseObjectIdField(value, fieldName) {
     const idValue = parseStringField(value, fieldName, { min: 24, max: 24 });
     if (!MONGODB_OBJECT_ID_REGEX.test(idValue)) {
+        throw new Error(`${fieldName} is invalid.`);
+    }
+    return idValue;
+}
+
+function isValidUserIdentifier(value) {
+    const normalized = String(value || '').trim();
+    return MONGODB_OBJECT_ID_REGEX.test(normalized) || POSTGRES_UUID_REGEX.test(normalized);
+}
+
+function parseUserIdField(value, fieldName) {
+    const idValue = parseStringField(value, fieldName, { min: 24, max: 64 });
+    if (!isValidUserIdentifier(idValue)) {
         throw new Error(`${fieldName} is invalid.`);
     }
     return idValue;
@@ -948,7 +971,7 @@ const bookBodySchema = createSchema((input) => {
 
 const roleUpdateBodySchema = createSchema((input) => {
     const payload = ensureObjectStrict(input, ['userId', 'role']);
-    const userId = parseObjectIdField(payload.userId, 'userId');
+    const userId = parseUserIdField(payload.userId, 'userId');
     const role = parseStringField(payload.role, 'role', { min: 6, max: 10 });
     if (![ROLE.VIEWER, ROLE.SCHEDULER].includes(role)) throw new Error('Invalid role.');
     return { userId, role };
@@ -1111,6 +1134,111 @@ function normalizeRoleValue(rawRole) {
     return ROLE.VIEWER;
 }
 
+function getMongoCompatibleUserId(user) {
+    const candidates = [
+        user?.legacyMongoId,
+        user?._id,
+        user?.id
+    ];
+    for (const candidate of candidates) {
+        const value = String(candidate || '').trim();
+        if (MONGODB_OBJECT_ID_REGEX.test(value)) {
+            return value;
+        }
+    }
+    return null;
+}
+
+async function migrateMongoUserToPostgres(mongoUser) {
+    if (!USERS_IN_POSTGRES || !mongoUser) {
+        return mongoUser || null;
+    }
+
+    const managedDoctorIds = normalizeManagedDoctorIds(mongoUser.managedDoctorIds || []);
+    return pgUsers.upsertUserFromMongo({
+        _id: String(mongoUser._id),
+        email: mongoUser.email || null,
+        phone: mongoUser.phone || null,
+        password: mongoUser.password || '',
+        googleId: mongoUser.googleId || null,
+        displayName: mongoUser.displayName || '',
+        role: normalizeRoleValue(mongoUser.role),
+        managedDoctorIds,
+        createdAt: mongoUser.createdAt || new Date()
+    });
+}
+
+async function findUserById(userId, { allowDualFallback = true } = {}) {
+    const normalizedUserId = String(userId || '').trim();
+    if (!normalizedUserId) return null;
+
+    if (!USERS_IN_POSTGRES) {
+        return User.findById(normalizedUserId);
+    }
+
+    let user = await pgUsers.findUserByPublicId(normalizedUserId);
+    if (user || !allowDualFallback || !DUAL_MONGO_USER_FALLBACK || !MONGODB_OBJECT_ID_REGEX.test(normalizedUserId)) {
+        return user;
+    }
+
+    const mongoUser = await User.findById(normalizedUserId);
+    if (!mongoUser) return null;
+    return migrateMongoUserToPostgres(mongoUser);
+}
+
+async function findUserByEmail(email, { allowDualFallback = true } = {}) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail) return null;
+
+    if (!USERS_IN_POSTGRES) {
+        return User.findOne({ email: normalizedEmail });
+    }
+
+    let user = await pgUsers.findUserByEmail(normalizedEmail);
+    if (user || !allowDualFallback || !DUAL_MONGO_USER_FALLBACK) {
+        return user;
+    }
+
+    const mongoUser = await User.findOne({ email: normalizedEmail });
+    if (!mongoUser) return null;
+    return migrateMongoUserToPostgres(mongoUser);
+}
+
+async function findUserByPhone(phone, { allowDualFallback = true } = {}) {
+    const normalizedPhone = String(phone || '').trim();
+    if (!normalizedPhone) return null;
+
+    if (!USERS_IN_POSTGRES) {
+        return User.findOne({ phone: normalizedPhone });
+    }
+
+    let user = await pgUsers.findUserByPhone(normalizedPhone);
+    if (user || !allowDualFallback || !DUAL_MONGO_USER_FALLBACK) {
+        return user;
+    }
+
+    const mongoUser = await User.findOne({ phone: normalizedPhone });
+    if (!mongoUser) return null;
+    return migrateMongoUserToPostgres(mongoUser);
+}
+
+async function persistUser(user, { managedDoctorIdsChanged = false } = {}) {
+    if (!user) return null;
+    if (!USERS_IN_POSTGRES) {
+        await user.save();
+        return user;
+    }
+    return pgUsers.updateUserByPublicId(user._id, {
+        email: user.email ?? null,
+        phone: user.phone ?? null,
+        passwordHash: user.password,
+        googleId: user.googleId ?? null,
+        displayName: user.displayName,
+        role: normalizeRoleValue(user.role),
+        ...(managedDoctorIdsChanged ? { managedDoctorIds: normalizeManagedDoctorIds(user.managedDoctorIds || []) } : {})
+    });
+}
+
 async function ensureNormalizedRole(user) {
     if (!user) return null;
     let shouldSave = false;
@@ -1124,7 +1252,7 @@ async function ensureNormalizedRole(user) {
         shouldSave = true;
     }
     if (shouldSave) {
-        await user.save();
+        return persistUser(user, { managedDoctorIdsChanged: true });
     }
     return user;
 }
@@ -1481,8 +1609,9 @@ async function writeAuditLog(req, {
     metadata = {}
 } = {}) {
     try {
+        const actorUserId = getMongoCompatibleUserId(actorUser);
         await AuditLog.create({
-            actorUserId: actorUser?._id || null,
+            actorUserId: actorUserId || null,
             actorRole: actorUser?.role || 'anonymous',
             action: String(action || 'unknown_action'),
             targetType: String(targetType || ''),
@@ -1691,7 +1820,7 @@ async function getAuthenticatedUser(req) {
     if (!accessToken) return null;
 
     const payload = verifyAccessToken(accessToken);
-    const user = await User.findById(payload.sub);
+    const user = await findUserById(payload.sub, { allowDualFallback: true });
     return ensureNormalizedRole(user || null);
 }
 
@@ -1902,10 +2031,10 @@ app.post('/api/auth/login', validateBody(loginBodySchema), async (req, res) => {
 
         let user;
         if (isEmail(identifier)) {
-            user = await User.findOne({ email: identifier.toLowerCase() });
+            user = await findUserByEmail(identifier.toLowerCase(), { allowDualFallback: true });
         } else {
             const cleanedPhone = cleanPhone(identifier);
-            user = await User.findOne({ phone: cleanedPhone });
+            user = await findUserByPhone(cleanedPhone, { allowDualFallback: true });
         }
 
         if (!user) {
@@ -1997,14 +2126,14 @@ app.post('/api/auth/refresh', async (req, res) => {
 
     try {
         const payload = verifyRefreshToken(refreshToken);
-        const user = await User.findById(payload.sub);
+        const user = await findUserById(payload.sub, { allowDualFallback: true });
 
         if (!user) {
             throw new Error('User not found for refresh token.');
         }
 
         clearFailedRefreshAttempt(req);
-        setSessionCookies(res, user, { rotateRefresh: true, rotateCsrf: true });
+        setSessionCookies(res, await ensureNormalizedRole(user), { rotateRefresh: true, rotateCsrf: true });
         return res.json({ ok: true });
 
     } catch (_) {
@@ -2027,7 +2156,7 @@ app.get('/api/auth/me', async (req, res) => {
 
     try {
         const payload = verifyAccessToken(accessToken);
-        const user = await ensureNormalizedRole(await User.findById(payload.sub));
+        const user = await ensureNormalizedRole(await findUserById(payload.sub, { allowDualFallback: true }));
         if (!user) {
             return res.status(401).json({ error: 'Sesiune invalida.' });
         }
@@ -2206,7 +2335,7 @@ async function handleAppointmentBooking(req, res) {
             doctorId: doctor._id,
             doctorSnapshotName: doctor.displayName,
             hasDiagnosis: !!hasDiagnosis,
-            userId: req.user ? req.user._id : null
+            userId: getMongoCompatibleUserId(req.user) || null
         };
         if (safeDiagnosticFileMeta) {
             newAppointmentPayload.diagnosticFileMeta = safeDiagnosticFileMeta;
@@ -2684,8 +2813,8 @@ app.post('/api/admin/doctors', requireSuperadminOnly, validateBody(doctorCreateB
             bookingSettings: payload.bookingSettings,
             availabilityRules: payload.availabilityRules,
             blockedDates: payload.blockedDates,
-            createdByUserId: req.user._id,
-            updatedByUserId: req.user._id
+            createdByUserId: getMongoCompatibleUserId(req.user) || null,
+            updatedByUserId: getMongoCompatibleUserId(req.user) || null
         });
         await doctor.save();
 
@@ -2730,7 +2859,7 @@ app.patch('/api/admin/doctors/:id', requireSuperadminOnly, validateBody(doctorPa
         if (updates.bookingSettings !== undefined) updateDoc.bookingSettings = updates.bookingSettings;
         if (updates.availabilityRules !== undefined) updateDoc.availabilityRules = updates.availabilityRules;
         if (updates.blockedDates !== undefined) updateDoc.blockedDates = updates.blockedDates;
-        updateDoc.updatedByUserId = req.user._id;
+        updateDoc.updatedByUserId = getMongoCompatibleUserId(req.user) || null;
 
         const doctor = await Doctor.findByIdAndUpdate(doctorId, { $set: updateDoc }, { new: true, runValidators: true });
         if (!doctor) {
@@ -2780,7 +2909,7 @@ app.post('/api/admin/doctors/:id/block-date', requireSuperadminOnly, validateBod
             doctorId,
             {
                 $addToSet: { blockedDates: date },
-                $set: { updatedByUserId: req.user._id }
+                $set: { updatedByUserId: getMongoCompatibleUserId(req.user) || null }
             },
             { new: true, runValidators: true }
         );
@@ -2821,7 +2950,7 @@ app.delete('/api/admin/doctors/:id/block-date/:date', requireSuperadminOnly, asy
             doctorId,
             {
                 $pull: { blockedDates: rawDate },
-                $set: { updatedByUserId: req.user._id }
+                $set: { updatedByUserId: getMongoCompatibleUserId(req.user) || null }
             },
             { new: true, runValidators: true }
         );
@@ -2866,27 +2995,39 @@ app.post('/api/admin/users', requireSuperadminOnly, validateBody(adminCreateUser
             return res.status(400).json({ error: 'Unul sau mai multi doctori asignati nu exista.' });
         }
 
-        const existingEmail = await User.findOne({ email: normalizedEmail });
+        const existingEmail = await findUserByEmail(normalizedEmail, { allowDualFallback: true });
         if (existingEmail) {
             return res.status(409).json({ error: 'Acest email este deja inregistrat.' });
         }
 
-        const existingPhone = await User.findOne({ phone: cleanedPhone });
+        const existingPhone = await findUserByPhone(cleanedPhone, { allowDualFallback: true });
         if (existingPhone) {
             return res.status(409).json({ error: 'Acest numar de telefon este deja inregistrat.' });
         }
 
         const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
-        const user = new User({
-            email: normalizedEmail,
-            phone: cleanedPhone,
-            password: hashedPassword,
-            displayName: displayName.trim(),
-            role,
-            managedDoctorIds: normalizedDoctorIds.map((id) => new mongoose.Types.ObjectId(id))
-        });
+        let user;
+        if (USERS_IN_POSTGRES) {
+            user = await pgUsers.withTransaction(async (client) => pgUsers.createUser({
+                email: normalizedEmail,
+                phone: cleanedPhone,
+                passwordHash: hashedPassword,
+                displayName: displayName.trim(),
+                role,
+                managedDoctorIds: normalizedDoctorIds
+            }, client));
+        } else {
+            user = new User({
+                email: normalizedEmail,
+                phone: cleanedPhone,
+                password: hashedPassword,
+                displayName: displayName.trim(),
+                role,
+                managedDoctorIds: normalizedDoctorIds.map((id) => new mongoose.Types.ObjectId(id))
+            });
+            await user.save();
+        }
 
-        await user.save();
         const doctorsMap = await loadDoctorsMapByIds(normalizedDoctorIds);
         await writeAuditLog(req, {
             action: 'user_create',
@@ -2899,15 +3040,21 @@ app.post('/api/admin/users', requireSuperadminOnly, validateBody(adminCreateUser
 
         return res.status(201).json({
             success: true,
-            user: sanitizeUserForAdmin(user.toObject(), doctorsMap)
+            user: sanitizeUserForAdmin(USERS_IN_POSTGRES ? user : user.toObject(), doctorsMap)
         });
-    } catch (_) {
+    } catch (error) {
         await writeAuditLog(req, {
             action: 'user_create',
             result: 'failure',
             targetType: 'user',
             actorUser: req.user
         });
+        if (!USERS_IN_POSTGRES && error?.code === 11000) {
+            return res.status(409).json({ error: 'Email sau telefon deja inregistrat.' });
+        }
+        if (USERS_IN_POSTGRES && pgUsers.isUniqueViolation(error)) {
+            return res.status(409).json({ error: 'Email sau telefon deja inregistrat.' });
+        }
         return res.status(500).json({ error: 'Database error' });
     }
 });
@@ -2916,7 +3063,16 @@ app.get('/api/admin/users', requireSuperadminOnly, async (req, res) => {
     setAuthNoStore(res);
 
     try {
-        const users = await User.find().select('-password').sort({ createdAt: -1 }).lean();
+        if (USERS_IN_POSTGRES && DUAL_MONGO_USER_FALLBACK) {
+            const mongoUsers = await User.find().lean();
+            for (const mongoUser of mongoUsers) {
+                await migrateMongoUserToPostgres(mongoUser);
+            }
+        }
+
+        const users = USERS_IN_POSTGRES
+            ? await pgUsers.listUsers()
+            : await User.find().select('-password').sort({ createdAt: -1 }).lean();
         const allDoctorIds = users.flatMap((user) => normalizeManagedDoctorIds(user.managedDoctorIds));
         const doctorMap = await loadDoctorsMapByIds(allDoctorIds);
         const normalizedUsers = users.map((user) => sanitizeUserForAdmin(user, doctorMap));
@@ -2939,7 +3095,7 @@ app.post('/api/admin/users/role', requireSuperadminOnly, requireStepUp('user_rol
     try {
         const { userId, role } = req.validatedBody;
 
-        const user = await User.findById(userId);
+        const user = await findUserById(userId, { allowDualFallback: true });
         if (!user) {
             return res.status(404).json({ error: 'Utilizator negasit.' });
         }
@@ -2950,7 +3106,7 @@ app.post('/api/admin/users/role', requireSuperadminOnly, requireStepUp('user_rol
 
         const previousRole = user.role;
         user.role = role;
-        await user.save();
+        await persistUser(user);
 
         await writeAuditLog(req, {
             action: 'user_role_change',
@@ -2977,12 +3133,12 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
     setAuthNoStore(res);
 
     const userId = String(req.params.id || '').trim();
-    if (!MONGODB_OBJECT_ID_REGEX.test(userId)) {
+    if (!isValidUserIdentifier(userId)) {
         return res.status(400).json({ error: 'Utilizator invalid.' });
     }
 
     try {
-        const existingUser = await User.findById(userId);
+        const existingUser = await findUserById(userId, { allowDualFallback: true });
         if (!existingUser) {
             return res.status(404).json({ error: 'Utilizator negasit.' });
         }
@@ -2992,8 +3148,8 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
 
         if (updates.email !== undefined) {
             const normalizedEmail = updates.email.toLowerCase();
-            const duplicate = await User.findOne({ email: normalizedEmail, _id: { $ne: existingUser._id } });
-            if (duplicate) {
+            const duplicate = await findUserByEmail(normalizedEmail, { allowDualFallback: true });
+            if (duplicate && String(duplicate._id) !== String(existingUser._id)) {
                 return res.status(409).json({ error: 'Acest email este deja inregistrat.' });
             }
             existingUser.email = normalizedEmail;
@@ -3005,8 +3161,8 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
                 return res.status(400).json({ error: 'Format telefon invalid.' });
             }
             const cleanedPhone = cleanPhone(updates.phone);
-            const duplicatePhone = await User.findOne({ phone: cleanedPhone, _id: { $ne: existingUser._id } });
-            if (duplicatePhone) {
+            const duplicatePhone = await findUserByPhone(cleanedPhone, { allowDualFallback: true });
+            if (duplicatePhone && String(duplicatePhone._id) !== String(existingUser._id)) {
                 return res.status(409).json({ error: 'Acest numar de telefon este deja inregistrat.' });
             }
             existingUser.phone = cleanedPhone;
@@ -3024,7 +3180,9 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
             }
 
             if (existingUser.role === ROLE.SUPERADMIN && updates.role !== ROLE.SUPERADMIN) {
-                const superadminCount = await User.countDocuments({ role: ROLE.SUPERADMIN });
+                const superadminCount = USERS_IN_POSTGRES
+                    ? await pgUsers.countUsersByRole(ROLE.SUPERADMIN)
+                    : await User.countDocuments({ role: ROLE.SUPERADMIN });
                 if (superadminCount <= 1) {
                     return res.status(403).json({ error: 'Nu puteti retrograda ultimul superadmin.' });
                 }
@@ -3045,7 +3203,9 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
             if (!exists) {
                 return res.status(400).json({ error: 'Unul sau mai multi doctori asignati nu exista.' });
             }
-            existingUser.managedDoctorIds = normalizedDoctorIds.map((id) => new mongoose.Types.ObjectId(id));
+            existingUser.managedDoctorIds = USERS_IN_POSTGRES
+                ? normalizedDoctorIds
+                : normalizedDoctorIds.map((id) => new mongoose.Types.ObjectId(id));
             changedFields.push('managedDoctorIds');
         }
 
@@ -3053,23 +3213,23 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
             return res.status(400).json({ error: 'Nicio schimbare valida.' });
         }
 
-        await existingUser.save();
-        const doctorsMap = await loadDoctorsMapByIds(existingUser.managedDoctorIds);
+        const savedUser = await persistUser(existingUser, { managedDoctorIdsChanged: changedFields.includes('managedDoctorIds') });
+        const doctorsMap = await loadDoctorsMapByIds(savedUser.managedDoctorIds);
 
         await writeAuditLog(req, {
             action: 'user_update',
             result: 'success',
             targetType: 'user',
-            targetId: String(existingUser._id),
+            targetId: String(savedUser._id),
             actorUser: req.user,
             metadata: { changedFields }
         });
 
         return res.json({
             success: true,
-            user: sanitizeUserForAdmin(existingUser.toObject(), doctorsMap)
+            user: sanitizeUserForAdmin(USERS_IN_POSTGRES ? savedUser : savedUser.toObject(), doctorsMap)
         });
-    } catch (_) {
+    } catch (error) {
         await writeAuditLog(req, {
             action: 'user_update',
             result: 'failure',
@@ -3077,6 +3237,12 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
             targetId: userId,
             actorUser: req.user
         });
+        if (!USERS_IN_POSTGRES && error?.code === 11000) {
+            return res.status(409).json({ error: 'Email sau telefon deja inregistrat.' });
+        }
+        if (USERS_IN_POSTGRES && pgUsers.isUniqueViolation(error)) {
+            return res.status(409).json({ error: 'Email sau telefon deja inregistrat.' });
+        }
         return res.status(500).json({ error: 'Database error' });
     }
 });
@@ -3085,7 +3251,7 @@ app.delete('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_de
     setAuthNoStore(res);
 
     const userId = String(req.params.id || '').trim();
-    if (!MONGODB_OBJECT_ID_REGEX.test(userId)) {
+    if (!isValidUserIdentifier(userId)) {
         return res.status(400).json({ error: 'Utilizator invalid.' });
     }
 
@@ -3094,19 +3260,25 @@ app.delete('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_de
     }
 
     try {
-        const target = await User.findById(userId);
+        const target = await findUserById(userId, { allowDualFallback: true });
         if (!target) {
             return res.status(404).json({ error: 'Utilizator negasit.' });
         }
 
         if (target.role === ROLE.SUPERADMIN) {
-            const superadminCount = await User.countDocuments({ role: ROLE.SUPERADMIN });
+            const superadminCount = USERS_IN_POSTGRES
+                ? await pgUsers.countUsersByRole(ROLE.SUPERADMIN)
+                : await User.countDocuments({ role: ROLE.SUPERADMIN });
             if (superadminCount <= 1) {
                 return res.status(403).json({ error: 'Nu puteti sterge ultimul superadmin.' });
             }
         }
 
-        await User.deleteOne({ _id: target._id });
+        if (USERS_IN_POSTGRES) {
+            await pgUsers.deleteUserByPublicId(target._id);
+        } else {
+            await User.deleteOne({ _id: target._id });
+        }
         await writeAuditLog(req, {
             action: 'user_delete',
             result: 'success',

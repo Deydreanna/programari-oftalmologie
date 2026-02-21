@@ -113,9 +113,10 @@ DATABASE_URL=postgresql://<user>:<password>@<host>/<database>?sslmode=require
 
 Current behavior:
 
-- API endpoints still use MongoDB/Mongoose.
-- `DB_PROVIDER` enables startup Postgres health checks and env validation only.
-- Mongo remains required for active app behavior in this phase.
+- `DB_PROVIDER=mongo`: users/auth + appointments/doctors use MongoDB.
+- `DB_PROVIDER=postgres` or `DB_PROVIDER=dual`: users/auth/roles are persisted in Postgres.
+- Appointments/doctors/availability/audit collections remain on MongoDB in this phase.
+- `DB_PROVIDER=dual` supports lazy user migration from MongoDB to Postgres at auth time.
 
 ### Run migrations
 
@@ -127,6 +128,15 @@ npm run db:migrate
 
 ```bash
 npm run db:check:postgres
+```
+
+### Verify auth + RBAC flow (requires running server + superadmin creds)
+
+```bash
+$env:BASE_URL="http://localhost:3000"
+$env:SUPERADMIN_IDENTIFIER="superadmin@example.com"
+$env:SUPERADMIN_PASSWORD="YourSuperadminPassword"
+npm run test:auth-rbac
 ```
 
 ## MongoDB TLS hardening
