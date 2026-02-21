@@ -14,6 +14,7 @@
         "check:env": "node scripts/check-env.js",
         "db:migrate": "node scripts/run-pg-migrations.js",
         "db:check:postgres": "node scripts/check-postgres.js",
+        "db:migrate:mongo-to-postgres": "node scripts/migrate-mongo-to-postgres.js",
         "seed:superadmin": "node scripts/seed-superadmin.js",
         "test:race": "node scripts/test-booking-race.js",
         "test:multidoctor": "node scripts/verify-multidoctor.js",

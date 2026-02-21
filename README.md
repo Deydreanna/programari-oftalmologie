@@ -130,6 +130,93 @@ npm run db:migrate
 npm run db:check:postgres
 ```
 
+## One-time Mongo -> Postgres migration (Phase 3)
+
+Script: `scripts/migrate-mongo-to-postgres.js`
+
+NPM command:
+
+```bash
+npm run db:migrate:mongo-to-postgres
+```
+
+### Prerequisites
+
+1. Run this in staging first.
+2. Ensure Postgres schema is migrated (`npm run db:migrate`).
+3. Ensure both `MONGODB_URI` and `DATABASE_URL` are set.
+4. Keep `DB_PROVIDER=mongo` during data import verification to avoid production behavior changes.
+
+### Idempotency strategy
+
+- The script is rerun-safe:
+  - upserts core entities by `legacy_mongo_id` (`users`, `doctors`, `appointments`, optional `audit_logs`)
+  - replaces per-source child rows for `doctor_admin_assignments`, `doctor_availability_rules`, and `doctor_blocked_days`
+- MongoDB source data is never deleted by this script.
+
+### Commands
+
+Dry run (no Postgres writes):
+
+```bash
+npm run db:migrate:mongo-to-postgres -- --dry-run --report-file=./migration-report-dry-run.json
+```
+
+Real run:
+
+```bash
+npm run db:migrate:mongo-to-postgres -- --report-file=./migration-report.json
+```
+
+Include audit logs (optional):
+
+```bash
+npm run db:migrate:mongo-to-postgres -- --include-audit-logs --report-file=./migration-report-with-audit.json
+```
+
+### Migration report format
+
+The script prints a JSON report and can also save it to disk (`--report-file`).
+
+Top-level fields:
+
+- `startedAt`, `finishedAt`, `durationMs`
+- `options` (`dryRun`, `includeAuditLogs`, `batchSize`, `sampleSize`)
+- `source` / `target`
+- `idempotencyStrategy`
+- `entities`:
+  - `mongoCount`, `processed`, `inserted`, `updated`, `skipped`
+  - `conflicts`, `errors`, `unresolvedReferences`, `dryRunPlanned`
+  - `errorSamples`
+- `validations`:
+  - `counts` (Mongo vs Postgres)
+  - `samples` (random sample checks for users/doctors/appointments)
+  - `referentialIntegrity` checks
+  - `duplicateAndConflictSummary`
+- `totals`
+
+### Verification checklist
+
+1. Inspect `validations.counts` differences and confirm expected variance.
+2. Check `validations.samples` for mismatches.
+3. Ensure referential checks are acceptable:
+   - `assignmentsMissingDoctorBinding`
+   - `appointmentsMissingDoctorRow`
+   - `duplicateAppointmentSlots` (should be `0`)
+4. Review `entities.*.errorSamples` and re-run after fixing source data issues if needed.
+5. Run existing API verification scripts against staging (`test:auth-rbac`, `test:multidoctor`, `test:race`).
+
+### Rollback approach
+
+- Source of truth remains MongoDB.
+- If issues are found after migration, keep or switch runtime to:
+
+```bash
+DB_PROVIDER=mongo
+```
+
+- Fix migration/data issues, then rerun the migration script.
+
 ### Verify auth + RBAC flow (requires running server + superadmin creds)
 
 ```bash
