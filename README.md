@@ -1,6 +1,6 @@
 ﻿# Ophthalmology Appointments
 
-Node.js + Express application for ophthalmology bookings, with secure cookie auth, CSRF, RBAC, and audit logging. MongoDB remains active, and Postgres (Neon-compatible) infrastructure is prepared in parallel.
+Node.js + Express application for ophthalmology bookings, with secure cookie auth, CSRF, RBAC, and audit logging. The app supports MongoDB (`DB_PROVIDER=mongo`) and Neon-compatible Postgres (`DB_PROVIDER=postgres` or `dual`).
 
 ## What changed (multi-doctor refactor)
 
@@ -113,10 +113,10 @@ DATABASE_URL=postgresql://<user>:<password>@<host>/<database>?sslmode=require
 
 Current behavior:
 
-- `DB_PROVIDER=mongo`: users/auth + doctors/availability + appointments use MongoDB.
-- `DB_PROVIDER=postgres` or `DB_PROVIDER=dual`: users/auth/roles + doctors/availability/blocked days are persisted in Postgres.
-- Appointments and audit logs remain on MongoDB in this phase.
-- `DB_PROVIDER=dual` supports lazy user and doctor migration from MongoDB to Postgres.
+- `DB_PROVIDER=mongo`: users/auth + doctors/availability + appointments + audit logs use MongoDB.
+- `DB_PROVIDER=postgres` or `DB_PROVIDER=dual`: users/auth/roles + doctors/availability + appointments + audit logs are persisted in Postgres.
+- `DB_PROVIDER=dual` supports lazy user/doctor/appointment migration from MongoDB to Postgres at startup.
+- Appointment API responses keep `_id` as 24-char legacy-compatible IDs backed by `legacy_mongo_id` in Postgres.
 
 ### Run migrations
 

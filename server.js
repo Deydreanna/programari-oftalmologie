@@ -14,6 +14,7 @@ const { validateBaseEnv, normalizeDbProvider, isPostgresProvider } = require('./
 const { runPostgresHealthCheck, redactPostgresUrlInText } = require('./db/postgres');
 const pgUsers = require('./db/users-postgres');
 const pgDoctors = require('./db/doctors-postgres');
+const pgAppointments = require('./db/appointments-postgres');
 const {
     buildMongoTlsPolicy,
     buildMongoDriverTlsOptions,
@@ -51,8 +52,11 @@ const DB_PROVIDER = baseEnvValidation.parsed.dbProvider || normalizeDbProvider(p
 const POSTGRES_ENABLED = isPostgresProvider(DB_PROVIDER);
 const USERS_IN_POSTGRES = POSTGRES_ENABLED;
 const DOCTORS_IN_POSTGRES = POSTGRES_ENABLED;
+const APPOINTMENTS_IN_POSTGRES = POSTGRES_ENABLED;
+const AUDIT_IN_POSTGRES = POSTGRES_ENABLED;
 const DUAL_MONGO_USER_FALLBACK = DB_PROVIDER === 'dual';
 const DUAL_MONGO_DOCTOR_FALLBACK = DB_PROVIDER === 'dual';
+const DUAL_MONGO_APPOINTMENT_FALLBACK = DB_PROVIDER === 'dual';
 const startupValidationErrors = Array.from(new Set([
     ...baseEnvValidation.errors,
     ...mongoTlsPolicy.validationErrors
@@ -303,25 +307,42 @@ async function ensureDefaultDoctorAndBackfill() {
         );
     }
 
-    const appointmentsBackfill = await Appointment.updateMany(
-        {
-            $or: [
-                { doctorId: { $exists: false } },
-                { doctorId: null }
-            ]
-        },
-        {
-            $set: {
-                doctorId: defaultDoctor._id,
-                doctorSnapshotName: defaultDoctor.displayName
+    let appointmentsBackfillCount = 0;
+    let snapshotsBackfillCount = 0;
+    let appointmentsMigratedCount = 0;
+    if (!APPOINTMENTS_IN_POSTGRES || DUAL_MONGO_APPOINTMENT_FALLBACK) {
+        const appointmentsBackfill = await Appointment.updateMany(
+            {
+                $or: [
+                    { doctorId: { $exists: false } },
+                    { doctorId: null }
+                ]
+            },
+            {
+                $set: {
+                    doctorId: defaultDoctor._id,
+                    doctorSnapshotName: defaultDoctor.displayName
+                }
+            }
+        );
+        appointmentsBackfillCount = appointmentsBackfill.modifiedCount || 0;
+
+        const snapshotBackfill = await Appointment.updateMany(
+            { doctorSnapshotName: { $in: [null, ''] }, doctorId: { $exists: true, $ne: null } },
+            { $set: { doctorSnapshotName: defaultDoctor.displayName } }
+        );
+        snapshotsBackfillCount = snapshotBackfill.modifiedCount || 0;
+    }
+
+    if (APPOINTMENTS_IN_POSTGRES && DUAL_MONGO_APPOINTMENT_FALLBACK) {
+        const mongoAppointments = await Appointment.find().lean();
+        for (const mongoAppointment of mongoAppointments) {
+            const migrated = await migrateMongoAppointmentToPostgres(mongoAppointment, { defaultDoctorId: defaultDoctor._id });
+            if (migrated) {
+                appointmentsMigratedCount += 1;
             }
         }
-    );
-
-    const snapshotBackfill = await Appointment.updateMany(
-        { doctorSnapshotName: { $in: [null, ''] }, doctorId: { $exists: true, $ne: null } },
-        { $set: { doctorSnapshotName: defaultDoctor.displayName } }
-    );
+    }
 
     let usersBackfillCount = 0;
     if (!USERS_IN_POSTGRES) {
@@ -334,8 +355,9 @@ async function ensureDefaultDoctorAndBackfill() {
 
     return {
         defaultDoctorId: String(defaultDoctor._id),
-        appointmentsBackfilled: appointmentsBackfill.modifiedCount || 0,
-        snapshotsBackfilled: snapshotBackfill.modifiedCount || 0,
+        appointmentsBackfilled: appointmentsBackfillCount,
+        snapshotsBackfilled: snapshotsBackfillCount,
+        appointmentsMigratedToPostgres: appointmentsMigratedCount,
         usersBackfilled: usersBackfillCount
     };
 }
@@ -443,7 +465,9 @@ async function ensureMongoReady() {
                     if (!USERS_IN_POSTGRES) {
                         await User.syncIndexes();
                     }
-                    await Appointment.syncIndexes();
+                    if (!APPOINTMENTS_IN_POSTGRES) {
+                        await Appointment.syncIndexes();
+                    }
                     mongoBootstrapped = true;
                     const tlsDiagnostics = getMongoTlsDiagnosticsSnapshot();
                     console.log(
@@ -1286,6 +1310,40 @@ async function migrateMongoDoctorToPostgres(mongoDoctor) {
     });
 }
 
+async function migrateMongoAppointmentToPostgres(mongoAppointment, { defaultDoctorId = null } = {}) {
+    if (!APPOINTMENTS_IN_POSTGRES || !mongoAppointment) {
+        return mongoAppointment || null;
+    }
+
+    const doctorLegacyId = String(mongoAppointment.doctorId || defaultDoctorId || '').trim();
+    if (!MONGODB_OBJECT_ID_REGEX.test(doctorLegacyId)) {
+        return null;
+    }
+
+    const ensuredDoctor = await resolveDoctorByIdentifier(doctorLegacyId, { requireActive: false, allowDualFallback: true });
+    if (!ensuredDoctor) {
+        return null;
+    }
+
+    return pgAppointments.upsertAppointmentFromMongo({
+        _id: String(mongoAppointment._id || ''),
+        name: mongoAppointment.name || '',
+        phone: mongoAppointment.phone || '',
+        type: mongoAppointment.type || '',
+        date: mongoAppointment.date || '',
+        time: mongoAppointment.time || '',
+        notes: mongoAppointment.notes || '',
+        email: mongoAppointment.email || '',
+        emailSent: !!mongoAppointment.emailSent,
+        hasDiagnosis: !!mongoAppointment.hasDiagnosis,
+        diagnosticFileMeta: mongoAppointment.diagnosticFileMeta || null,
+        doctorId: doctorLegacyId,
+        doctorSnapshotName: mongoAppointment.doctorSnapshotName || ensuredDoctor.displayName || '',
+        userId: getMongoCompatibleUserId({ _id: mongoAppointment.userId }) || null,
+        createdAt: mongoAppointment.createdAt || new Date()
+    });
+}
+
 async function ensureNormalizedRole(user) {
     if (!user) return null;
     let shouldSave = false;
@@ -1700,9 +1758,24 @@ async function writeAuditLog(req, {
     metadata = {}
 } = {}) {
     try {
-        const actorUserId = getMongoCompatibleUserId(actorUser);
+        const actorUserId = getMongoCompatibleUserId(actorUser) || String(actorUser?._id || actorUser?.id || '').trim() || null;
+        if (AUDIT_IN_POSTGRES) {
+            await pgAppointments.createAuditLog({
+                action: String(action || 'unknown_action'),
+                result: String(result || 'success'),
+                targetType: String(targetType || ''),
+                targetId: String(targetId || ''),
+                actorUserPublicId: actorUserId,
+                actorRole: actorUser?.role || 'anonymous',
+                ip: getClientIp(req),
+                userAgent: getUserAgent(req),
+                metadata: metadata && typeof metadata === 'object' ? metadata : {}
+            });
+            return;
+        }
+
         await AuditLog.create({
-            actorUserId: actorUserId || null,
+            actorUserId: getMongoCompatibleUserId(actorUser) || null,
             actorRole: actorUser?.role || 'anonymous',
             action: String(action || 'unknown_action'),
             targetType: String(targetType || ''),
@@ -2329,6 +2402,26 @@ app.get('/api/slots', validateQuery(slotsQuerySchema), async (req, res) => {
             return res.status(404).json({ error: 'Doctor not found.' });
         }
 
+        if (APPOINTMENTS_IN_POSTGRES) {
+            const slotMatrix = await pgAppointments.getSlotMatrixForDoctorDate(doctor._id, date);
+            if (!slotMatrix.found) {
+                return res.status(404).json({ error: 'Doctor not found.' });
+            }
+            if (slotMatrix.inRange === false) {
+                return res.status(400).json({ error: 'Data selectata este in afara intervalului permis pentru acest medic.' });
+            }
+            if (slotMatrix.hasAvailability === false) {
+                return res.status(400).json({ error: 'Medicul selectat nu are disponibilitate in aceasta zi.' });
+            }
+
+            return res.json({
+                doctor: sanitizeDoctorForPublic(doctor),
+                date,
+                blocked: !!slotMatrix.blocked,
+                slots: slotMatrix.slots
+            });
+        }
+
         if (!isDateInDoctorRange(date, doctor.bookingSettings?.monthsToShow)) {
             return res.status(400).json({ error: 'Data selectata este in afara intervalului permis pentru acest medic.' });
         }
@@ -2342,8 +2435,7 @@ app.get('/api/slots', validateQuery(slotsQuerySchema), async (req, res) => {
         const allSlots = generateDoctorSlots(doctor);
         const isBlockedDate = Array.isArray(doctor.blockedDates) && doctor.blockedDates.includes(date);
 
-        const existingAppointments = await Appointment.find({ date, doctorId: doctor._id }).select('time').lean();
-        const bookedTimes = existingAppointments.map((a) => a.time);
+        const bookedTimes = (await Appointment.find({ date, doctorId: doctor._id }).select('time').lean()).map((a) => a.time);
         const availableSlots = allSlots.map((time) => ({
             time,
             available: !isBlockedDate && !bookedTimes.includes(time)
@@ -2378,19 +2470,21 @@ async function handleAppointmentBooking(req, res) {
             return res.status(400).json({ error: 'Data selectata este in afara intervalului permis pentru acest medic.' });
         }
 
-        const appointmentDay = getUtcDateFromISO(date).getUTCDay();
-        const weekdays = Array.isArray(doctor.availabilityRules?.weekdays) ? doctor.availabilityRules.weekdays : DEFAULT_AVAILABILITY_WEEKDAYS;
-        if (!weekdays.includes(appointmentDay)) {
-            return res.status(400).json({ error: 'Medicul selectat nu are disponibilitate in aceasta zi.' });
-        }
+        if (!APPOINTMENTS_IN_POSTGRES) {
+            const appointmentDay = getUtcDateFromISO(date).getUTCDay();
+            const weekdays = Array.isArray(doctor.availabilityRules?.weekdays) ? doctor.availabilityRules.weekdays : DEFAULT_AVAILABILITY_WEEKDAYS;
+            if (!weekdays.includes(appointmentDay)) {
+                return res.status(400).json({ error: 'Medicul selectat nu are disponibilitate in aceasta zi.' });
+            }
 
-        if (Array.isArray(doctor.blockedDates) && doctor.blockedDates.includes(date)) {
-            return res.status(409).json({ error: 'Ziua selectata este indisponibila pentru medicul ales.' });
-        }
+            if (Array.isArray(doctor.blockedDates) && doctor.blockedDates.includes(date)) {
+                return res.status(409).json({ error: 'Ziua selectata este indisponibila pentru medicul ales.' });
+            }
 
-        const allowedSlots = generateDoctorSlots(doctor);
-        if (!allowedSlots.includes(time)) {
-            return res.status(400).json({ error: 'Ora selectata este invalida pentru medicul ales.' });
+            const allowedSlots = generateDoctorSlots(doctor);
+            if (!allowedSlots.includes(time)) {
+                return res.status(400).json({ error: 'Ora selectata este invalida pentru medicul ales.' });
+            }
         }
 
         if (diagnosticFile) {
@@ -2418,24 +2512,56 @@ async function handleAppointmentBooking(req, res) {
             }
         }
 
-        const newAppointmentPayload = {
-            name,
-            phone: cleanPhone(phone),
-            email: email.toLowerCase().trim(),
-            type,
-            date,
-            time,
-            doctorId: doctor._id,
-            doctorSnapshotName: doctor.displayName,
-            hasDiagnosis: !!hasDiagnosis,
-            userId: getMongoCompatibleUserId(req.user) || null
-        };
-        if (safeDiagnosticFileMeta) {
-            newAppointmentPayload.diagnosticFileMeta = safeDiagnosticFileMeta;
-        }
+        let newAppointment;
+        if (APPOINTMENTS_IN_POSTGRES) {
+            newAppointment = await pgAppointments.createAppointmentTransactional({
+                doctorIdentifier: doctor._id,
+                name,
+                phone: cleanPhone(phone),
+                email: email.toLowerCase().trim(),
+                type,
+                date,
+                time,
+                notes: '',
+                hasDiagnosis: !!hasDiagnosis,
+                diagnosticFileMeta: safeDiagnosticFileMeta || null,
+                userPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null,
+                auditContext: {
+                    action: 'appointment_book',
+                    result: 'success',
+                    targetType: 'appointment',
+                    actorUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null,
+                    actorRole: req.user?.role || 'anonymous',
+                    ip: getClientIp(req),
+                    userAgent: getUserAgent(req),
+                    metadata: {
+                        doctorId: doctor._id,
+                        date,
+                        time
+                    }
+                }
+            });
+        } else {
+            const newAppointmentPayload = {
+                name,
+                phone: cleanPhone(phone),
+                email: email.toLowerCase().trim(),
+                type,
+                date,
+                time,
+                doctorId: doctor._id,
+                doctorSnapshotName: doctor.displayName,
+                hasDiagnosis: !!hasDiagnosis,
+                userId: getMongoCompatibleUserId(req.user) || null
+            };
+            if (safeDiagnosticFileMeta) {
+                newAppointmentPayload.diagnosticFileMeta = safeDiagnosticFileMeta;
+            }
 
-        const newAppointment = new Appointment(newAppointmentPayload);
-        await newAppointment.save();
+            const mongoAppointment = new Appointment(newAppointmentPayload);
+            await mongoAppointment.save();
+            newAppointment = mongoAppointment;
+        }
 
         const appointmentData = {
             name,
@@ -2452,7 +2578,11 @@ async function handleAppointmentBooking(req, res) {
             if (stderr) console.error(`[EMAIL STDERR]: ${stderr}`);
 
             try {
-                await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
+                if (APPOINTMENTS_IN_POSTGRES) {
+                    await pgAppointments.setAppointmentEmailSentByPublicId(newAppointment._id, true);
+                } else {
+                    await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
+                }
             } catch (updateErr) {
                 console.error('[EMAIL DB UPDATE ERROR]:', updateErr.message);
             }
@@ -2462,8 +2592,11 @@ async function handleAppointmentBooking(req, res) {
 
         return res.json({ success: true, message: 'Programare confirmata! Verificati e-mail-ul pentru invitatie.' });
     } catch (err) {
+        if (err instanceof pgAppointments.BookingValidationError) {
+            return res.status(err.status || 400).json({ error: err.message || 'Eroare la salvare.' });
+        }
         console.error('Booking save failed:', err?.message || err, err?.code || '');
-        if (err?.code === 11000) {
+        if (err?.code === 11000 || (APPOINTMENTS_IN_POSTGRES && pgAppointments.isUniqueViolation(err))) {
             return res.status(409).json({ error: 'Interval deja rezervat.' });
         }
         return res.status(500).json({ error: 'Eroare la salvare.' });
@@ -2535,12 +2668,25 @@ app.get('/api/admin/appointments', requireViewerSchedulerOrSuperadmin, async (re
     setAuthNoStore(res);
 
     try {
-        const scopeQuery = getAdminDoctorScopeQuery(req.user, 'doctorId');
-        if (scopeQuery === null) {
-            return res.status(403).json({ error: 'Nu aveti niciun medic asignat.' });
+        let appointments;
+        if (APPOINTMENTS_IN_POSTGRES) {
+            if (isSuperadminUser(req.user)) {
+                appointments = await pgAppointments.listAppointments();
+            } else {
+                const scopedDoctorIds = getUserManagedDoctorIds(req.user);
+                if (scopedDoctorIds.length === 0) {
+                    return res.status(403).json({ error: 'Nu aveti niciun medic asignat.' });
+                }
+                appointments = await pgAppointments.listAppointments({ doctorLegacyIds: scopedDoctorIds });
+            }
+        } else {
+            const scopeQuery = getAdminDoctorScopeQuery(req.user, 'doctorId');
+            if (scopeQuery === null) {
+                return res.status(403).json({ error: 'Nu aveti niciun medic asignat.' });
+            }
+            appointments = await Appointment.find(scopeQuery).sort({ date: 1, time: 1 }).lean();
         }
 
-        const appointments = await Appointment.find(scopeQuery).sort({ date: 1, time: 1 }).lean();
         await writeAuditLog(req, {
             action: 'appointments_list_view',
             result: 'success',
@@ -2563,7 +2709,9 @@ app.get('/api/admin/appointments/:id', requireViewerSchedulerOrSuperadmin, async
     }
 
     try {
-        const appointment = await Appointment.findById(appointmentId).lean();
+        const appointment = APPOINTMENTS_IN_POSTGRES
+            ? await pgAppointments.findAppointmentByPublicId(appointmentId)
+            : await Appointment.findById(appointmentId).lean();
         if (!appointment) {
             return res.status(404).json({ error: 'Programare negasita.' });
         }
@@ -2593,7 +2741,9 @@ app.get('/api/admin/appointments/:id/file-url', requireSchedulerOrSuperadmin, as
     }
 
     try {
-        const appointment = await Appointment.findById(appointmentId).lean();
+        const appointment = APPOINTMENTS_IN_POSTGRES
+            ? await pgAppointments.findAppointmentByPublicId(appointmentId)
+            : await Appointment.findById(appointmentId).lean();
         if (!appointment) {
             return res.status(404).json({ error: 'Programare negasita.' });
         }
@@ -2628,7 +2778,9 @@ app.post('/api/admin/resend-email/:id', requireSchedulerOrSuperadmin, async (req
     }
 
     try {
-        const appointment = await Appointment.findById(appointmentId);
+        const appointment = APPOINTMENTS_IN_POSTGRES
+            ? await pgAppointments.findAppointmentByPublicId(appointmentId)
+            : await Appointment.findById(appointmentId);
         if (!appointment) return res.status(404).json({ error: 'Programare negasita.' });
         if (!canUserAccessDoctor(req.user, appointment.doctorId)) {
             return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
@@ -2648,7 +2800,11 @@ app.post('/api/admin/resend-email/:id', requireSchedulerOrSuperadmin, async (req
 
         try {
             await executeEmailScript(base64Data);
-            await Appointment.findByIdAndUpdate(appointment._id, { emailSent: true });
+            if (APPOINTMENTS_IN_POSTGRES) {
+                await pgAppointments.setAppointmentEmailSentByPublicId(appointment._id, true);
+            } else {
+                await Appointment.findByIdAndUpdate(appointment._id, { emailSent: true });
+            }
             await writeAuditLog(req, {
                 action: 'appointment_resend_email',
                 result: 'success',
@@ -2680,8 +2836,14 @@ app.get('/api/admin/stats', requireSuperadminOnly, async (req, res) => {
     setAuthNoStore(res);
 
     try {
-        const stats = await mongoose.connection.db.command({ dbStats: 1 });
-        const usedSize = stats.storageSize || stats.dataSize;
+        let usedSize = 0;
+        if (APPOINTMENTS_IN_POSTGRES) {
+            const stats = await pgAppointments.getAppointmentStorageStats();
+            usedSize = Number(stats.appointmentsBytes || 0);
+        } else {
+            const stats = await mongoose.connection.db.command({ dbStats: 1 });
+            usedSize = stats.storageSize || stats.dataSize;
+        }
         await writeAuditLog(req, {
             action: 'admin_stats_view',
             result: 'success',
@@ -2734,13 +2896,15 @@ app.post('/api/admin/reset', requireSuperadminOnly, requireStepUp('appointments_
     setAuthNoStore(res);
 
     try {
-        const result = await Appointment.deleteMany({});
+        const deletedCount = APPOINTMENTS_IN_POSTGRES
+            ? await pgAppointments.deleteAllAppointments()
+            : (await Appointment.deleteMany({})).deletedCount || 0;
         await writeAuditLog(req, {
             action: 'appointments_reset',
             result: 'success',
             targetType: 'appointment_collection',
             actorUser: req.user,
-            metadata: { deletedCount: result.deletedCount || 0 }
+            metadata: { deletedCount }
         });
         return res.json({ success: true, message: 'Baza de date a fost resetata.' });
     } catch (_) {
@@ -2763,7 +2927,9 @@ app.delete('/api/admin/appointment/:id', requireSuperadminOnly, requireStepUp('a
     }
 
     try {
-        const deleted = await Appointment.findByIdAndDelete(appointmentId);
+        const deleted = APPOINTMENTS_IN_POSTGRES
+            ? await pgAppointments.deleteAppointmentByPublicId(appointmentId)
+            : await Appointment.findByIdAndDelete(appointmentId);
         if (!deleted) {
             return res.status(404).json({ error: 'Programare negasita.' });
         }
@@ -2792,19 +2958,21 @@ app.delete('/api/admin/appointments/by-date', requireSuperadminOnly, requireStep
 
     try {
         const { date } = req.validatedBody;
-        const result = await Appointment.deleteMany({ date });
+        const deletedCount = APPOINTMENTS_IN_POSTGRES
+            ? await pgAppointments.deleteAppointmentsByDate(date)
+            : (await Appointment.deleteMany({ date })).deletedCount || 0;
         await writeAuditLog(req, {
             action: 'appointments_delete_by_date',
             result: 'success',
             targetType: 'appointment_collection',
             targetId: date,
             actorUser: req.user,
-            metadata: { deletedCount: result.deletedCount || 0 }
+            metadata: { deletedCount }
         });
         return res.json({
             success: true,
-            deletedCount: result.deletedCount || 0,
-            message: `Au fost anulate ${result.deletedCount || 0} programari pentru data ${date}.`
+            deletedCount,
+            message: `Au fost anulate ${deletedCount} programari pentru data ${date}.`
         });
     } catch (_) {
         await writeAuditLog(req, {
@@ -2821,7 +2989,9 @@ app.get('/api/admin/export', requireSuperadminOnly, requireStepUp('appointments_
     setAuthNoStore(res);
 
     try {
-        const appointments = await Appointment.find().sort({ date: 1, time: 1 }).lean();
+        const appointments = APPOINTMENTS_IN_POSTGRES
+            ? await pgAppointments.listAppointments()
+            : await Appointment.find().sort({ date: 1, time: 1 }).lean();
 
         const metadataRows = [{
             NOTICE: 'CONFIDENTIAL - authorized superadmin use only',
@@ -3011,10 +3181,14 @@ app.patch('/api/admin/doctors/:id', requireSchedulerOrSuperadmin, validateBody(d
             return res.status(404).json({ error: 'Medic negasit.' });
         }
 
-        await Appointment.updateMany(
-            { doctorId: doctor._id, doctorSnapshotName: { $ne: sanitizeInlineString(doctor.displayName) } },
-            { $set: { doctorSnapshotName: doctor.displayName } }
-        );
+        if (APPOINTMENTS_IN_POSTGRES) {
+            await pgAppointments.updateDoctorSnapshotNameByDoctorLegacyId(doctor._id, doctor.displayName);
+        } else {
+            await Appointment.updateMany(
+                { doctorId: doctor._id, doctorSnapshotName: { $ne: sanitizeInlineString(doctor.displayName) } },
+                { $set: { doctorSnapshotName: doctor.displayName } }
+            );
+        }
 
         await writeAuditLog(req, {
             action: 'doctor_update',
