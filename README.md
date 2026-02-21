@@ -1,6 +1,6 @@
 ﻿# Ophthalmology Appointments
 
-Node.js + Express + MongoDB application for ophthalmology bookings, with secure cookie auth, CSRF, RBAC, and audit logging.
+Node.js + Express application for ophthalmology bookings, with secure cookie auth, CSRF, RBAC, and audit logging. MongoDB remains active, and Postgres (Neon-compatible) infrastructure is prepared in parallel.
 
 ## What changed (multi-doctor refactor)
 
@@ -80,11 +80,53 @@ npm start
 ## Required env vars
 
 ```bash
+DB_PROVIDER=mongo
 MONGODB_URI=mongodb://localhost:27017/appointments
 JWT_ACCESS_SECRET=<at least 32 chars>
 JWT_REFRESH_SECRET=<at least 32 chars>
 JWT_STEPUP_SECRET=<at least 32 chars>
 ALLOWED_ORIGINS=https://your-app.vercel.app,http://localhost:3000
+```
+
+### Postgres env vars (Phase 1)
+
+- `DB_PROVIDER`: `mongo` (default), `postgres`, or `dual`
+- `DATABASE_URL`: required when `DB_PROVIDER=postgres` or `DB_PROVIDER=dual`
+- Optional pool tuning:
+  - `PG_POOL_MAX` (default `10`)
+  - `PG_IDLE_TIMEOUT_MS` (default `30000`)
+  - `PG_CONNECTION_TIMEOUT_MS` (default `5000`)
+
+Example:
+
+```bash
+DB_PROVIDER=dual
+DATABASE_URL=postgresql://<user>:<password>@<host>/<database>?sslmode=require
+```
+
+## Postgres (Phase 1 infrastructure)
+
+- Connection module: `db/postgres.js`
+- SQL migrations: `db/migrations/*.sql`
+- Migration runner: `npm run db:migrate`
+- Connectivity check: `npm run db:check:postgres`
+
+Current behavior:
+
+- API endpoints still use MongoDB/Mongoose.
+- `DB_PROVIDER` enables startup Postgres health checks and env validation only.
+- Mongo remains required for active app behavior in this phase.
+
+### Run migrations
+
+```bash
+npm run db:migrate
+```
+
+### Test Postgres connectivity
+
+```bash
+npm run db:check:postgres
 ```
 
 ## MongoDB TLS hardening

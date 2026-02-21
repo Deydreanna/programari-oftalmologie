@@ -10,7 +10,8 @@ const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const path = require('path');
-const { validateBaseEnv, parseAllowedOrigins } = require('./scripts/env-utils');
+const { validateBaseEnv, normalizeDbProvider, isPostgresProvider } = require('./scripts/env-utils');
+const { runPostgresHealthCheck, redactPostgresUrlInText } = require('./db/postgres');
 const {
     buildMongoTlsPolicy,
     buildMongoDriverTlsOptions,
@@ -44,6 +45,8 @@ const DEFAULT_AVAILABILITY_WEEKDAYS = Object.freeze([3]);
 
 const mongoTlsPolicy = buildMongoTlsPolicy(process.env);
 const baseEnvValidation = validateBaseEnv(process.env);
+const DB_PROVIDER = baseEnvValidation.parsed.dbProvider || normalizeDbProvider(process.env.DB_PROVIDER) || 'mongo';
+const POSTGRES_ENABLED = isPostgresProvider(DB_PROVIDER);
 const startupValidationErrors = Array.from(new Set([
     ...baseEnvValidation.errors,
     ...mongoTlsPolicy.validationErrors
@@ -60,7 +63,7 @@ const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 const JWT_STEPUP_SECRET = process.env.JWT_STEPUP_SECRET;
 const MONGODB_URI = mongoTlsPolicy.mongodbUri;
-const ALLOWED_ORIGINS = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
+const ALLOWED_ORIGINS = baseEnvValidation.parsed.allowedOrigins || [];
 const ACCESS_TOKEN_TTL_MINUTES = Number(process.env.ACCESS_TOKEN_TTL_MINUTES || 15);
 const REFRESH_TOKEN_TTL_DAYS = Number(process.env.REFRESH_TOKEN_TTL_DAYS || 30);
 const STEP_UP_TOKEN_TTL_MINUTES = Number(process.env.STEP_UP_TOKEN_TTL_MINUTES || 5);
@@ -3140,6 +3143,38 @@ app.use((err, req, res, next) => {
     return res.status(500).json({ error: 'Internal server error.', details: err?.message || 'Unknown error' });
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT} (MongoDB + Auth + RBAC Enabled)`);
+async function validatePostgresStartupHealth() {
+    if (!POSTGRES_ENABLED) {
+        console.log(`[POSTGRES] Startup health check skipped (DB_PROVIDER=${DB_PROVIDER}).`);
+        return;
+    }
+
+    const health = await runPostgresHealthCheck();
+    if (health.skipped) {
+        console.log(`[POSTGRES] Startup health check skipped (${health.reason}).`);
+        return;
+    }
+
+    console.log(
+        `[POSTGRES] Startup health check OK `
+        + `(provider=${DB_PROVIDER}, target=${health.target}, latencyMs=${health.latencyMs}).`
+    );
+}
+
+async function bootstrapServer() {
+    try {
+        await validatePostgresStartupHealth();
+    } catch (error) {
+        console.error(`[POSTGRES] Startup health check failed: ${redactPostgresUrlInText(error?.message || String(error))}`);
+        process.exit(1);
+    }
+
+    app.listen(PORT, () => {
+        console.log(`Server running on http://localhost:${PORT} (MongoDB active, DB_PROVIDER=${DB_PROVIDER})`);
+    });
+}
+
+bootstrapServer().catch((error) => {
+    console.error(`Server bootstrap failed: ${redactPostgresUrlInText(error?.message || String(error))}`);
+    process.exit(1);
 });
