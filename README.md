@@ -113,10 +113,10 @@ DATABASE_URL=postgresql://<user>:<password>@<host>/<database>?sslmode=require
 
 Current behavior:
 
-- `DB_PROVIDER=mongo`: users/auth + appointments/doctors use MongoDB.
-- `DB_PROVIDER=postgres` or `DB_PROVIDER=dual`: users/auth/roles are persisted in Postgres.
-- Appointments/doctors/availability/audit collections remain on MongoDB in this phase.
-- `DB_PROVIDER=dual` supports lazy user migration from MongoDB to Postgres at auth time.
+- `DB_PROVIDER=mongo`: users/auth + doctors/availability + appointments use MongoDB.
+- `DB_PROVIDER=postgres` or `DB_PROVIDER=dual`: users/auth/roles + doctors/availability/blocked days are persisted in Postgres.
+- Appointments and audit logs remain on MongoDB in this phase.
+- `DB_PROVIDER=dual` supports lazy user and doctor migration from MongoDB to Postgres.
 
 ### Run migrations
 
@@ -204,9 +204,9 @@ Never add these to `MONGODB_URI`: `tls=false`, `ssl=false`, `tlsAllowInvalidCert
 - Doctors:
   - `GET /api/admin/doctors`
   - `POST /api/admin/doctors` (superadmin)
-  - `PATCH /api/admin/doctors/:id` (superadmin)
-  - `POST /api/admin/doctors/:id/block-date` (superadmin)
-  - `DELETE /api/admin/doctors/:id/block-date/:date` (superadmin)
+  - `PATCH /api/admin/doctors/:id` (scheduler scoped to assigned doctors, or superadmin)
+  - `POST /api/admin/doctors/:id/block-date` (scheduler scoped to assigned doctors, or superadmin)
+  - `DELETE /api/admin/doctors/:id/block-date/:date` (scheduler scoped to assigned doctors, or superadmin)
 - Users:
   - `POST /api/admin/users` (superadmin)
   - `GET /api/admin/users` (superadmin)

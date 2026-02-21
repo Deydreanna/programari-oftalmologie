@@ -13,6 +13,7 @@ const path = require('path');
 const { validateBaseEnv, normalizeDbProvider, isPostgresProvider } = require('./scripts/env-utils');
 const { runPostgresHealthCheck, redactPostgresUrlInText } = require('./db/postgres');
 const pgUsers = require('./db/users-postgres');
+const pgDoctors = require('./db/doctors-postgres');
 const {
     buildMongoTlsPolicy,
     buildMongoDriverTlsOptions,
@@ -49,7 +50,9 @@ const baseEnvValidation = validateBaseEnv(process.env);
 const DB_PROVIDER = baseEnvValidation.parsed.dbProvider || normalizeDbProvider(process.env.DB_PROVIDER) || 'mongo';
 const POSTGRES_ENABLED = isPostgresProvider(DB_PROVIDER);
 const USERS_IN_POSTGRES = POSTGRES_ENABLED;
+const DOCTORS_IN_POSTGRES = POSTGRES_ENABLED;
 const DUAL_MONGO_USER_FALLBACK = DB_PROVIDER === 'dual';
+const DUAL_MONGO_DOCTOR_FALLBACK = DB_PROVIDER === 'dual';
 const startupValidationErrors = Array.from(new Set([
     ...baseEnvValidation.errors,
     ...mongoTlsPolicy.validationErrors
@@ -253,29 +256,52 @@ charsetProbeSchema.index({ createdAt: -1 });
 const CharsetProbe = mongoose.model('CharsetProbe', charsetProbeSchema);
 
 async function ensureDefaultDoctorAndBackfill() {
-    const defaultDoctor = await Doctor.findOneAndUpdate(
-        { slug: DEFAULT_DOCTOR_SLUG },
-        {
-            $setOnInsert: {
+    if (DOCTORS_IN_POSTGRES && DUAL_MONGO_DOCTOR_FALLBACK) {
+        const mongoDoctors = await Doctor.find().lean();
+        for (const mongoDoctor of mongoDoctors) {
+            await migrateMongoDoctorToPostgres(mongoDoctor);
+        }
+    }
+
+    let defaultDoctor;
+    if (DOCTORS_IN_POSTGRES) {
+        defaultDoctor = await pgDoctors.findDoctorByIdentifier(DEFAULT_DOCTOR_SLUG, { requireActive: false });
+        if (!defaultDoctor) {
+            defaultDoctor = await pgDoctors.createDoctor({
                 slug: DEFAULT_DOCTOR_SLUG,
                 displayName: DEFAULT_DOCTOR_DISPLAY_NAME,
                 specialty: DEFAULT_DOCTOR_SPECIALTY,
                 isActive: true,
-                bookingSettings: {
-                    consultationDurationMinutes: DEFAULT_BOOKING_SETTINGS.consultationDurationMinutes,
-                    workdayStart: DEFAULT_BOOKING_SETTINGS.workdayStart,
-                    workdayEnd: DEFAULT_BOOKING_SETTINGS.workdayEnd,
-                    monthsToShow: DEFAULT_BOOKING_SETTINGS.monthsToShow,
-                    timezone: DEFAULT_BOOKING_SETTINGS.timezone
-                },
+                bookingSettings: DEFAULT_BOOKING_SETTINGS,
                 availabilityRules: { weekdays: DEFAULT_AVAILABILITY_WEEKDAYS },
-                blockedDates: [],
-                createdByUserId: null,
-                updatedByUserId: null
-            }
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
+                blockedDates: []
+            });
+        }
+    } else {
+        defaultDoctor = await Doctor.findOneAndUpdate(
+            { slug: DEFAULT_DOCTOR_SLUG },
+            {
+                $setOnInsert: {
+                    slug: DEFAULT_DOCTOR_SLUG,
+                    displayName: DEFAULT_DOCTOR_DISPLAY_NAME,
+                    specialty: DEFAULT_DOCTOR_SPECIALTY,
+                    isActive: true,
+                    bookingSettings: {
+                        consultationDurationMinutes: DEFAULT_BOOKING_SETTINGS.consultationDurationMinutes,
+                        workdayStart: DEFAULT_BOOKING_SETTINGS.workdayStart,
+                        workdayEnd: DEFAULT_BOOKING_SETTINGS.workdayEnd,
+                        monthsToShow: DEFAULT_BOOKING_SETTINGS.monthsToShow,
+                        timezone: DEFAULT_BOOKING_SETTINGS.timezone
+                    },
+                    availabilityRules: { weekdays: DEFAULT_AVAILABILITY_WEEKDAYS },
+                    blockedDates: [],
+                    createdByUserId: null,
+                    updatedByUserId: null
+                }
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+    }
 
     const appointmentsBackfill = await Appointment.updateMany(
         {
@@ -411,7 +437,9 @@ async function ensureMongoReady() {
             .then(async () => {
                 if (!mongoBootstrapped) {
                     const migrationSummary = await ensureDefaultDoctorAndBackfill();
-                    await Doctor.syncIndexes();
+                    if (!DOCTORS_IN_POSTGRES) {
+                        await Doctor.syncIndexes();
+                    }
                     if (!USERS_IN_POSTGRES) {
                         await User.syncIndexes();
                     }
@@ -1239,6 +1267,25 @@ async function persistUser(user, { managedDoctorIdsChanged = false } = {}) {
     });
 }
 
+async function migrateMongoDoctorToPostgres(mongoDoctor) {
+    if (!DOCTORS_IN_POSTGRES || !mongoDoctor) {
+        return mongoDoctor || null;
+    }
+
+    return pgDoctors.upsertDoctorFromMongo({
+        _id: String(mongoDoctor._id),
+        slug: mongoDoctor.slug || '',
+        displayName: mongoDoctor.displayName || '',
+        specialty: mongoDoctor.specialty || DEFAULT_DOCTOR_SPECIALTY,
+        isActive: mongoDoctor.isActive !== false,
+        bookingSettings: mongoDoctor.bookingSettings || DEFAULT_BOOKING_SETTINGS,
+        availabilityRules: mongoDoctor.availabilityRules || { weekdays: DEFAULT_AVAILABILITY_WEEKDAYS },
+        blockedDates: Array.isArray(mongoDoctor.blockedDates) ? mongoDoctor.blockedDates : [],
+        createdByUserId: getMongoCompatibleUserId({ _id: mongoDoctor.createdByUserId }) || null,
+        updatedByUserId: getMongoCompatibleUserId({ _id: mongoDoctor.updatedByUserId }) || null
+    });
+}
+
 async function ensureNormalizedRole(user) {
     if (!user) return null;
     let shouldSave = false;
@@ -1378,9 +1425,24 @@ function sanitizeDoctorForAdmin(doctor, { includeAudit = false } = {}) {
     return payload;
 }
 
-async function resolveDoctorByIdentifier(rawIdentifier, { requireActive = true } = {}) {
+async function resolveDoctorByIdentifier(rawIdentifier, { requireActive = true, allowDualFallback = true } = {}) {
     const normalized = sanitizeInlineString(rawIdentifier).toLowerCase();
     if (!normalized) return null;
+
+    if (!DOCTORS_IN_POSTGRES) {
+        const query = MONGODB_OBJECT_ID_REGEX.test(normalized)
+            ? { _id: normalized }
+            : { slug: normalized };
+        if (requireActive) {
+            query.isActive = true;
+        }
+        return Doctor.findOne(query);
+    }
+
+    let doctor = await pgDoctors.findDoctorByIdentifier(normalized, { requireActive });
+    if (doctor || !allowDualFallback || !DUAL_MONGO_DOCTOR_FALLBACK) {
+        return doctor;
+    }
 
     const query = MONGODB_OBJECT_ID_REGEX.test(normalized)
         ? { _id: normalized }
@@ -1388,15 +1450,44 @@ async function resolveDoctorByIdentifier(rawIdentifier, { requireActive = true }
     if (requireActive) {
         query.isActive = true;
     }
-    return Doctor.findOne(query);
+    const mongoDoctor = await Doctor.findOne(query);
+    if (!mongoDoctor) {
+        return null;
+    }
+    doctor = await migrateMongoDoctorToPostgres(mongoDoctor);
+    if (doctor && requireActive && !doctor.isActive) {
+        return null;
+    }
+    return doctor;
 }
 
 async function validateDoctorIdsExist(ids = []) {
     if (!Array.isArray(ids) || ids.length === 0) {
         return true;
     }
-    const count = await Doctor.countDocuments({ _id: { $in: ids } });
-    return count === ids.length;
+
+    if (!DOCTORS_IN_POSTGRES) {
+        const count = await Doctor.countDocuments({ _id: { $in: ids } });
+        return count === ids.length;
+    }
+
+    const normalizedLegacyIds = normalizeManagedDoctorIds(ids.map((id) => String(id)));
+    if (!normalizedLegacyIds.length) {
+        return false;
+    }
+
+    if (DUAL_MONGO_DOCTOR_FALLBACK) {
+        for (const legacyId of normalizedLegacyIds) {
+            const existing = await pgDoctors.findDoctorByIdentifier(legacyId, { requireActive: false });
+            if (existing) continue;
+            const mongoDoctor = await Doctor.findById(legacyId);
+            if (!mongoDoctor) continue;
+            await migrateMongoDoctorToPostgres(mongoDoctor);
+        }
+    }
+
+    const count = await pgDoctors.countDoctorsByLegacyIds(normalizedLegacyIds);
+    return count === normalizedLegacyIds.length;
 }
 
 function parseCookies(req) {
@@ -2218,7 +2309,9 @@ app.post('/api/auth/step-up', requireAuthenticated, validateBody(stepUpBodySchem
 
 app.get('/api/public/doctors', async (req, res) => {
     try {
-        const doctors = await Doctor.find({ isActive: true }).sort({ displayName: 1 }).lean();
+        const doctors = DOCTORS_IN_POSTGRES
+            ? await pgDoctors.listDoctors({ isActive: true })
+            : await Doctor.find({ isActive: true }).sort({ displayName: 1 }).lean();
         return res.json({
             doctors: doctors.map(sanitizeDoctorForPublic)
         });
@@ -2405,6 +2498,9 @@ function sanitizeUserForAdmin(userDoc, doctorMap = new Map()) {
 }
 
 async function assertManagedDoctorsExist(managedDoctorIds) {
+    if (DOCTORS_IN_POSTGRES) {
+        return validateDoctorIdsExist((managedDoctorIds || []).map((id) => String(id)));
+    }
     const ids = (managedDoctorIds || []).map((id) => new mongoose.Types.ObjectId(id));
     return validateDoctorIdsExist(ids);
 }
@@ -2414,7 +2510,14 @@ async function loadDoctorsMapByIds(rawIds = []) {
     if (ids.length === 0) {
         return new Map();
     }
-    const doctors = await Doctor.find({ _id: { $in: ids } }).select('_id slug displayName').lean();
+
+    let doctors;
+    if (DOCTORS_IN_POSTGRES) {
+        doctors = await pgDoctors.listDoctors({ legacyIds: ids, isActive: null });
+    } else {
+        doctors = await Doctor.find({ _id: { $in: ids } }).select('_id slug displayName').lean();
+    }
+
     const map = new Map();
     for (const doctor of doctors) {
         map.set(String(doctor._id), { _id: doctor._id, slug: doctor.slug, displayName: doctor.displayName });
@@ -2780,12 +2883,25 @@ app.get('/api/admin/doctors', requireViewerSchedulerOrSuperadmin, async (req, re
     setAuthNoStore(res);
 
     try {
-        const scopeQuery = doctorScopeQueryForUser(req.user);
-        if (scopeQuery === null) {
-            return res.status(403).json({ error: 'Nu aveti niciun medic asignat.' });
+        let doctors;
+        if (DOCTORS_IN_POSTGRES) {
+            if (isSuperadminUser(req.user)) {
+                doctors = await pgDoctors.listDoctors({ isActive: null });
+            } else {
+                const scopedDoctorIds = getUserManagedDoctorIds(req.user);
+                if (scopedDoctorIds.length === 0) {
+                    return res.status(403).json({ error: 'Nu aveti niciun medic asignat.' });
+                }
+                doctors = await pgDoctors.listDoctors({ legacyIds: scopedDoctorIds, isActive: null });
+            }
+        } else {
+            const scopeQuery = doctorScopeQueryForUser(req.user);
+            if (scopeQuery === null) {
+                return res.status(403).json({ error: 'Nu aveti niciun medic asignat.' });
+            }
+            doctors = await Doctor.find(scopeQuery).sort({ displayName: 1 }).lean();
         }
 
-        const doctors = await Doctor.find(scopeQuery).sort({ displayName: 1 }).lean();
         await writeAuditLog(req, {
             action: 'doctor_list_view',
             result: 'success',
@@ -2805,18 +2921,33 @@ app.post('/api/admin/doctors', requireSuperadminOnly, validateBody(doctorCreateB
 
     try {
         const payload = req.validatedBody;
-        const doctor = new Doctor({
-            slug: payload.slug,
-            displayName: sanitizeInlineString(payload.displayName),
-            specialty: sanitizeInlineString(payload.specialty),
-            isActive: !!payload.isActive,
-            bookingSettings: payload.bookingSettings,
-            availabilityRules: payload.availabilityRules,
-            blockedDates: payload.blockedDates,
-            createdByUserId: getMongoCompatibleUserId(req.user) || null,
-            updatedByUserId: getMongoCompatibleUserId(req.user) || null
-        });
-        await doctor.save();
+        const doctor = DOCTORS_IN_POSTGRES
+            ? await pgDoctors.createDoctor({
+                slug: payload.slug,
+                displayName: sanitizeInlineString(payload.displayName),
+                specialty: sanitizeInlineString(payload.specialty),
+                isActive: !!payload.isActive,
+                bookingSettings: payload.bookingSettings,
+                availabilityRules: payload.availabilityRules,
+                blockedDates: payload.blockedDates,
+                createdByUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null,
+                updatedByUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null
+            })
+            : await (async () => {
+                const mongoDoctor = new Doctor({
+                    slug: payload.slug,
+                    displayName: sanitizeInlineString(payload.displayName),
+                    specialty: sanitizeInlineString(payload.specialty),
+                    isActive: !!payload.isActive,
+                    bookingSettings: payload.bookingSettings,
+                    availabilityRules: payload.availabilityRules,
+                    blockedDates: payload.blockedDates,
+                    createdByUserId: getMongoCompatibleUserId(req.user) || null,
+                    updatedByUserId: getMongoCompatibleUserId(req.user) || null
+                });
+                await mongoDoctor.save();
+                return mongoDoctor.toObject();
+            })();
 
         await writeAuditLog(req, {
             action: 'doctor_create',
@@ -2826,7 +2957,7 @@ app.post('/api/admin/doctors', requireSuperadminOnly, validateBody(doctorCreateB
             actorUser: req.user,
             metadata: { slug: doctor.slug }
         });
-        return res.status(201).json({ success: true, doctor: sanitizeDoctorForAdmin(doctor.toObject(), { includeAudit: true }) });
+        return res.status(201).json({ success: true, doctor: sanitizeDoctorForAdmin(doctor, { includeAudit: true }) });
     } catch (error) {
         await writeAuditLog(req, {
             action: 'doctor_create',
@@ -2834,19 +2965,22 @@ app.post('/api/admin/doctors', requireSuperadminOnly, validateBody(doctorCreateB
             targetType: 'doctor',
             actorUser: req.user
         });
-        if (error?.code === 11000) {
+        if ((!DOCTORS_IN_POSTGRES && error?.code === 11000) || (DOCTORS_IN_POSTGRES && pgDoctors.isUniqueViolation(error))) {
             return res.status(409).json({ error: 'Slug-ul medicului exista deja.' });
         }
         return res.status(500).json({ error: 'Eroare la crearea medicului.' });
     }
 });
 
-app.patch('/api/admin/doctors/:id', requireSuperadminOnly, validateBody(doctorPatchBodySchema), async (req, res) => {
+app.patch('/api/admin/doctors/:id', requireSchedulerOrSuperadmin, validateBody(doctorPatchBodySchema), async (req, res) => {
     setAuthNoStore(res);
 
     const doctorId = String(req.params.id || '').trim();
     if (!MONGODB_OBJECT_ID_REGEX.test(doctorId)) {
         return res.status(400).json({ error: 'Medic invalid.' });
+    }
+    if (!isSuperadminUser(req.user) && !canUserAccessDoctor(req.user, doctorId)) {
+        return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
     }
 
     try {
@@ -2859,15 +2993,26 @@ app.patch('/api/admin/doctors/:id', requireSuperadminOnly, validateBody(doctorPa
         if (updates.bookingSettings !== undefined) updateDoc.bookingSettings = updates.bookingSettings;
         if (updates.availabilityRules !== undefined) updateDoc.availabilityRules = updates.availabilityRules;
         if (updates.blockedDates !== undefined) updateDoc.blockedDates = updates.blockedDates;
-        updateDoc.updatedByUserId = getMongoCompatibleUserId(req.user) || null;
+        updateDoc.updatedByUserPublicId = getMongoCompatibleUserId(req.user) || req.user?._id || null;
 
-        const doctor = await Doctor.findByIdAndUpdate(doctorId, { $set: updateDoc }, { new: true, runValidators: true });
+        const doctor = DOCTORS_IN_POSTGRES
+            ? await pgDoctors.updateDoctorByLegacyId(doctorId, updateDoc)
+            : await (async () => {
+                const mongoUpdateDoc = { ...updateDoc };
+                delete mongoUpdateDoc.updatedByUserPublicId;
+                mongoUpdateDoc.updatedByUserId = getMongoCompatibleUserId(req.user) || null;
+                return Doctor.findByIdAndUpdate(
+                    doctorId,
+                    { $set: mongoUpdateDoc },
+                    { new: true, runValidators: true }
+                );
+            })();
         if (!doctor) {
             return res.status(404).json({ error: 'Medic negasit.' });
         }
 
         await Appointment.updateMany(
-            { doctorId: doctor._id, doctorSnapshotName: { $ne: doctor.displayName } },
+            { doctorId: doctor._id, doctorSnapshotName: { $ne: sanitizeInlineString(doctor.displayName) } },
             { $set: { doctorSnapshotName: doctor.displayName } }
         );
 
@@ -2877,9 +3022,9 @@ app.patch('/api/admin/doctors/:id', requireSuperadminOnly, validateBody(doctorPa
             targetType: 'doctor',
             targetId: doctorId,
             actorUser: req.user,
-            metadata: { fields: Object.keys(updateDoc) }
+            metadata: { fields: Object.keys(updates || {}) }
         });
-        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(doctor.toObject(), { includeAudit: true }) });
+        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(DOCTORS_IN_POSTGRES ? doctor : doctor.toObject(), { includeAudit: true }) });
     } catch (error) {
         await writeAuditLog(req, {
             action: 'doctor_update',
@@ -2888,31 +3033,40 @@ app.patch('/api/admin/doctors/:id', requireSuperadminOnly, validateBody(doctorPa
             targetId: doctorId,
             actorUser: req.user
         });
-        if (error?.code === 11000) {
+        if ((!DOCTORS_IN_POSTGRES && error?.code === 11000) || (DOCTORS_IN_POSTGRES && pgDoctors.isUniqueViolation(error))) {
             return res.status(409).json({ error: 'Slug-ul medicului exista deja.' });
         }
         return res.status(500).json({ error: 'Eroare la actualizarea medicului.' });
     }
 });
 
-app.post('/api/admin/doctors/:id/block-date', requireSuperadminOnly, validateBody(doctorBlockDateBodySchema), async (req, res) => {
+app.post('/api/admin/doctors/:id/block-date', requireSchedulerOrSuperadmin, validateBody(doctorBlockDateBodySchema), async (req, res) => {
     setAuthNoStore(res);
 
     const doctorId = String(req.params.id || '').trim();
     if (!MONGODB_OBJECT_ID_REGEX.test(doctorId)) {
         return res.status(400).json({ error: 'Medic invalid.' });
     }
+    if (!isSuperadminUser(req.user) && !canUserAccessDoctor(req.user, doctorId)) {
+        return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
+    }
 
     try {
         const { date } = req.validatedBody;
-        const doctor = await Doctor.findByIdAndUpdate(
-            doctorId,
-            {
-                $addToSet: { blockedDates: date },
-                $set: { updatedByUserId: getMongoCompatibleUserId(req.user) || null }
-            },
-            { new: true, runValidators: true }
-        );
+        const doctor = DOCTORS_IN_POSTGRES
+            ? await pgDoctors.blockDoctorDateByLegacyId(
+                doctorId,
+                date,
+                { actorUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null }
+            )
+            : await Doctor.findByIdAndUpdate(
+                doctorId,
+                {
+                    $addToSet: { blockedDates: date },
+                    $set: { updatedByUserId: getMongoCompatibleUserId(req.user) || null }
+                },
+                { new: true, runValidators: true }
+            );
 
         if (!doctor) {
             return res.status(404).json({ error: 'Medic negasit.' });
@@ -2926,18 +3080,21 @@ app.post('/api/admin/doctors/:id/block-date', requireSuperadminOnly, validateBod
             actorUser: req.user,
             metadata: { date }
         });
-        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(doctor.toObject(), { includeAudit: true }) });
+        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(DOCTORS_IN_POSTGRES ? doctor : doctor.toObject(), { includeAudit: true }) });
     } catch (_) {
         return res.status(500).json({ error: 'Eroare la blocarea zilei.' });
     }
 });
 
-app.delete('/api/admin/doctors/:id/block-date/:date', requireSuperadminOnly, async (req, res) => {
+app.delete('/api/admin/doctors/:id/block-date/:date', requireSchedulerOrSuperadmin, async (req, res) => {
     setAuthNoStore(res);
 
     const doctorId = String(req.params.id || '').trim();
     if (!MONGODB_OBJECT_ID_REGEX.test(doctorId)) {
         return res.status(400).json({ error: 'Medic invalid.' });
+    }
+    if (!isSuperadminUser(req.user) && !canUserAccessDoctor(req.user, doctorId)) {
+        return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
     }
 
     const rawDate = String(req.params.date || '').trim();
@@ -2946,14 +3103,20 @@ app.delete('/api/admin/doctors/:id/block-date/:date', requireSuperadminOnly, asy
     }
 
     try {
-        const doctor = await Doctor.findByIdAndUpdate(
-            doctorId,
-            {
-                $pull: { blockedDates: rawDate },
-                $set: { updatedByUserId: getMongoCompatibleUserId(req.user) || null }
-            },
-            { new: true, runValidators: true }
-        );
+        const doctor = DOCTORS_IN_POSTGRES
+            ? await pgDoctors.unblockDoctorDateByLegacyId(
+                doctorId,
+                rawDate,
+                { actorUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null }
+            )
+            : await Doctor.findByIdAndUpdate(
+                doctorId,
+                {
+                    $pull: { blockedDates: rawDate },
+                    $set: { updatedByUserId: getMongoCompatibleUserId(req.user) || null }
+                },
+                { new: true, runValidators: true }
+            );
         if (!doctor) {
             return res.status(404).json({ error: 'Medic negasit.' });
         }
@@ -2967,7 +3130,7 @@ app.delete('/api/admin/doctors/:id/block-date/:date', requireSuperadminOnly, asy
             metadata: { date: rawDate }
         });
 
-        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(doctor.toObject(), { includeAudit: true }) });
+        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(DOCTORS_IN_POSTGRES ? doctor : doctor.toObject(), { includeAudit: true }) });
     } catch (_) {
         return res.status(500).json({ error: 'Eroare la reactivarea zilei.' });
     }
