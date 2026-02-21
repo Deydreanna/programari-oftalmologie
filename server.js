@@ -2948,16 +2948,37 @@ app.post('/api/admin/reset', requireSuperadminOnly, requireStepUp('appointments_
     setAuthNoStore(res);
 
     try {
-        const deletedCount = APPOINTMENTS_IN_POSTGRES
-            ? await pgAppointments.deleteAllAppointments()
-            : (await Appointment.deleteMany({})).deletedCount || 0;
-        await writeAuditLog(req, {
-            action: 'appointments_reset',
-            result: 'success',
-            targetType: 'appointment_collection',
-            actorUser: req.user,
-            metadata: { deletedCount }
-        });
+        let deletedCount;
+        if (APPOINTMENTS_IN_POSTGRES && AUDIT_IN_POSTGRES) {
+            deletedCount = await pgAppointments.withTransaction(async (client) => {
+                const count = await pgAppointments.deleteAllAppointments(client);
+                await pgAppointments.createAuditLog({
+                    action: 'appointments_reset',
+                    result: 'success',
+                    targetType: 'appointment_collection',
+                    actorUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null,
+                    actorRole: req.user?.role || 'anonymous',
+                    ip: getClientIp(req),
+                    userAgent: getUserAgent(req),
+                    metadata: { deletedCount: count }
+                }, client);
+                return count;
+            });
+        } else {
+            deletedCount = APPOINTMENTS_IN_POSTGRES
+                ? await pgAppointments.deleteAllAppointments()
+                : (await Appointment.deleteMany({})).deletedCount || 0;
+        }
+
+        if (!(APPOINTMENTS_IN_POSTGRES && AUDIT_IN_POSTGRES)) {
+            await writeAuditLog(req, {
+                action: 'appointments_reset',
+                result: 'success',
+                targetType: 'appointment_collection',
+                actorUser: req.user,
+                metadata: { deletedCount }
+            });
+        }
         return res.json({ success: true, message: 'Baza de date a fost resetata.' });
     } catch (_) {
         await writeAuditLog(req, {
@@ -2979,19 +3000,47 @@ app.delete('/api/admin/appointment/:id', requireSuperadminOnly, requireStepUp('a
     }
 
     try {
-        const deleted = APPOINTMENTS_IN_POSTGRES
-            ? await pgAppointments.deleteAppointmentByPublicId(appointmentId)
-            : await Appointment.findByIdAndDelete(appointmentId);
+        let deleted;
+        if (APPOINTMENTS_IN_POSTGRES && AUDIT_IN_POSTGRES) {
+            deleted = await pgAppointments.withTransaction(async (client) => {
+                const removed = await pgAppointments.deleteAppointmentByPublicId(appointmentId, client);
+                if (!removed) {
+                    return null;
+                }
+                await pgAppointments.createAuditLog({
+                    action: 'appointment_delete',
+                    result: 'success',
+                    targetType: 'appointment',
+                    targetId: appointmentId,
+                    actorUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null,
+                    actorRole: req.user?.role || 'anonymous',
+                    ip: getClientIp(req),
+                    userAgent: getUserAgent(req),
+                    metadata: {
+                        doctorId: removed.doctorId || null,
+                        date: removed.date || null,
+                        time: removed.time || null
+                    }
+                }, client);
+                return removed;
+            });
+        } else {
+            deleted = APPOINTMENTS_IN_POSTGRES
+                ? await pgAppointments.deleteAppointmentByPublicId(appointmentId)
+                : await Appointment.findByIdAndDelete(appointmentId);
+        }
         if (!deleted) {
             return res.status(404).json({ error: 'Programare negasita.' });
         }
-        await writeAuditLog(req, {
-            action: 'appointment_delete',
-            result: 'success',
-            targetType: 'appointment',
-            targetId: appointmentId,
-            actorUser: req.user
-        });
+        if (!(APPOINTMENTS_IN_POSTGRES && AUDIT_IN_POSTGRES)) {
+            await writeAuditLog(req, {
+                action: 'appointment_delete',
+                result: 'success',
+                targetType: 'appointment',
+                targetId: appointmentId,
+                actorUser: req.user
+            });
+        }
         return res.json({ success: true, message: 'Programarea pacientului a fost anulata.' });
     } catch (_) {
         await writeAuditLog(req, {
@@ -3010,17 +3059,39 @@ app.delete('/api/admin/appointments/by-date', requireSuperadminOnly, requireStep
 
     try {
         const { date } = req.validatedBody;
-        const deletedCount = APPOINTMENTS_IN_POSTGRES
-            ? await pgAppointments.deleteAppointmentsByDate(date)
-            : (await Appointment.deleteMany({ date })).deletedCount || 0;
-        await writeAuditLog(req, {
-            action: 'appointments_delete_by_date',
-            result: 'success',
-            targetType: 'appointment_collection',
-            targetId: date,
-            actorUser: req.user,
-            metadata: { deletedCount }
-        });
+        let deletedCount;
+        if (APPOINTMENTS_IN_POSTGRES && AUDIT_IN_POSTGRES) {
+            deletedCount = await pgAppointments.withTransaction(async (client) => {
+                const count = await pgAppointments.deleteAppointmentsByDate(date, client);
+                await pgAppointments.createAuditLog({
+                    action: 'appointments_delete_by_date',
+                    result: 'success',
+                    targetType: 'appointment_collection',
+                    targetId: date,
+                    actorUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null,
+                    actorRole: req.user?.role || 'anonymous',
+                    ip: getClientIp(req),
+                    userAgent: getUserAgent(req),
+                    metadata: { deletedCount: count }
+                }, client);
+                return count;
+            });
+        } else {
+            deletedCount = APPOINTMENTS_IN_POSTGRES
+                ? await pgAppointments.deleteAppointmentsByDate(date)
+                : (await Appointment.deleteMany({ date })).deletedCount || 0;
+        }
+
+        if (!(APPOINTMENTS_IN_POSTGRES && AUDIT_IN_POSTGRES)) {
+            await writeAuditLog(req, {
+                action: 'appointments_delete_by_date',
+                result: 'success',
+                targetType: 'appointment_collection',
+                targetId: date,
+                actorUser: req.user,
+                metadata: { deletedCount }
+            });
+        }
         return res.json({
             success: true,
             deletedCount,

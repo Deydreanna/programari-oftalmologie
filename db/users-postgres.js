@@ -2,9 +2,14 @@ const crypto = require('crypto');
 const { getPostgresPool } = require('./postgres');
 
 const MONGODB_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
+const POSTGRES_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isUniqueViolation(error) {
     return error?.code === '23505';
+}
+
+function isPostgresUuid(value) {
+    return POSTGRES_UUID_REGEX.test(String(value || '').trim());
 }
 
 function normalizeManagedDoctorIds(value = []) {
@@ -117,14 +122,27 @@ async function queryManagedDoctorMapByUserPgIds(userPgIds = [], client = null) {
 async function findUserRowByPublicId(publicId, client = null) {
     const id = String(publicId || '').trim();
     if (!id) return null;
-    return queryOneRow(
-        `SELECT id, legacy_mongo_id, email, phone, password_hash, google_id, display_name, role, created_at
-         FROM users
-         WHERE legacy_mongo_id = $1 OR id::text = $1
-         LIMIT 1`,
-        [id],
-        client
-    );
+    if (MONGODB_OBJECT_ID_REGEX.test(id)) {
+        return queryOneRow(
+            `SELECT id, legacy_mongo_id, email, phone, password_hash, google_id, display_name, role, created_at
+             FROM users
+             WHERE legacy_mongo_id = $1::char(24)
+             LIMIT 1`,
+            [id],
+            client
+        );
+    }
+    if (isPostgresUuid(id)) {
+        return queryOneRow(
+            `SELECT id, legacy_mongo_id, email, phone, password_hash, google_id, display_name, role, created_at
+             FROM users
+             WHERE id = $1::uuid
+             LIMIT 1`,
+            [id],
+            client
+        );
+    }
+    return null;
 }
 
 async function findUserByPublicId(publicId, client = null) {
@@ -140,7 +158,7 @@ async function findUserByEmail(email, client = null) {
     const row = await queryOneRow(
         `SELECT id, legacy_mongo_id, email, phone, password_hash, google_id, display_name, role, created_at
          FROM users
-         WHERE email = $1
+         WHERE lower(email) = $1
          LIMIT 1`,
         [normalizedEmail],
         client
@@ -382,7 +400,7 @@ async function upsertUserFromMongo(mongoUser = {}, client = null) {
             existing = await queryOneRow(
                 `SELECT id, legacy_mongo_id, email, phone, password_hash, google_id, display_name, role, created_at
                  FROM users
-                 WHERE email = $1
+                 WHERE lower(email) = $1
                  LIMIT 1`,
                 [normalizedPayload.email],
                 txClient

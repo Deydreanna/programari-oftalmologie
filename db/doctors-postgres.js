@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { getPostgresPool } = require('./postgres');
 
 const MONGODB_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
+const POSTGRES_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DOCTOR_SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const TIME_HHMM_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -31,6 +32,10 @@ function normalizeLegacyDoctorId(value) {
         return null;
     }
     return candidate;
+}
+
+function isPostgresUuid(value) {
+    return POSTGRES_UUID_REGEX.test(String(value || '').trim());
 }
 
 function normalizeDoctorSlug(value) {
@@ -226,7 +231,7 @@ async function queryDoctorRowByLegacyId(legacyId, client = null) {
          FROM doctors d
          LEFT JOIN users u_created ON u_created.id = d.created_by_user_id
          LEFT JOIN users u_updated ON u_updated.id = d.updated_by_user_id
-         WHERE TRIM(d.legacy_mongo_id) = $1
+         WHERE d.legacy_mongo_id = $1::char(24)
          LIMIT 1`,
         [legacyId],
         client
@@ -308,14 +313,28 @@ async function mapDoctorRows(rows = [], client = null) {
 async function queryUserPgIdByPublicId(publicId, client = null) {
     const normalized = String(publicId || '').trim();
     if (!normalized) return null;
-    const row = await queryOneRow(
-        `SELECT id
-         FROM users
-         WHERE legacy_mongo_id = $1 OR id::text = $1
-         LIMIT 1`,
-        [normalized],
-        client
-    );
+
+    let row = null;
+    if (MONGODB_OBJECT_ID_REGEX.test(normalized)) {
+        row = await queryOneRow(
+            `SELECT id
+             FROM users
+             WHERE legacy_mongo_id = $1::char(24)
+             LIMIT 1`,
+            [normalized],
+            client
+        );
+    } else if (isPostgresUuid(normalized)) {
+        row = await queryOneRow(
+            `SELECT id
+             FROM users
+             WHERE id = $1::uuid
+             LIMIT 1`,
+            [normalized],
+            client
+        );
+    }
+
     return row ? String(row.id) : null;
 }
 
@@ -395,7 +414,7 @@ async function listDoctors({ legacyIds = null, isActive = null } = {}, client = 
             return [];
         }
         params.push(normalizedLegacyIds);
-        conditions.push(`TRIM(d.legacy_mongo_id) = ANY($${params.length}::text[])`);
+        conditions.push(`d.legacy_mongo_id = ANY($${params.length}::char(24)[])`);
     }
 
     if (typeof isActive === 'boolean') {
@@ -440,7 +459,7 @@ async function findDoctorByIdentifier(rawIdentifier, { requireActive = true } = 
     const params = [];
     if (normalizeLegacyDoctorId(identifier)) {
         params.push(identifier);
-        conditions.push(`TRIM(d.legacy_mongo_id) = $${params.length}`);
+        conditions.push(`d.legacy_mongo_id = $${params.length}::char(24)`);
     } else {
         params.push(identifier);
         conditions.push(`d.slug = $${params.length}`);
@@ -491,7 +510,7 @@ async function countDoctorsByLegacyIds(legacyIds = [], client = null) {
     const result = await executor.query(
         `SELECT COUNT(*)::int AS count
          FROM doctors
-         WHERE TRIM(legacy_mongo_id) = ANY($1::text[])`,
+         WHERE legacy_mongo_id = ANY($1::char(24)[])`,
         [normalizedLegacyIds]
     );
     return Number(result.rows?.[0]?.count || 0);

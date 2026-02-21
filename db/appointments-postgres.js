@@ -2,8 +2,12 @@ const crypto = require('crypto');
 const { getPostgresPool } = require('./postgres');
 
 const MONGODB_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
+const POSTGRES_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TIME_HHMM_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const APPOINTMENT_SLOT_CONSTRAINTS = new Set([
+    'appointments_doctor_id_appointment_date_appointment_time_key'
+]);
 
 class BookingValidationError extends Error {
     constructor(message, { code = 'booking_validation_error', status = 400 } = {}) {
@@ -16,6 +20,24 @@ class BookingValidationError extends Error {
 
 function isUniqueViolation(error) {
     return error?.code === '23505';
+}
+
+function isPostgresUuid(value) {
+    return POSTGRES_UUID_REGEX.test(String(value || '').trim());
+}
+
+function isAppointmentSlotUniqueViolation(error) {
+    if (!isUniqueViolation(error)) {
+        return false;
+    }
+
+    const constraintName = String(error?.constraint || '').trim();
+    if (constraintName && APPOINTMENT_SLOT_CONSTRAINTS.has(constraintName)) {
+        return true;
+    }
+
+    const detail = String(error?.detail || '');
+    return /\(doctor_id,\s*appointment_date,\s*appointment_time\)=/i.test(detail);
 }
 
 function generateLegacyMongoId() {
@@ -155,14 +177,28 @@ async function queryOneRow(sql, params = [], client = null) {
 async function queryUserPgIdByPublicId(publicId, client = null) {
     const normalized = normalizePublicId(publicId);
     if (!normalized) return null;
-    const row = await queryOneRow(
-        `SELECT id
-         FROM users
-         WHERE legacy_mongo_id = $1 OR id::text = $1
-         LIMIT 1`,
-        [normalized],
-        client
-    );
+
+    let row = null;
+    if (normalizeLegacyObjectId(normalized)) {
+        row = await queryOneRow(
+            `SELECT id
+             FROM users
+             WHERE legacy_mongo_id = $1::char(24)
+             LIMIT 1`,
+            [normalized],
+            client
+        );
+    } else if (isPostgresUuid(normalized)) {
+        row = await queryOneRow(
+            `SELECT id
+             FROM users
+             WHERE id = $1::uuid
+             LIMIT 1`,
+            [normalized],
+            client
+        );
+    }
+
     return row ? String(row.id) : null;
 }
 
@@ -175,7 +211,7 @@ async function queryDoctorRowByIdentifier(identifier, { requireActive = true } =
     const filters = [];
     if (byLegacyId) {
         params.push(byLegacyId);
-        filters.push(`TRIM(d.legacy_mongo_id) = $${params.length}`);
+        filters.push(`d.legacy_mongo_id = $${params.length}::char(24)`);
     } else {
         params.push(normalized);
         filters.push(`d.slug = $${params.length}`);
@@ -273,23 +309,38 @@ async function queryMappedAppointmentByPgId(appointmentPgId, client = null) {
     return row ? mapAppointmentRow(row) : null;
 }
 
-async function listBookedTimesByDoctorDate(doctorLegacyId, dateISO, client = null) {
-    const normalizedDoctorId = normalizeLegacyObjectId(doctorLegacyId);
+async function listBookedTimesByDoctorDate(doctorIdentifier, dateISO, client = null) {
+    const normalizedDoctorIdentifier = normalizePublicId(doctorIdentifier);
     const normalizedDate = normalizeISODate(dateISO);
-    if (!normalizedDoctorId || !normalizedDate) {
+    if (!normalizedDoctorIdentifier || !normalizedDate) {
         return [];
     }
 
     const executor = client || getPostgresPool();
-    const result = await executor.query(
-        `SELECT to_char(a.appointment_time, 'HH24:MI') AS appointment_time
-         FROM appointments a
-         JOIN doctors d ON d.id = a.doctor_id
-         WHERE TRIM(d.legacy_mongo_id) = $1
-           AND a.appointment_date = $2::date
-         ORDER BY a.appointment_time ASC`,
-        [normalizedDoctorId, normalizedDate]
-    );
+    let result;
+    if (normalizeLegacyObjectId(normalizedDoctorIdentifier)) {
+        result = await executor.query(
+            `SELECT to_char(a.appointment_time, 'HH24:MI') AS appointment_time
+             FROM appointments a
+             JOIN doctors d ON d.id = a.doctor_id
+             WHERE d.legacy_mongo_id = $1::char(24)
+               AND a.appointment_date = $2::date
+             ORDER BY a.appointment_time ASC`,
+            [normalizedDoctorIdentifier, normalizedDate]
+        );
+    } else if (isPostgresUuid(normalizedDoctorIdentifier)) {
+        result = await executor.query(
+            `SELECT to_char(a.appointment_time, 'HH24:MI') AS appointment_time
+             FROM appointments a
+             WHERE a.doctor_id = $1::uuid
+               AND a.appointment_date = $2::date
+             ORDER BY a.appointment_time ASC`,
+            [normalizedDoctorIdentifier, normalizedDate]
+        );
+    } else {
+        return [];
+    }
+
     return result.rows.map((row) => row.appointment_time);
 }
 
@@ -328,7 +379,7 @@ async function getSlotMatrixForDoctorDate(doctorIdentifier, dateISO, client = nu
         endTime: rule.end_time,
         slotMinutes: rule.slot_minutes
     });
-    const bookedTimes = await listBookedTimesByDoctorDate(doctor.legacy_mongo_id, normalizedDate, client);
+    const bookedTimes = await listBookedTimesByDoctorDate(doctor.id, normalizedDate, client);
     const slots = allSlots.map((slotTime) => ({
         time: slotTime,
         available: !blocked && !bookedTimes.includes(slotTime)
@@ -425,6 +476,13 @@ async function createAppointmentTransactional({
     if (!normalizedDate || !normalizedTime) {
         throw new BookingValidationError('Data sau ora invalida.', { code: 'invalid_datetime', status: 400 });
     }
+    const normalizedName = String(name || '').trim();
+    const normalizedPhone = String(phone || '').trim();
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const normalizedType = String(type || '').trim();
+    if (!normalizedName || !normalizedPhone || !normalizedEmail || !normalizedType) {
+        throw new BookingValidationError('Datele programarii sunt incomplete.', { code: 'invalid_payload', status: 400 });
+    }
 
     const task = async (txClient) => {
         const doctor = await queryDoctorRowByIdentifier(doctorIdentifier, { requireActive: true }, txClient);
@@ -512,13 +570,13 @@ async function createAppointmentTransactional({
                 RETURNING id::text AS id`,
                 [
                     generateLegacyMongoId(),
-                    String(name || '').trim(),
-                    String(phone || '').trim(),
-                    String(type || '').trim(),
+                    normalizedName,
+                    normalizedPhone,
+                    normalizedType,
                     normalizedDate,
                     normalizedTime,
                     String(notes || ''),
-                    String(email || '').trim().toLowerCase(),
+                    normalizedEmail,
                     !!hasDiagnosis,
                     diagnosticFileMeta?.key || null,
                     diagnosticFileMeta?.mime || null,
@@ -531,7 +589,7 @@ async function createAppointmentTransactional({
             );
             insertedId = insertResult.rows[0]?.id || null;
         } catch (error) {
-            if (isUniqueViolation(error)) {
+            if (isAppointmentSlotUniqueViolation(error)) {
                 throw new BookingValidationError('Interval deja rezervat.', {
                     code: 'doctor_slot_already_booked',
                     status: 409
@@ -591,7 +649,7 @@ async function listAppointments({
             return [];
         }
         params.push(normalizedIds);
-        conditions.push(`TRIM(d.legacy_mongo_id) = ANY($${params.length}::text[])`);
+        conditions.push(`d.legacy_mongo_id = ANY($${params.length}::char(24)[])`);
     }
 
     const normalizedDate = normalizeISODate(date);
@@ -647,34 +705,68 @@ async function findAppointmentByPublicId(publicId, client = null) {
     if (!normalizedId) {
         return null;
     }
-    const row = await queryOneRow(
-        `SELECT
-            a.id::text AS id,
-            TRIM(a.legacy_mongo_id) AS legacy_mongo_id,
-            a.name,
-            a.phone,
-            a.type,
-            a.appointment_date::text AS appointment_date,
-            to_char(a.appointment_time, 'HH24:MI') AS appointment_time,
-            a.notes,
-            a.email,
-            a.email_sent,
-            a.has_diagnosis,
-            a.diagnostic_file_key,
-            a.diagnostic_file_mime,
-            a.diagnostic_file_size,
-            a.diagnostic_uploaded_at,
-            a.doctor_id::text AS doctor_id,
-            a.doctor_snapshot_name,
-            a.created_at,
-            TRIM(d.legacy_mongo_id) AS doctor_legacy_mongo_id
-         FROM appointments a
-         JOIN doctors d ON d.id = a.doctor_id
-         WHERE TRIM(a.legacy_mongo_id) = $1 OR a.id::text = $1
-         LIMIT 1`,
-        [normalizedId],
-        client
-    );
+
+    let row = null;
+    if (normalizeLegacyObjectId(normalizedId)) {
+        row = await queryOneRow(
+            `SELECT
+                a.id::text AS id,
+                TRIM(a.legacy_mongo_id) AS legacy_mongo_id,
+                a.name,
+                a.phone,
+                a.type,
+                a.appointment_date::text AS appointment_date,
+                to_char(a.appointment_time, 'HH24:MI') AS appointment_time,
+                a.notes,
+                a.email,
+                a.email_sent,
+                a.has_diagnosis,
+                a.diagnostic_file_key,
+                a.diagnostic_file_mime,
+                a.diagnostic_file_size,
+                a.diagnostic_uploaded_at,
+                a.doctor_id::text AS doctor_id,
+                a.doctor_snapshot_name,
+                a.created_at,
+                TRIM(d.legacy_mongo_id) AS doctor_legacy_mongo_id
+             FROM appointments a
+             JOIN doctors d ON d.id = a.doctor_id
+             WHERE a.legacy_mongo_id = $1::char(24)
+             LIMIT 1`,
+            [normalizedId],
+            client
+        );
+    } else if (isPostgresUuid(normalizedId)) {
+        row = await queryOneRow(
+            `SELECT
+                a.id::text AS id,
+                TRIM(a.legacy_mongo_id) AS legacy_mongo_id,
+                a.name,
+                a.phone,
+                a.type,
+                a.appointment_date::text AS appointment_date,
+                to_char(a.appointment_time, 'HH24:MI') AS appointment_time,
+                a.notes,
+                a.email,
+                a.email_sent,
+                a.has_diagnosis,
+                a.diagnostic_file_key,
+                a.diagnostic_file_mime,
+                a.diagnostic_file_size,
+                a.diagnostic_uploaded_at,
+                a.doctor_id::text AS doctor_id,
+                a.doctor_snapshot_name,
+                a.created_at,
+                TRIM(d.legacy_mongo_id) AS doctor_legacy_mongo_id
+             FROM appointments a
+             JOIN doctors d ON d.id = a.doctor_id
+             WHERE a.id = $1::uuid
+             LIMIT 1`,
+            [normalizedId],
+            client
+        );
+    }
+
     return row ? mapAppointmentRow(row) : null;
 }
 
@@ -683,14 +775,27 @@ async function setAppointmentEmailSentByPublicId(publicId, value = true, client 
     if (!normalizedId) return null;
 
     const task = async (txClient) => {
-        const row = await queryOneRow(
-            `UPDATE appointments
-             SET email_sent = $2
-             WHERE TRIM(legacy_mongo_id) = $1 OR id::text = $1
-             RETURNING id::text AS id`,
-            [normalizedId, !!value],
-            txClient
-        );
+        let row = null;
+        if (normalizeLegacyObjectId(normalizedId)) {
+            row = await queryOneRow(
+                `UPDATE appointments
+                 SET email_sent = $2
+                 WHERE legacy_mongo_id = $1::char(24)
+                 RETURNING id::text AS id`,
+                [normalizedId, !!value],
+                txClient
+            );
+        } else if (isPostgresUuid(normalizedId)) {
+            row = await queryOneRow(
+                `UPDATE appointments
+                 SET email_sent = $2
+                 WHERE id = $1::uuid
+                 RETURNING id::text AS id`,
+                [normalizedId, !!value],
+                txClient
+            );
+        }
+
         if (!row) return null;
         return queryMappedAppointmentByPgId(row.id, txClient);
     };
@@ -712,7 +817,7 @@ async function updateDoctorSnapshotNameByDoctorLegacyId(doctorLegacyId, displayN
          SET doctor_snapshot_name = $2
          FROM doctors d
          WHERE a.doctor_id = d.id
-           AND TRIM(d.legacy_mongo_id) = $1
+           AND d.legacy_mongo_id = $1::char(24)
            AND a.doctor_snapshot_name <> $2`,
         [normalizedDoctorLegacyId, String(displayName || '')]
     );
@@ -728,11 +833,21 @@ async function deleteAppointmentByPublicId(publicId, client = null) {
         if (!found) {
             return null;
         }
-        await txClient.query(
-            `DELETE FROM appointments
-             WHERE TRIM(legacy_mongo_id) = $1 OR id::text = $1`,
-            [normalizedId]
-        );
+        if (normalizeLegacyObjectId(normalizedId)) {
+            await txClient.query(
+                `DELETE FROM appointments
+                 WHERE legacy_mongo_id = $1::char(24)`,
+                [normalizedId]
+            );
+        } else if (isPostgresUuid(normalizedId)) {
+            await txClient.query(
+                `DELETE FROM appointments
+                 WHERE id = $1::uuid`,
+                [normalizedId]
+            );
+        } else {
+            return null;
+        }
         return found;
     };
 
@@ -891,7 +1006,7 @@ async function upsertAppointmentFromMongo(mongoAppointment = {}, client = null) 
             );
             return queryMappedAppointmentByPgId(row.id, txClient);
         } catch (error) {
-            if (!isUniqueViolation(error)) {
+            if (!isAppointmentSlotUniqueViolation(error)) {
                 throw error;
             }
             const existing = await queryOneRow(
