@@ -87,6 +87,53 @@ JWT_STEPUP_SECRET=<at least 32 chars>
 ALLOWED_ORIGINS=https://your-app.vercel.app,http://localhost:3000
 ```
 
+## MongoDB TLS hardening
+
+Mongo transport security is enforced in code via `mongoose.connect(MONGODB_URI, options)` with TLS options, not only via URI defaults.
+
+### Added env vars
+
+- `MONGO_TLS_MIN_VERSION` (default: `TLSv1.3`, allowed values: `TLSv1.3`, `TLSv1.2`)
+- `MONGO_TLS_ALLOW_FALLBACK_TO_1_2` (default: `false`)
+- `MONGO_TLS_CA_FILE` (optional, custom CA bundle path)
+- `MONGO_TLS_CERT_KEY_FILE` (optional, client cert/key bundle path)
+- `MONGO_TLS_CERT_KEY_PASSWORD` (optional, client cert/key password)
+
+### Behavior
+
+1. Startup fails if `MONGODB_URI` is missing or contains insecure TLS overrides.
+2. First connection attempt always uses `tls: true` and `minVersion` from `MONGO_TLS_MIN_VERSION` (default `TLSv1.3`).
+3. If and only if a TLS protocol compatibility error is detected and `MONGO_TLS_ALLOW_FALLBACK_TO_1_2=true`, the app retries once with `minVersion: TLSv1.2`.
+4. The app does not fallback for authentication, DNS, URI parsing, certificate validation, or unrelated errors.
+5. Startup logs include effective TLS policy and Node runtime version, without logging full Mongo URI or credentials.
+
+### Atlas example (recommended)
+
+```bash
+MONGODB_URI=mongodb+srv://<user>:<password>@cluster0.example.mongodb.net/appointments?retryWrites=true&w=majority
+MONGO_TLS_MIN_VERSION=TLSv1.3
+MONGO_TLS_ALLOW_FALLBACK_TO_1_2=false
+```
+
+### Self-hosted example (custom CA/client cert)
+
+```bash
+MONGODB_URI=mongodb://db1.example.internal:27017,db2.example.internal:27017/appointments?replicaSet=rs0
+MONGO_TLS_MIN_VERSION=TLSv1.3
+MONGO_TLS_ALLOW_FALLBACK_TO_1_2=false
+MONGO_TLS_CA_FILE=/etc/certs/mongo-ca.pem
+MONGO_TLS_CERT_KEY_FILE=/etc/certs/mongo-client.pem
+MONGO_TLS_CERT_KEY_PASSWORD=<optional-password>
+```
+
+### Diagnostics
+
+- `GET /api/admin/mongo-tls` (superadmin only) returns non-sensitive Mongo TLS metadata and connection state.
+
+### Insecure flags to avoid
+
+Never add these to `MONGODB_URI`: `tls=false`, `ssl=false`, `tlsAllowInvalidCertificates=true`, `tlsAllowInvalidHostnames=true`, `tlsInsecure=true`.
+
 ## Node runtime
 
 - `package.json` pins Node: `20.x`
@@ -113,6 +160,8 @@ ALLOWED_ORIGINS=https://your-app.vercel.app,http://localhost:3000
   - `GET /api/admin/users` (superadmin)
   - `PATCH /api/admin/users/:id` (superadmin + step-up)
   - `DELETE /api/admin/users/:id` (superadmin + step-up)
+- System diagnostics:
+  - `GET /api/admin/mongo-tls` (superadmin)
 
 ## Verification scripts
 

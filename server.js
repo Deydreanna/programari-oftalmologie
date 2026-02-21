@@ -11,6 +11,12 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const path = require('path');
 const { validateBaseEnv, parseAllowedOrigins } = require('./scripts/env-utils');
+const {
+    buildMongoTlsPolicy,
+    getSafeMongoErrorSummary,
+    isLikelyTlsCompatibilityError,
+    FALLBACK_MONGO_TLS_MIN_VERSION
+} = require('./utils/mongo-tls-config');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,10 +41,15 @@ const DEFAULT_BOOKING_SETTINGS = Object.freeze({
 });
 const DEFAULT_AVAILABILITY_WEEKDAYS = Object.freeze([3]);
 
+const mongoTlsPolicy = buildMongoTlsPolicy(process.env);
 const baseEnvValidation = validateBaseEnv(process.env);
-if (!baseEnvValidation.ok) {
+const startupValidationErrors = Array.from(new Set([
+    ...baseEnvValidation.errors,
+    ...mongoTlsPolicy.validationErrors
+]));
+if (startupValidationErrors.length) {
     console.error('Startup environment validation failed:');
-    for (const error of baseEnvValidation.errors) {
+    for (const error of startupValidationErrors) {
         console.error(`- ${error}`);
     }
     process.exit(1);
@@ -47,7 +58,7 @@ if (!baseEnvValidation.ok) {
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 const JWT_STEPUP_SECRET = process.env.JWT_STEPUP_SECRET;
-const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_URI = mongoTlsPolicy.mongodbUri;
 const ALLOWED_ORIGINS = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
 const ACCESS_TOKEN_TTL_MINUTES = Number(process.env.ACCESS_TOKEN_TTL_MINUTES || 15);
 const REFRESH_TOKEN_TTL_DAYS = Number(process.env.REFRESH_TOKEN_TTL_DAYS || 30);
@@ -78,6 +89,17 @@ const loginAttempts = new Map();
 const refreshAttempts = new Map();
 let mongoBootstrapPromise = null;
 let mongoBootstrapped = false;
+const MONGOOSE_READY_STATE_LABELS = Object.freeze({
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting'
+});
+const mongoTlsRuntime = {
+    fallbackToTls12Used: false,
+    effectiveMinVersion: mongoTlsPolicy.configuredMinVersion,
+    lastConnectionError: null
+};
 
 function parseHHMMToMinutes(value) {
     if (typeof value !== 'string') return NaN;
@@ -281,13 +303,103 @@ async function ensureDefaultDoctorAndBackfill() {
     };
 }
 
+function getMongoConnectionStateLabel() {
+    return MONGOOSE_READY_STATE_LABELS[mongoose.connection.readyState] || 'unknown';
+}
+
+function getMongoTlsDiagnosticsSnapshot() {
+    return {
+        connectionState: getMongoConnectionStateLabel(),
+        tlsRequired: true,
+        configuredMinVersion: mongoTlsPolicy.configuredMinVersion,
+        effectiveMinVersion: mongoTlsRuntime.effectiveMinVersion,
+        fallbackToTls12Used: mongoTlsRuntime.fallbackToTls12Used,
+        allowFallbackToTls12: mongoTlsPolicy.allowFallbackTo12,
+        uriScheme: mongoTlsPolicy.uriScheme,
+        hostCount: mongoTlsPolicy.hostCount,
+        redactedHosts: mongoTlsPolicy.redactedHosts,
+        tlsCAFileConfigured: mongoTlsPolicy.tlsCAFileConfigured,
+        tlsCertificateKeyFileConfigured: mongoTlsPolicy.tlsCertificateKeyFileConfigured,
+        tlsCertificateKeyPasswordConfigured: mongoTlsPolicy.tlsCertificateKeyPasswordConfigured,
+        lastConnectionError: mongoTlsRuntime.lastConnectionError,
+        nodeVersion: process.version
+    };
+}
+
+function formatSafeMongoError(error) {
+    const summary = getSafeMongoErrorSummary(error);
+    const codePart = summary.code ? ` code=${summary.code}` : '';
+    return `${summary.name}${codePart}: ${summary.message}`;
+}
+
+async function connectMongoWithTlsPolicy() {
+    const primaryMinVersion = mongoTlsPolicy.configuredMinVersion;
+    const primaryOptions = {
+        ...mongoTlsPolicy.connectOptions,
+        minVersion: primaryMinVersion
+    };
+
+    try {
+        await mongoose.connect(MONGODB_URI, primaryOptions);
+        mongoTlsRuntime.effectiveMinVersion = primaryMinVersion;
+        mongoTlsRuntime.fallbackToTls12Used = false;
+        mongoTlsRuntime.lastConnectionError = null;
+        return;
+    } catch (primaryError) {
+        const tlsCompatibilityError = isLikelyTlsCompatibilityError(primaryError);
+        const fallbackEnabled = mongoTlsPolicy.allowFallbackTo12;
+        const canFallbackTo12 = primaryMinVersion !== FALLBACK_MONGO_TLS_MIN_VERSION;
+
+        if (tlsCompatibilityError && !fallbackEnabled && canFallbackTo12) {
+            const compatibilityError = new Error(
+                `MongoDB TLS compatibility failure while enforcing ${primaryMinVersion}. `
+                + 'Fallback to TLSv1.2 is disabled. Set MONGO_TLS_ALLOW_FALLBACK_TO_1_2=true '
+                + 'to retry with TLSv1.2.'
+            );
+            compatibilityError.cause = primaryError;
+            throw compatibilityError;
+        }
+
+        if (!(tlsCompatibilityError && fallbackEnabled && canFallbackTo12)) {
+            throw primaryError;
+        }
+
+        console.warn(
+            `[HIGH][MONGO_TLS] TLS compatibility issue detected. `
+            + `Retrying once with ${FALLBACK_MONGO_TLS_MIN_VERSION} because `
+            + 'MONGO_TLS_ALLOW_FALLBACK_TO_1_2=true.'
+        );
+        console.warn(`[HIGH][MONGO_TLS] Primary connection error: ${formatSafeMongoError(primaryError)}`);
+
+        await mongoose.disconnect().catch(() => {});
+
+        try {
+            await mongoose.connect(MONGODB_URI, {
+                ...mongoTlsPolicy.connectOptions,
+                minVersion: FALLBACK_MONGO_TLS_MIN_VERSION
+            });
+            mongoTlsRuntime.fallbackToTls12Used = true;
+            mongoTlsRuntime.effectiveMinVersion = FALLBACK_MONGO_TLS_MIN_VERSION;
+            mongoTlsRuntime.lastConnectionError = null;
+        } catch (fallbackError) {
+            const fallbackSummary = formatSafeMongoError(fallbackError);
+            const fallbackFailure = new Error(
+                `MongoDB connection failed after fallback to ${FALLBACK_MONGO_TLS_MIN_VERSION}. `
+                + `Reason: ${fallbackSummary}`
+            );
+            fallbackFailure.cause = fallbackError;
+            throw fallbackFailure;
+        }
+    }
+}
+
 async function ensureMongoReady() {
     if (mongoBootstrapped && mongoose.connection.readyState === 1) {
         return;
     }
 
     if (!mongoBootstrapPromise) {
-        mongoBootstrapPromise = mongoose.connect(MONGODB_URI)
+        mongoBootstrapPromise = connectMongoWithTlsPolicy()
             .then(async () => {
                 if (!mongoBootstrapped) {
                     const migrationSummary = await ensureDefaultDoctorAndBackfill();
@@ -295,12 +407,24 @@ async function ensureMongoReady() {
                     await User.syncIndexes();
                     await Appointment.syncIndexes();
                     mongoBootstrapped = true;
-                    console.log('Connected to MongoDB');
+                    const tlsDiagnostics = getMongoTlsDiagnosticsSnapshot();
+                    console.log(
+                        `[MONGO_TLS] Connected to MongoDB `
+                        + `(state=${tlsDiagnostics.connectionState}, `
+                        + `tlsRequired=${tlsDiagnostics.tlsRequired}, `
+                        + `configuredMinVersion=${tlsDiagnostics.configuredMinVersion}, `
+                        + `effectiveMinVersion=${tlsDiagnostics.effectiveMinVersion}, `
+                        + `fallbackToTls12Used=${tlsDiagnostics.fallbackToTls12Used}, `
+                        + `uriScheme=${tlsDiagnostics.uriScheme}, `
+                        + `hosts=${tlsDiagnostics.hostCount}, `
+                        + `node=${tlsDiagnostics.nodeVersion})`
+                    );
                     console.log('Startup migration summary:', migrationSummary);
                 }
             })
             .catch((error) => {
                 mongoBootstrapPromise = null;
+                mongoTlsRuntime.lastConnectionError = getSafeMongoErrorSummary(error);
                 throw error;
             });
     }
@@ -309,7 +433,7 @@ async function ensureMongoReady() {
 }
 
 ensureMongoReady().catch((err) => {
-    console.error('MongoDB connection error:', err);
+    console.error(`MongoDB connection error: ${formatSafeMongoError(err)}`);
 });
 
 // =====================
@@ -370,7 +494,7 @@ app.use(['/api', '/debug'], async (req, res, next) => {
         await ensureMongoReady();
         return next();
     } catch (error) {
-        console.error('MongoDB unavailable for request:', error?.message || error);
+        console.error(`MongoDB unavailable for request: ${formatSafeMongoError(error)}`);
         return res.status(503).json({ error: 'Database unavailable. Please retry shortly.' });
     }
 });
@@ -2339,6 +2463,37 @@ app.get('/api/admin/stats', requireSuperadminOnly, async (req, res) => {
         });
     } catch (_) {
         return res.status(500).json({ error: 'Could not fetch stats' });
+    }
+});
+
+app.get('/api/admin/mongo-tls', requireSuperadminOnly, async (req, res) => {
+    setAuthNoStore(res);
+
+    try {
+        const diagnostics = getMongoTlsDiagnosticsSnapshot();
+        await writeAuditLog(req, {
+            action: 'admin_mongo_tls_view',
+            result: 'success',
+            targetType: 'system',
+            targetId: 'mongo_tls',
+            actorUser: req.user,
+            metadata: {
+                connectionState: diagnostics.connectionState,
+                configuredMinVersion: diagnostics.configuredMinVersion,
+                effectiveMinVersion: diagnostics.effectiveMinVersion,
+                fallbackToTls12Used: diagnostics.fallbackToTls12Used
+            }
+        });
+        return res.json(diagnostics);
+    } catch (_) {
+        await writeAuditLog(req, {
+            action: 'admin_mongo_tls_view',
+            result: 'failure',
+            targetType: 'system',
+            targetId: 'mongo_tls',
+            actorUser: req.user
+        });
+        return res.status(500).json({ error: 'Could not fetch MongoDB TLS diagnostics' });
     }
 });
 
