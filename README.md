@@ -1,6 +1,6 @@
 ﻿# Ophthalmology Appointments
 
-Node.js + Express application for ophthalmology bookings, with secure cookie auth, CSRF, RBAC, and audit logging. The app supports MongoDB (`DB_PROVIDER=mongo`) and Neon-compatible Postgres (`DB_PROVIDER=postgres` or `dual`).
+Node.js + Express application for ophthalmology bookings, with secure cookie auth, CSRF, RBAC, and audit logging. Postgres (Neon-compatible) is the primary runtime storage (`DB_PROVIDER=postgres` by default). MongoDB runtime remains available temporarily behind feature flags for rollback (`DB_PROVIDER=mongo` or `dual`).
 
 ## What changed (multi-doctor refactor)
 
@@ -80,8 +80,8 @@ npm start
 ## Required env vars
 
 ```bash
-DB_PROVIDER=mongo
-MONGODB_URI=mongodb://localhost:27017/appointments
+DB_PROVIDER=postgres
+DATABASE_URL=postgresql://<user>:<password>@<host>/<database>?sslmode=require
 JWT_ACCESS_SECRET=<at least 32 chars>
 JWT_REFRESH_SECRET=<at least 32 chars>
 JWT_STEPUP_SECRET=<at least 32 chars>
@@ -90,7 +90,7 @@ ALLOWED_ORIGINS=https://your-app.vercel.app,http://localhost:3000
 
 ### Postgres env vars (Phase 1)
 
-- `DB_PROVIDER`: `mongo` (default), `postgres`, or `dual`
+- `DB_PROVIDER`: `postgres` (default), `mongo`, or `dual`
 - `DATABASE_URL`: required when `DB_PROVIDER=postgres` or `DB_PROVIDER=dual`
 - Optional pool tuning:
   - `PG_POOL_MAX` (default `10`)
@@ -100,9 +100,21 @@ ALLOWED_ORIGINS=https://your-app.vercel.app,http://localhost:3000
 Example:
 
 ```bash
-DB_PROVIDER=dual
+DB_PROVIDER=postgres
 DATABASE_URL=postgresql://<user>:<password>@<host>/<database>?sslmode=require
 ```
+
+### Mongo rollback env vars (temporary compatibility path)
+
+Set these only if you intentionally run in `mongo` or `dual` mode:
+
+- `MONGODB_URI`
+- Optional Mongo TLS vars:
+  - `MONGO_TLS_MIN_VERSION`
+  - `MONGO_TLS_ALLOW_FALLBACK_TO_1_2`
+  - `MONGO_TLS_CA_FILE`
+  - `MONGO_TLS_CERT_KEY_FILE`
+  - `MONGO_TLS_CERT_KEY_PASSWORD`
 
 ## Postgres (Phase 1 infrastructure)
 
@@ -113,9 +125,9 @@ DATABASE_URL=postgresql://<user>:<password>@<host>/<database>?sslmode=require
 
 Current behavior:
 
-- `DB_PROVIDER=mongo`: users/auth + doctors/availability + appointments + audit logs use MongoDB.
-- `DB_PROVIDER=postgres` or `DB_PROVIDER=dual`: users/auth/roles + doctors/availability + appointments + audit logs are persisted in Postgres.
-- `DB_PROVIDER=dual` supports lazy user/doctor/appointment migration from MongoDB to Postgres at startup.
+- `DB_PROVIDER=postgres` (default): users/auth/roles + doctors/availability + appointments + audit logs use Postgres.
+- `DB_PROVIDER=dual`: Postgres primary with temporary Mongo lazy-import compatibility for user/doctor/appointment startup migration.
+- `DB_PROVIDER=mongo`: legacy rollback mode for one release cycle.
 - Appointment API responses keep `_id` as 24-char legacy-compatible IDs backed by `legacy_mongo_id` in Postgres.
 
 ### Run migrations
@@ -145,7 +157,7 @@ npm run db:migrate:mongo-to-postgres
 1. Run this in staging first.
 2. Ensure Postgres schema is migrated (`npm run db:migrate`).
 3. Ensure both `MONGODB_URI` and `DATABASE_URL` are set.
-4. Keep `DB_PROVIDER=mongo` during data import verification to avoid production behavior changes.
+4. Keep production on current provider during staging validation; switch to `DB_PROVIDER=postgres` only after migration checks pass.
 
 ### Idempotency strategy
 
@@ -216,6 +228,36 @@ DB_PROVIDER=mongo
 ```
 
 - Fix migration/data issues, then rerun the migration script.
+
+## Deployment (Vercel)
+
+### Required env vars
+
+- `DB_PROVIDER=postgres`
+- `DATABASE_URL` (Neon connection string)
+- `JWT_ACCESS_SECRET`
+- `JWT_REFRESH_SECRET`
+- `JWT_STEPUP_SECRET`
+- `ALLOWED_ORIGINS`
+
+### Recommended optional env vars
+
+- `PG_POOL_MAX`
+- `PG_IDLE_TIMEOUT_MS`
+- `PG_CONNECTION_TIMEOUT_MS`
+- `ACCESS_TOKEN_TTL_MINUTES`
+- `REFRESH_TOKEN_TTL_DAYS`
+- `STEP_UP_TOKEN_TTL_MINUTES`
+
+### Deploy sequence
+
+1. Run SQL migrations:
+   - `npm run db:migrate`
+2. Run data migration in staging first:
+   - `npm run db:migrate:mongo-to-postgres -- --dry-run --report-file=./migration-report-dry-run.json`
+   - `npm run db:migrate:mongo-to-postgres -- --report-file=./migration-report.json`
+3. Deploy with `DB_PROVIDER=postgres`.
+4. Execute post-deploy verification checklist (below).
 
 ### Verify auth + RBAC flow (requires running server + superadmin creds)
 
@@ -300,7 +342,7 @@ Never add these to `MONGODB_URI`: `tls=false`, `ssl=false`, `tlsAllowInvalidCert
   - `PATCH /api/admin/users/:id` (superadmin + step-up)
   - `DELETE /api/admin/users/:id` (superadmin + step-up)
 - System diagnostics:
-  - `GET /api/admin/mongo-tls` (superadmin)
+  - `GET /api/admin/mongo-tls` (superadmin, only when `DB_PROVIDER` includes Mongo runtime)
 
 ## Verification scripts
 
@@ -346,6 +388,31 @@ curl -i "$BASE_URL/api/slots?date=2026-03-04"
 curl -I "$BASE_URL/"
 curl -I "$BASE_URL/adminpanel"
 ```
+
+## Post-deploy verification checklist
+
+1. Authentication:
+   - login with known superadmin and scheduler accounts
+   - verify cookie auth + CSRF flows still pass
+2. Admin panel:
+   - load `/adminpanel`
+   - confirm appointments/users/doctors views render correctly
+3. Doctor management:
+   - create/update doctor
+   - modify availability rules
+4. Booking:
+   - book a new appointment
+   - verify slot exclusion after booking
+   - run race test (`npm run test:race`) to verify anti-double-booking
+5. Cancellation/reactivation:
+   - block a date for a doctor
+   - reactivate (unblock) the same date
+   - verify slots reflect state changes
+6. Audit logs:
+   - verify auth/admin/booking actions are persisted in `audit_logs`
+7. Role scoping:
+   - verify doctor-scoped admin can manage only assigned doctors
+   - verify access denied on non-assigned doctors
 
 ## Notes
 

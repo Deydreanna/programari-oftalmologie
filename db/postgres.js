@@ -68,7 +68,7 @@ async function closePostgresPool() {
 }
 
 async function runPostgresHealthCheck({ force = false } = {}) {
-    const dbProvider = normalizeDbProvider(process.env.DB_PROVIDER) || 'mongo';
+    const dbProvider = normalizeDbProvider(process.env.DB_PROVIDER) || 'postgres';
     if (!force && !isPostgresProvider(dbProvider)) {
         return {
             ok: true,

@@ -10,7 +10,7 @@ const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const path = require('path');
-const { validateBaseEnv, normalizeDbProvider, isPostgresProvider } = require('./scripts/env-utils');
+const { validateBaseEnv, normalizeDbProvider, isPostgresProvider, isMongoRuntimeProvider } = require('./scripts/env-utils');
 const { runPostgresHealthCheck, redactPostgresUrlInText } = require('./db/postgres');
 const pgUsers = require('./db/users-postgres');
 const pgDoctors = require('./db/doctors-postgres');
@@ -46,10 +46,10 @@ const DEFAULT_BOOKING_SETTINGS = Object.freeze({
 });
 const DEFAULT_AVAILABILITY_WEEKDAYS = Object.freeze([3]);
 
-const mongoTlsPolicy = buildMongoTlsPolicy(process.env);
 const baseEnvValidation = validateBaseEnv(process.env);
-const DB_PROVIDER = baseEnvValidation.parsed.dbProvider || normalizeDbProvider(process.env.DB_PROVIDER) || 'mongo';
+const DB_PROVIDER = baseEnvValidation.parsed.dbProvider || normalizeDbProvider(process.env.DB_PROVIDER) || 'postgres';
 const POSTGRES_ENABLED = isPostgresProvider(DB_PROVIDER);
+const MONGO_RUNTIME_ENABLED = isMongoRuntimeProvider(DB_PROVIDER);
 const USERS_IN_POSTGRES = POSTGRES_ENABLED;
 const DOCTORS_IN_POSTGRES = POSTGRES_ENABLED;
 const APPOINTMENTS_IN_POSTGRES = POSTGRES_ENABLED;
@@ -57,6 +57,21 @@ const AUDIT_IN_POSTGRES = POSTGRES_ENABLED;
 const DUAL_MONGO_USER_FALLBACK = DB_PROVIDER === 'dual';
 const DUAL_MONGO_DOCTOR_FALLBACK = DB_PROVIDER === 'dual';
 const DUAL_MONGO_APPOINTMENT_FALLBACK = DB_PROVIDER === 'dual';
+const mongoTlsPolicy = MONGO_RUNTIME_ENABLED
+    ? buildMongoTlsPolicy(process.env)
+    : {
+        mongodbUri: '',
+        validationErrors: [],
+        uriScheme: 'disabled',
+        hostCount: 0,
+        redactedHosts: [],
+        configuredMinVersion: 'n/a',
+        allowFallbackTo12: false,
+        connectOptions: { tls: true },
+        tlsCAFileConfigured: false,
+        tlsCertificateKeyFileConfigured: false,
+        tlsCertificateKeyPasswordConfigured: false
+    };
 const startupValidationErrors = Array.from(new Set([
     ...baseEnvValidation.errors,
     ...mongoTlsPolicy.validationErrors
@@ -367,7 +382,28 @@ function getMongoConnectionStateLabel() {
 }
 
 function getMongoTlsDiagnosticsSnapshot() {
+    if (!MONGO_RUNTIME_ENABLED) {
+        return {
+            runtimeEnabled: false,
+            connectionState: 'disabled',
+            tlsRequired: true,
+            configuredMinVersion: 'n/a',
+            effectiveMinVersion: 'n/a',
+            fallbackToTls12Used: false,
+            allowFallbackToTls12: false,
+            uriScheme: 'disabled',
+            hostCount: 0,
+            redactedHosts: [],
+            tlsCAFileConfigured: false,
+            tlsCertificateKeyFileConfigured: false,
+            tlsCertificateKeyPasswordConfigured: false,
+            lastConnectionError: null,
+            nodeVersion: process.version
+        };
+    }
+
     return {
+        runtimeEnabled: true,
         connectionState: getMongoConnectionStateLabel(),
         tlsRequired: true,
         configuredMinVersion: mongoTlsPolicy.configuredMinVersion,
@@ -392,6 +428,10 @@ function formatSafeMongoError(error) {
 }
 
 async function connectMongoWithTlsPolicy() {
+    if (!MONGO_RUNTIME_ENABLED) {
+        return;
+    }
+
     const primaryMinVersion = mongoTlsPolicy.configuredMinVersion;
     const primaryOptions = buildMongoDriverTlsOptions(mongoTlsPolicy, primaryMinVersion);
 
@@ -450,6 +490,10 @@ async function connectMongoWithTlsPolicy() {
 }
 
 async function ensureMongoReady() {
+    if (!MONGO_RUNTIME_ENABLED) {
+        return;
+    }
+
     if (mongoBootstrapped && mongoose.connection.readyState === 1) {
         return;
     }
@@ -494,9 +538,13 @@ async function ensureMongoReady() {
     await mongoBootstrapPromise;
 }
 
-ensureMongoReady().catch((err) => {
-    console.error(`MongoDB connection error: ${formatSafeMongoError(err)}`);
-});
+if (MONGO_RUNTIME_ENABLED) {
+    ensureMongoReady().catch((err) => {
+        console.error(`MongoDB connection error: ${formatSafeMongoError(err)}`);
+    });
+} else {
+    console.log(`[MONGO_TLS] Mongo runtime disabled (DB_PROVIDER=${DB_PROVIDER}).`);
+}
 
 // =====================
 //  MIDDLEWARE
@@ -2864,6 +2912,10 @@ app.get('/api/admin/stats', requireSuperadminOnly, async (req, res) => {
 app.get('/api/admin/mongo-tls', requireSuperadminOnly, async (req, res) => {
     setAuthNoStore(res);
 
+    if (!MONGO_RUNTIME_ENABLED) {
+        return res.status(404).json({ error: 'Mongo runtime is disabled for current DB provider.' });
+    }
+
     try {
         const diagnostics = getMongoTlsDiagnosticsSnapshot();
         await writeAuditLog(req, {
@@ -3673,13 +3725,21 @@ async function validatePostgresStartupHealth() {
 async function bootstrapServer() {
     try {
         await validatePostgresStartupHealth();
+        if (POSTGRES_ENABLED && !MONGO_RUNTIME_ENABLED) {
+            const migrationSummary = await ensureDefaultDoctorAndBackfill();
+            console.log('Startup migration summary:', migrationSummary);
+        }
     } catch (error) {
         console.error(`[POSTGRES] Startup health check failed: ${redactPostgresUrlInText(error?.message || String(error))}`);
         process.exit(1);
     }
 
     app.listen(PORT, () => {
-        console.log(`Server running on http://localhost:${PORT} (MongoDB active, DB_PROVIDER=${DB_PROVIDER})`);
+        console.log(
+            `Server running on http://localhost:${PORT} `
+            + `(DB_PROVIDER=${DB_PROVIDER}, postgres=${POSTGRES_ENABLED ? 'enabled' : 'disabled'}, `
+            + `mongoRuntime=${MONGO_RUNTIME_ENABLED ? 'enabled' : 'disabled'})`
+        );
     });
 }
 

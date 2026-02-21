@@ -3,9 +3,9 @@ const DB_PROVIDER = Object.freeze({
     POSTGRES: 'postgres',
     DUAL: 'dual'
 });
-const DEFAULT_DB_PROVIDER = DB_PROVIDER.MONGO;
+const DEFAULT_DB_PROVIDER = DB_PROVIDER.POSTGRES;
 const VALID_DB_PROVIDERS = new Set(Object.values(DB_PROVIDER));
-const REQUIRED_ENV_VARS = ['MONGODB_URI', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'JWT_STEPUP_SECRET', 'ALLOWED_ORIGINS'];
+const REQUIRED_ENV_VARS = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'JWT_STEPUP_SECRET', 'ALLOWED_ORIGINS'];
 
 function parseAllowedOrigins(raw) {
     if (!raw) return [];
@@ -26,6 +26,10 @@ function normalizeDbProvider(rawValue = DEFAULT_DB_PROVIDER) {
 
 function isPostgresProvider(provider = DEFAULT_DB_PROVIDER) {
     return provider === DB_PROVIDER.POSTGRES || provider === DB_PROVIDER.DUAL;
+}
+
+function isMongoRuntimeProvider(provider = DEFAULT_DB_PROVIDER) {
+    return provider === DB_PROVIDER.MONGO || provider === DB_PROVIDER.DUAL;
 }
 
 function validateDatabaseUrl(value) {
@@ -115,6 +119,12 @@ function validateBaseEnv(env = process.env) {
     }
 
     const normalizedProvider = dbProvider || DEFAULT_DB_PROVIDER;
+    if (isMongoRuntimeProvider(normalizedProvider)) {
+        if (!env.MONGODB_URI || !String(env.MONGODB_URI).trim()) {
+            errors.push('MONGODB_URI is required when DB_PROVIDER is mongo or dual.');
+        }
+    }
+
     if (isPostgresProvider(normalizedProvider)) {
         const databaseUrlValidation = validateDatabaseUrl(env.DATABASE_URL);
         if (!databaseUrlValidation.ok) {
@@ -139,6 +149,7 @@ module.exports = {
     REQUIRED_ENV_VARS,
     normalizeDbProvider,
     isPostgresProvider,
+    isMongoRuntimeProvider,
     validateDatabaseUrl,
     parseAllowedOrigins,
     validateBaseEnv

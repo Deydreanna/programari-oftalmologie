@@ -101,7 +101,7 @@ async function run() {
     const mongodbUri = process.env.MONGODB_URI;
     const email = process.env.SUPERADMIN_EMAIL.toLowerCase().trim();
     const password = process.env.SUPERADMIN_PASSWORD;
-    const dbProvider = normalizeDbProvider(process.env.DB_PROVIDER) || 'mongo';
+    const dbProvider = normalizeDbProvider(process.env.DB_PROVIDER) || 'postgres';
 
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
     let result;
