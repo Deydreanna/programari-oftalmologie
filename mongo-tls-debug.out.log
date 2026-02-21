@@ -1,0 +1,8 @@
+Server running on http://localhost:3000 (MongoDB + Auth + RBAC Enabled)
+[MONGO_TLS] Connected to MongoDB (state=connected, tlsRequired=true, configuredMinVersion=TLSv1.3, effectiveMinVersion=TLSv1.3, fallbackToTls12Used=false, uriScheme=mongodb, hosts=3, node=v24.13.1)
+Startup migration summary: {
+  defaultDoctorId: '6998e2ee66ce1de2136d2087',
+  appointmentsBackfilled: 0,
+  snapshotsBackfilled: 0,
+  usersBackfilled: 0
+}

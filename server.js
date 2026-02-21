@@ -13,6 +13,7 @@ const path = require('path');
 const { validateBaseEnv, parseAllowedOrigins } = require('./scripts/env-utils');
 const {
     buildMongoTlsPolicy,
+    buildMongoDriverTlsOptions,
     getSafeMongoErrorSummary,
     isLikelyTlsCompatibilityError,
     FALLBACK_MONGO_TLS_MIN_VERSION
@@ -334,10 +335,7 @@ function formatSafeMongoError(error) {
 
 async function connectMongoWithTlsPolicy() {
     const primaryMinVersion = mongoTlsPolicy.configuredMinVersion;
-    const primaryOptions = {
-        ...mongoTlsPolicy.connectOptions,
-        minVersion: primaryMinVersion
-    };
+    const primaryOptions = buildMongoDriverTlsOptions(mongoTlsPolicy, primaryMinVersion);
 
     try {
         await mongoose.connect(MONGODB_URI, primaryOptions);
@@ -374,10 +372,10 @@ async function connectMongoWithTlsPolicy() {
         await mongoose.disconnect().catch(() => {});
 
         try {
-            await mongoose.connect(MONGODB_URI, {
-                ...mongoTlsPolicy.connectOptions,
-                minVersion: FALLBACK_MONGO_TLS_MIN_VERSION
-            });
+            await mongoose.connect(
+                MONGODB_URI,
+                buildMongoDriverTlsOptions(mongoTlsPolicy, FALLBACK_MONGO_TLS_MIN_VERSION)
+            );
             mongoTlsRuntime.fallbackToTls12Used = true;
             mongoTlsRuntime.effectiveMinVersion = FALLBACK_MONGO_TLS_MIN_VERSION;
             mongoTlsRuntime.lastConnectionError = null;

@@ -1,3 +1,5 @@
+const tls = require('tls');
+
 const DEFAULT_MONGO_TLS_MIN_VERSION = 'TLSv1.3';
 const FALLBACK_MONGO_TLS_MIN_VERSION = 'TLSv1.2';
 const INSECURE_QUERY_OPTION_MESSAGES = Object.freeze({
@@ -175,8 +177,7 @@ function buildMongoTlsPolicy(env = process.env) {
     const tlsCertificateKeyFilePassword = trimEnvValue(env.MONGO_TLS_CERT_KEY_PASSWORD);
 
     const connectOptions = {
-        tls: true,
-        minVersion: configuredMinVersion
+        tls: true
     };
     if (tlsCAFile) {
         connectOptions.tlsCAFile = tlsCAFile;
@@ -201,6 +202,25 @@ function buildMongoTlsPolicy(env = process.env) {
         tlsCertificateKeyFileConfigured: Boolean(tlsCertificateKeyFile),
         tlsCertificateKeyPasswordConfigured: Boolean(tlsCertificateKeyFilePassword)
     };
+}
+
+function buildMongoDriverTlsOptions(policy, minVersion) {
+    const options = {
+        ...(policy?.connectOptions || {}),
+        tls: true
+    };
+
+    try {
+        options.secureContext = tls.createSecureContext({ minVersion });
+    } catch (error) {
+        const wrapped = new Error(
+            `MongoDB TLS protocol configuration failed while requiring ${minVersion}.`
+        );
+        wrapped.cause = error;
+        throw wrapped;
+    }
+
+    return options;
 }
 
 function collectErrorParts(error) {
@@ -313,6 +333,7 @@ module.exports = {
     DEFAULT_MONGO_TLS_MIN_VERSION,
     FALLBACK_MONGO_TLS_MIN_VERSION,
     buildMongoTlsPolicy,
+    buildMongoDriverTlsOptions,
     getSafeMongoErrorSummary,
     isLikelyTlsCompatibilityError
 };
