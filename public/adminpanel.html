@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panou Administrare - Prof. Dr. Balta Florian</title>
+    <title>Panou Administrare - INSTITUTUL CLINIC DE URGENTE OFTALMOLOGICE "PROF. DR. MIRCEA OLTEANU"</title>
     <meta name="description" content="Panou administrare programari. Acces pe baza de rol.">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="style.css">
@@ -43,7 +43,7 @@
     <header class="bg-brand-800 border-b border-brand-600/20 shadow-lg">
         <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-                <a href="/" class="text-2xl font-black text-brand-100 tracking-tight hover:text-brand-300 transition-colors">Prof. Dr. Balta Florian</a>
+                <a href="/" class="text-2xl font-black text-brand-100 tracking-tight hover:text-brand-300 transition-colors">INSTITUTUL CLINIC DE URGENTE OFTALMOLOGICE "PROF. DR. MIRCEA OLTEANU"</a>
                 <p class="text-sm text-brand-400/70 mt-1">Panou administrare programari</p>
             </div>
             <div id="authGuest" class="flex items-center gap-3">
@@ -104,11 +104,39 @@
                 <div id="adminActionButtons" class="flex flex-wrap gap-2">
                     <button id="manageUsersBtn" class="hidden admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Gestionare Utilizatori</button>
                     <button id="manageDoctorsBtn" class="hidden admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Gestionare Medici</button>
+                    <button id="editDayScheduleBtn" class="admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Editeaza Zi</button>
                     <button id="exportExcelBtn" class="admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Export Excel</button>
                     <button id="resetDatabaseBtn" class="admin-action-btn bg-red-900/30 text-red-300 border-red-800/40 hover:bg-red-900/50">Reseteaza</button>
                     <button id="cancelDayAppointmentsBtn" class="admin-action-btn bg-orange-900/30 text-orange-300 border-orange-800/40 hover:bg-orange-900/50">Anuleaza Ziua</button>
                     <button id="closeDashboard" class="admin-action-btn bg-brand-800 text-brand-400 border-brand-600/30 hover:bg-brand-700">Inapoi</button>
                 </div>
+            </div>
+
+            <div id="adminCalendarPanel" class="mb-6 bg-brand-800 rounded-2xl border border-brand-600/20 p-4">
+                <div class="flex items-center justify-between gap-3 mb-3">
+                    <button id="adminCalendarPrevMonth" class="nav-btn" aria-label="Luna anterioara">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                        </svg>
+                    </button>
+                    <h3 id="adminCalendarMonthLabel" class="text-sm font-bold text-brand-100"></h3>
+                    <button id="adminCalendarNextMonth" class="nav-btn" aria-label="Luna urmatoare">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="grid grid-cols-7 text-center mb-2">
+                    <span class="text-xs font-bold text-brand-400/50 uppercase py-1">Du</span>
+                    <span class="text-xs font-bold text-brand-400/50 uppercase py-1">Lu</span>
+                    <span class="text-xs font-bold text-brand-400/50 uppercase py-1">Ma</span>
+                    <span class="text-xs font-bold text-brand-400/50 uppercase py-1">Mi</span>
+                    <span class="text-xs font-bold text-brand-400/50 uppercase py-1">Jo</span>
+                    <span class="text-xs font-bold text-brand-400/50 uppercase py-1">Vi</span>
+                    <span class="text-xs font-bold text-brand-400/50 uppercase py-1">Sa</span>
+                </div>
+                <div id="adminCalendarGrid" class="grid grid-cols-7 gap-1"></div>
+                <p class="text-xs text-brand-400/70 mt-3">Zilele verzi au program activ in contextul curent. Click pe o zi pentru detalii.</p>
             </div>
 
             <div id="timelineContainer" class="bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 h-[calc(100vh-260px)] overflow-hidden flex flex-col">
@@ -216,24 +244,13 @@
                             </select>
                         </div>
                         <div>
-                            <label for="doctorWorkdayStart" class="form-label">Program inceput</label>
-                            <input id="doctorWorkdayStart" type="time" class="form-input" value="09:00" required>
-                        </div>
-                        <div>
-                            <label for="doctorWorkdayEnd" class="form-label">Program sfarsit</label>
-                            <input id="doctorWorkdayEnd" type="time" class="form-input" value="14:00" required>
-                        </div>
-                        <div>
-                            <label for="doctorDuration" class="form-label">Durata consultatie (min)</label>
-                            <input id="doctorDuration" type="number" min="5" max="120" class="form-input" value="20" required>
-                        </div>
-                        <div>
                             <label for="doctorMonthsToShow" class="form-label">Luni vizibile</label>
                             <input id="doctorMonthsToShow" type="number" min="1" max="12" class="form-input" value="3" required>
                         </div>
                         <div class="md:col-span-4">
-                            <label for="doctorWeekdays" class="form-label">Zile disponibile (0=Du ... 6=Sa, separate prin virgula)</label>
-                            <input id="doctorWeekdays" type="text" class="form-input" value="3">
+                            <label class="form-label">Program pe zile (selecteaza ziua si configureaza intervalul)</label>
+                            <div id="doctorDayConfigList" class="space-y-2"></div>
+                            <p class="text-xs text-brand-400/70 mt-2">Regula: intervalul trebuie sa fie divizibil perfect la durata consultatiei.</p>
                         </div>
                         <div class="md:col-span-4">
                             <button id="createDoctorSubmit" type="submit" class="admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Creeaza medic</button>

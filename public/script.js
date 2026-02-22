@@ -123,11 +123,33 @@
         return day >= minDate && day <= maxDate;
     }
 
+    function getDoctorDayConfigs(doctor) {
+        if (!doctor || !doctor.availabilityRules) return [];
+        const dayConfigs = Array.isArray(doctor.availabilityRules.dayConfigs)
+            ? doctor.availabilityRules.dayConfigs
+            : [];
+        if (dayConfigs.length > 0) {
+            return dayConfigs
+                .map((config) => ({
+                    weekday: Number(config.weekday),
+                    startTime: String(config.startTime || ''),
+                    endTime: String(config.endTime || ''),
+                    consultationDurationMinutes: Number(config.consultationDurationMinutes)
+                }))
+                .filter((config) => Number.isInteger(config.weekday) && config.weekday >= 0 && config.weekday <= 6);
+        }
+        const weekdays = Array.isArray(doctor.availabilityRules.weekdays) ? doctor.availabilityRules.weekdays : [];
+        return weekdays.map((weekday) => ({
+            weekday: Number(weekday),
+            startTime: String(doctor.bookingSettings?.workdayStart || ''),
+            endTime: String(doctor.bookingSettings?.workdayEnd || ''),
+            consultationDurationMinutes: Number(doctor.bookingSettings?.consultationDurationMinutes || 20)
+        }));
+    }
+
     function isDoctorWeekdayAvailable(dateObj) {
         if (!selectedDoctor) return false;
-        const weekdays = Array.isArray(selectedDoctor?.availabilityRules?.weekdays)
-            ? selectedDoctor.availabilityRules.weekdays
-            : [];
+        const weekdays = getDoctorDayConfigs(selectedDoctor).map((config) => config.weekday);
         return weekdays.includes(dateObj.getDay());
     }
 
@@ -281,11 +303,14 @@
         }
 
         const settings = selectedDoctor.bookingSettings || {};
-        const weekdays = Array.isArray(selectedDoctor?.availabilityRules?.weekdays)
-            ? selectedDoctor.availabilityRules.weekdays
-            : [];
+        const dayConfigs = getDoctorDayConfigs(selectedDoctor);
+        const summary = dayConfigs.length
+            ? dayConfigs
+                .map((config) => `${['Du', 'Lu', 'Ma', 'Mi', 'Jo', 'Vi', 'Sa'][config.weekday]} ${config.startTime}-${config.endTime}/${config.consultationDurationMinutes}m`)
+                .join('; ')
+            : 'nedefinit';
 
-        doctorSelectHint.textContent = `Program: ${settings.workdayStart || '-'}-${settings.workdayEnd || '-'}, durata ${settings.consultationDurationMinutes || '-'} min, luni vizibile ${settings.monthsToShow || '-'}, zile active: ${weekdays.join(', ')}`;
+        doctorSelectHint.textContent = `Program pe zile: ${summary}; luni vizibile ${settings.monthsToShow || '-'}; fus orar ${settings.timezone || 'Europe/Bucharest'}`;
     }
 
     function resetAfterDoctorChange() {

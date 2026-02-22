@@ -18,6 +18,7 @@ const pgAppointments = require('./db/appointments-postgres');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SALT_ROUNDS = 12;
+const CLINIC_DISPLAY_NAME = 'INSTITUTUL CLINIC DE URGENTE OFTALMOLOGICE "PROF. DR. MIRCEA OLTEANU"';
 const CLINIC_LOCATION = "Piata Alexandru Lahovari nr. 1, Sector 1, Bucuresti";
 const LOGIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_LOCKOUT_AFTER_ATTEMPTS = 5;
@@ -28,7 +29,7 @@ const ENABLE_DIAGNOSTIC_UPLOAD = process.env.ENABLE_DIAGNOSTIC_UPLOAD === 'true'
 const ENABLE_DEBUG_CHARSET_ENDPOINT = process.env.ENABLE_DEBUG_CHARSET_ENDPOINT === 'true';
 const TIME_HHMM_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const DEFAULT_DOCTOR_SLUG = 'prof-dr-balta-florian';
-const DEFAULT_DOCTOR_DISPLAY_NAME = 'Prof. Dr. Balta Florian';
+const DEFAULT_DOCTOR_DISPLAY_NAME = CLINIC_DISPLAY_NAME;
 const DEFAULT_DOCTOR_SPECIALTY = 'Oftalmologie';
 const DEFAULT_BOOKING_SETTINGS = Object.freeze({
     consultationDurationMinutes: 20,
@@ -487,6 +488,65 @@ function parseMonthsToShowField(value, fieldName) {
     return months;
 }
 
+function assertValidScheduleInterval(startTime, endTime, consultationDurationMinutes, contextFieldName, { requirePerfectDivision = false } = {}) {
+    const startMinutes = parseHHMMToMinutes(startTime);
+    const endMinutes = parseHHMMToMinutes(endTime);
+    if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes) || endMinutes <= startMinutes) {
+        throw new Error(`${contextFieldName} interval is invalid.`);
+    }
+    const intervalMinutes = endMinutes - startMinutes;
+    if (intervalMinutes < consultationDurationMinutes) {
+        throw new Error(`${contextFieldName} interval is shorter than consultation duration.`);
+    }
+    if (requirePerfectDivision && (intervalMinutes % consultationDurationMinutes !== 0)) {
+        throw new Error(`${contextFieldName} interval must be divisible by consultation duration.`);
+    }
+}
+
+function parseWeekdayField(value, fieldName) {
+    const weekday = Number(value);
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+        throw new Error(`${fieldName} is invalid.`);
+    }
+    return weekday;
+}
+
+function parseDayConfigsField(value, fieldName, { optional = false } = {}) {
+    if (value === undefined && optional) return undefined;
+    if (!Array.isArray(value) || value.length === 0) {
+        throw new Error(`${fieldName} must contain at least one day config.`);
+    }
+
+    const uniqueWeekdays = new Set();
+    const normalized = [];
+    for (let index = 0; index < value.length; index += 1) {
+        const itemField = `${fieldName}[${index}]`;
+        const payload = ensureObjectStrict(value[index], ['weekday', 'startTime', 'endTime', 'consultationDurationMinutes']);
+        const weekday = parseWeekdayField(payload.weekday, `${itemField}.weekday`);
+        if (uniqueWeekdays.has(weekday)) {
+            throw new Error(`${itemField}.weekday is duplicated.`);
+        }
+        uniqueWeekdays.add(weekday);
+
+        const startTime = parseTimeField(payload.startTime, `${itemField}.startTime`);
+        const endTime = parseTimeField(payload.endTime, `${itemField}.endTime`);
+        const consultationDurationMinutes = parseConsultationDurationField(
+            payload.consultationDurationMinutes,
+            `${itemField}.consultationDurationMinutes`
+        );
+        assertValidScheduleInterval(startTime, endTime, consultationDurationMinutes, itemField, { requirePerfectDivision: true });
+
+        normalized.push({
+            weekday,
+            startTime,
+            endTime,
+            consultationDurationMinutes
+        });
+    }
+
+    return normalized.sort((a, b) => a.weekday - b.weekday);
+}
+
 function parseDoctorBookingSettings(value, { optional = false } = {}) {
     if (value === undefined && optional) return undefined;
     const payload = ensureObjectStrict(value, ['consultationDurationMinutes', 'workdayStart', 'workdayEnd', 'monthsToShow', 'timezone']);
@@ -496,14 +556,13 @@ function parseDoctorBookingSettings(value, { optional = false } = {}) {
     const monthsToShow = parseMonthsToShowField(payload.monthsToShow, 'bookingSettings.monthsToShow');
     const timezone = parseStringField(payload.timezone, 'bookingSettings.timezone', { min: 3, max: 64 });
 
-    const startMinutes = parseHHMMToMinutes(workdayStart);
-    const endMinutes = parseHHMMToMinutes(workdayEnd);
-    if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes) || endMinutes <= startMinutes) {
-        throw new Error('bookingSettings workday interval is invalid.');
-    }
-    if ((endMinutes - startMinutes) < consultationDurationMinutes) {
-        throw new Error('bookingSettings interval is shorter than consultation duration.');
-    }
+    assertValidScheduleInterval(
+        workdayStart,
+        workdayEnd,
+        consultationDurationMinutes,
+        'bookingSettings',
+        { requirePerfectDivision: false }
+    );
 
     return {
         consultationDurationMinutes,
@@ -516,9 +575,16 @@ function parseDoctorBookingSettings(value, { optional = false } = {}) {
 
 function parseDoctorAvailabilityRules(value, { optional = false } = {}) {
     if (value === undefined && optional) return undefined;
-    const payload = ensureObjectStrict(value, ['weekdays']);
+    const payload = ensureObjectStrict(value, ['weekdays', 'dayConfigs']);
+    const dayConfigs = payload.dayConfigs !== undefined
+        ? parseDayConfigsField(payload.dayConfigs, 'availabilityRules.dayConfigs')
+        : undefined;
+    const weekdays = dayConfigs
+        ? dayConfigs.map((config) => config.weekday)
+        : parseWeekdaysField(payload.weekdays, 'availabilityRules.weekdays');
     return {
-        weekdays: parseWeekdaysField(payload.weekdays, 'availabilityRules.weekdays')
+        weekdays,
+        ...(dayConfigs ? { dayConfigs } : {})
     };
 }
 
@@ -667,6 +733,73 @@ const doctorBlockDateBodySchema = createSchema((input) => {
     const payload = ensureObjectStrict(input, ['date']);
     return {
         date: parseISODateField(payload.date, 'date')
+    };
+});
+
+const doctorDayScheduleBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['status', 'clearOverride', 'startTime', 'endTime', 'consultationDurationMinutes']);
+    const out = {};
+
+    if (payload.status !== undefined) {
+        const status = parseStringField(payload.status, 'status', { min: 5, max: 12 }).toLowerCase();
+        if (!['active', 'blocked'].includes(status)) {
+            throw new Error('status is invalid.');
+        }
+        out.status = status;
+    }
+    if (payload.clearOverride !== undefined) {
+        out.clearOverride = parseBooleanField(payload.clearOverride, 'clearOverride');
+    }
+    if (payload.startTime !== undefined) {
+        out.startTime = parseTimeField(payload.startTime, 'startTime');
+    }
+    if (payload.endTime !== undefined) {
+        out.endTime = parseTimeField(payload.endTime, 'endTime');
+    }
+    if (payload.consultationDurationMinutes !== undefined) {
+        out.consultationDurationMinutes = parseConsultationDurationField(
+            payload.consultationDurationMinutes,
+            'consultationDurationMinutes'
+        );
+    }
+
+    if (Object.keys(out).length === 0) {
+        throw new Error('No day schedule fields provided.');
+    }
+
+    const status = out.status || 'active';
+    if (status === 'blocked') {
+        return {
+            status: 'blocked',
+            clearOverride: out.clearOverride !== false
+        };
+    }
+
+    if (out.clearOverride === true) {
+        return {
+            status: 'active',
+            clearOverride: true
+        };
+    }
+
+    if (out.startTime === undefined || out.endTime === undefined || out.consultationDurationMinutes === undefined) {
+        throw new Error('startTime, endTime and consultationDurationMinutes are required unless clearOverride=true.');
+    }
+
+    assertValidScheduleInterval(
+        out.startTime,
+        out.endTime,
+        out.consultationDurationMinutes,
+        'daySchedule',
+        { requirePerfectDivision: true }
+    );
+
+    return {
+        status: 'active',
+        clearOverride: false,
+        startTime: out.startTime,
+        endTime: out.endTime,
+        consultationDurationMinutes: out.consultationDurationMinutes
     };
 });
 
@@ -971,9 +1104,17 @@ function isDateInDoctorRange(dateStr, monthsToShow) {
 
 function generateDoctorSlots(doctor) {
     const settings = doctor?.bookingSettings || DEFAULT_BOOKING_SETTINGS;
-    const start = parseHHMMToMinutes(settings.workdayStart);
-    const end = parseHHMMToMinutes(settings.workdayEnd);
-    const duration = Number(settings.consultationDurationMinutes);
+    return generateSlotsForWindow(
+        settings.workdayStart,
+        settings.workdayEnd,
+        settings.consultationDurationMinutes
+    );
+}
+
+function generateSlotsForWindow(workdayStart, workdayEnd, consultationDurationMinutes) {
+    const start = parseHHMMToMinutes(workdayStart);
+    const end = parseHHMMToMinutes(workdayEnd);
+    const duration = Number(consultationDurationMinutes);
     if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isInteger(duration) || duration <= 0 || end <= start) {
         return [];
     }
@@ -988,6 +1129,16 @@ function generateDoctorSlots(doctor) {
 }
 
 function sanitizeDoctorForPublic(doctor) {
+    const dayConfigs = Array.isArray(doctor.availabilityRules?.dayConfigs)
+        ? doctor.availabilityRules.dayConfigs
+            .map((config) => ({
+                weekday: Number(config?.weekday),
+                startTime: String(config?.startTime || ''),
+                endTime: String(config?.endTime || ''),
+                consultationDurationMinutes: Number(config?.consultationDurationMinutes)
+            }))
+            .filter((config) => Number.isInteger(config.weekday) && config.weekday >= 0 && config.weekday <= 6)
+        : [];
     return {
         _id: doctor._id,
         slug: doctor.slug,
@@ -1001,12 +1152,25 @@ function sanitizeDoctorForPublic(doctor) {
             timezone: doctor.bookingSettings?.timezone
         },
         availabilityRules: {
-            weekdays: Array.isArray(doctor.availabilityRules?.weekdays) ? doctor.availabilityRules.weekdays : []
+            weekdays: dayConfigs.length
+                ? dayConfigs.map((config) => config.weekday)
+                : (Array.isArray(doctor.availabilityRules?.weekdays) ? doctor.availabilityRules.weekdays : []),
+            dayConfigs
         }
     };
 }
 
 function sanitizeDoctorForAdmin(doctor, { includeAudit = false } = {}) {
+    const dayConfigs = Array.isArray(doctor.availabilityRules?.dayConfigs)
+        ? doctor.availabilityRules.dayConfigs
+            .map((config) => ({
+                weekday: Number(config?.weekday),
+                startTime: String(config?.startTime || ''),
+                endTime: String(config?.endTime || ''),
+                consultationDurationMinutes: Number(config?.consultationDurationMinutes)
+            }))
+            .filter((config) => Number.isInteger(config.weekday) && config.weekday >= 0 && config.weekday <= 6)
+        : [];
     const payload = {
         _id: doctor._id,
         slug: doctor.slug,
@@ -1021,7 +1185,10 @@ function sanitizeDoctorForAdmin(doctor, { includeAudit = false } = {}) {
             timezone: doctor.bookingSettings?.timezone
         },
         availabilityRules: {
-            weekdays: Array.isArray(doctor.availabilityRules?.weekdays) ? doctor.availabilityRules.weekdays : []
+            weekdays: dayConfigs.length
+                ? dayConfigs.map((config) => config.weekday)
+                : (Array.isArray(doctor.availabilityRules?.weekdays) ? doctor.availabilityRules.weekdays : []),
+            dayConfigs
         },
         blockedDates: Array.isArray(doctor.blockedDates) ? doctor.blockedDates : [],
         createdAt: doctor.createdAt,
@@ -1331,7 +1498,7 @@ async function executeEmailScript(base64Data) {
     const smtpSecure = process.env.EMAIL_SMTP_SECURE === 'true';
     const senderEmail = process.env.EMAIL_USER;
     const senderPass = process.env.EMAIL_PASS;
-    const senderName = process.env.EMAIL_FROM_NAME || 'Prof. Dr. Florian Balta';
+    const senderName = process.env.EMAIL_FROM_NAME || CLINIC_DISPLAY_NAME;
 
     if (!senderEmail || !senderPass) {
         throw new Error('EMAIL_USER and EMAIL_PASS are required.');
@@ -1385,7 +1552,7 @@ async function executeEmailScript(base64Data) {
     const dtStamp = nowUtcStamp();
     const dateRo = `${pad2(day)}.${pad2(month)}.${year}`;
     const timeRo = `${pad2(hour)}:${pad2(minute)}`;
-    const summary = `Programare Prof. Dr. Balta Florian - [${type}]`;
+    const summary = `Programare ${CLINIC_DISPLAY_NAME} - [${type}]`;
 
     const icsContent = [
         'BEGIN:VCALENDAR',
@@ -2530,6 +2697,263 @@ app.patch('/api/admin/doctors/:id', requireSchedulerOrSuperadmin, validateBody(d
             return res.status(409).json({ error: 'Slug-ul medicului exista deja.' });
         }
         return res.status(500).json({ error: 'Eroare la actualizarea medicului.' });
+    }
+});
+
+app.delete('/api/admin/doctors/:id', requireSuperadminOnly, requireStepUp('doctor_delete'), async (req, res) => {
+    setAuthNoStore(res);
+
+    const doctorId = String(req.params.id || '').trim();
+    if (!LEGACY_OBJECT_ID_REGEX.test(doctorId)) {
+        return res.status(400).json({ error: 'Medic invalid.' });
+    }
+
+    try {
+        const doctor = await pgDoctors.deactivateDoctorByLegacyId(
+            doctorId,
+            { actorUserPublicId: getUserPublicId(req.user) || req.user?._id || null }
+        );
+        if (!doctor) {
+            return res.status(404).json({ error: 'Medic negasit.' });
+        }
+
+        await writeAuditLog(req, {
+            action: 'doctor_delete_soft',
+            result: 'success',
+            targetType: 'doctor',
+            targetId: doctorId,
+            actorUser: req.user
+        });
+
+        return res.json({
+            success: true,
+            message: 'Medicul a fost dezactivat.',
+            doctor: sanitizeDoctorForAdmin(doctor, { includeAudit: true })
+        });
+    } catch (_) {
+        await writeAuditLog(req, {
+            action: 'doctor_delete_soft',
+            result: 'failure',
+            targetType: 'doctor',
+            targetId: doctorId,
+            actorUser: req.user
+        });
+        return res.status(500).json({ error: 'Eroare la stergerea medicului.' });
+    }
+});
+
+app.get('/api/admin/doctors/:id/day-schedule/:date', requireSchedulerOrSuperadmin, async (req, res) => {
+    setAuthNoStore(res);
+
+    const doctorId = String(req.params.id || '').trim();
+    if (!LEGACY_OBJECT_ID_REGEX.test(doctorId)) {
+        return res.status(400).json({ error: 'Medic invalid.' });
+    }
+    if (!isSuperadminUser(req.user) && !canUserAccessDoctor(req.user, doctorId)) {
+        return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
+    }
+
+    const rawDate = String(req.params.date || '').trim();
+    if (!isValidISODateString(rawDate)) {
+        return res.status(400).json({ error: 'Data invalida.' });
+    }
+
+    try {
+        const doctor = await resolveDoctorByIdentifier(doctorId, { requireActive: false });
+        if (!doctor) {
+            return res.status(404).json({ error: 'Medic negasit.' });
+        }
+
+        const daySchedule = await pgDoctors.getDoctorDayScheduleByLegacyId(doctorId, rawDate);
+        if (!daySchedule) {
+            return res.status(404).json({ error: 'Programul zilei nu a putut fi incarcat.' });
+        }
+
+        const bookedTimes = await pgAppointments.listBookedTimesByDoctorDate(doctorId, rawDate);
+        const slots = daySchedule.rule
+            ? generateSlotsForWindow(
+                daySchedule.rule.startTime,
+                daySchedule.rule.endTime,
+                daySchedule.rule.consultationDurationMinutes
+            )
+            : [];
+
+        return res.json({
+            success: true,
+            doctor: sanitizeDoctorForAdmin(doctor, { includeAudit: isSuperadminUser(req.user) }),
+            date: rawDate,
+            daySchedule: {
+                weekday: daySchedule.weekday,
+                blocked: !!daySchedule.blocked,
+                hasAvailability: !!daySchedule.hasAvailability,
+                rule: daySchedule.rule || null,
+                overrideRule: daySchedule.overrideRule || null,
+                defaultRule: daySchedule.defaultRule || null,
+                slots,
+                bookedTimes
+            }
+        });
+    } catch (_) {
+        return res.status(500).json({ error: 'Eroare la incarcarea programului zilei.' });
+    }
+});
+
+app.patch('/api/admin/doctors/:id/day-schedule/:date', requireSchedulerOrSuperadmin, validateBody(doctorDayScheduleBodySchema), async (req, res) => {
+    setAuthNoStore(res);
+
+    const doctorId = String(req.params.id || '').trim();
+    if (!LEGACY_OBJECT_ID_REGEX.test(doctorId)) {
+        return res.status(400).json({ error: 'Medic invalid.' });
+    }
+    if (!isSuperadminUser(req.user) && !canUserAccessDoctor(req.user, doctorId)) {
+        return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
+    }
+
+    const rawDate = String(req.params.date || '').trim();
+    if (!isValidISODateString(rawDate)) {
+        return res.status(400).json({ error: 'Data invalida.' });
+    }
+
+    try {
+        const doctor = await resolveDoctorByIdentifier(doctorId, { requireActive: false });
+        if (!doctor) {
+            return res.status(404).json({ error: 'Medic negasit.' });
+        }
+
+        if (!isDateInDoctorRange(rawDate, doctor.bookingSettings?.monthsToShow)) {
+            return res.status(400).json({ error: 'Data este in afara intervalului configurat pentru acest medic.' });
+        }
+
+        const payload = req.validatedBody;
+        const actorUserPublicId = getUserPublicId(req.user) || req.user?._id || null;
+
+        if (payload.status === 'blocked') {
+            if (payload.clearOverride) {
+                await pgDoctors.removeDoctorDayOverrideByLegacyId(
+                    doctorId,
+                    rawDate,
+                    { actorUserPublicId }
+                );
+            }
+            await pgDoctors.blockDoctorDateByLegacyId(
+                doctorId,
+                rawDate,
+                { actorUserPublicId }
+            );
+        } else {
+            if (payload.clearOverride) {
+                const currentDaySchedule = await pgDoctors.getDoctorDayScheduleByLegacyId(doctorId, rawDate);
+                const defaultRule = currentDaySchedule?.defaultRule;
+                if (!defaultRule) {
+                    return res.status(400).json({ error: 'Nu exista program standard pentru aceasta zi.' });
+                }
+                const bookedTimes = await pgAppointments.listBookedTimesByDoctorDate(doctorId, rawDate);
+                const allowedSlots = generateSlotsForWindow(
+                    defaultRule.startTime,
+                    defaultRule.endTime,
+                    defaultRule.consultationDurationMinutes
+                );
+                const invalidBookedTimes = bookedTimes.filter((time) => !allowedSlots.includes(time));
+                if (invalidBookedTimes.length > 0) {
+                    return res.status(409).json({
+                        error: 'Revenirea la programul standard invalideaza programari existente.',
+                        conflictTimes: invalidBookedTimes
+                    });
+                }
+
+                await pgDoctors.removeDoctorDayOverrideByLegacyId(
+                    doctorId,
+                    rawDate,
+                    { actorUserPublicId }
+                );
+            } else {
+                const bookedTimes = await pgAppointments.listBookedTimesByDoctorDate(doctorId, rawDate);
+                const allowedSlots = generateSlotsForWindow(
+                    payload.startTime,
+                    payload.endTime,
+                    payload.consultationDurationMinutes
+                );
+                const invalidBookedTimes = bookedTimes.filter((time) => !allowedSlots.includes(time));
+                if (invalidBookedTimes.length > 0) {
+                    return res.status(409).json({
+                        error: 'Modificarea invalideaza programari existente. Ajustati intervalul sau durata.',
+                        conflictTimes: invalidBookedTimes
+                    });
+                }
+
+                await pgDoctors.upsertDoctorDayOverrideByLegacyId(
+                    doctorId,
+                    rawDate,
+                    {
+                        startTime: payload.startTime,
+                        endTime: payload.endTime,
+                        consultationDurationMinutes: payload.consultationDurationMinutes,
+                        actorUserPublicId
+                    }
+                );
+            }
+
+            await pgDoctors.unblockDoctorDateByLegacyId(
+                doctorId,
+                rawDate,
+                { actorUserPublicId }
+            );
+        }
+
+        const updatedDaySchedule = await pgDoctors.getDoctorDayScheduleByLegacyId(doctorId, rawDate);
+        const refreshedDoctor = await resolveDoctorByIdentifier(doctorId, { requireActive: false });
+        const bookedTimes = await pgAppointments.listBookedTimesByDoctorDate(doctorId, rawDate);
+        const slots = updatedDaySchedule?.rule
+            ? generateSlotsForWindow(
+                updatedDaySchedule.rule.startTime,
+                updatedDaySchedule.rule.endTime,
+                updatedDaySchedule.rule.consultationDurationMinutes
+            )
+            : [];
+
+        await writeAuditLog(req, {
+            action: 'doctor_day_schedule_update',
+            result: 'success',
+            targetType: 'doctor',
+            targetId: doctorId,
+            actorUser: req.user,
+            metadata: {
+                date: rawDate,
+                status: payload.status,
+                clearOverride: !!payload.clearOverride
+            }
+        });
+
+        return res.json({
+            success: true,
+            doctor: refreshedDoctor ? sanitizeDoctorForAdmin(refreshedDoctor, { includeAudit: isSuperadminUser(req.user) }) : null,
+            date: rawDate,
+            daySchedule: updatedDaySchedule
+                ? {
+                    weekday: updatedDaySchedule.weekday,
+                    blocked: !!updatedDaySchedule.blocked,
+                    hasAvailability: !!updatedDaySchedule.hasAvailability,
+                    rule: updatedDaySchedule.rule || null,
+                    overrideRule: updatedDaySchedule.overrideRule || null,
+                    defaultRule: updatedDaySchedule.defaultRule || null,
+                    slots,
+                    bookedTimes
+                }
+                : null
+        });
+    } catch (error) {
+        await writeAuditLog(req, {
+            action: 'doctor_day_schedule_update',
+            result: 'failure',
+            targetType: 'doctor',
+            targetId: doctorId,
+            actorUser: req.user,
+            metadata: { date: rawDate }
+        });
+        if (String(error?.message || '').includes('Invalid day override window')) {
+            return res.status(400).json({ error: 'Intervalul zilei este invalid.' });
+        }
+        return res.status(500).json({ error: 'Eroare la actualizarea programului zilei.' });
     }
 });
 

@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
         appointmentDoctorFilter: byId('appointmentDoctorFilter'),
         manageUsersBtn: byId('manageUsersBtn'),
         manageDoctorsBtn: byId('manageDoctorsBtn'),
+        editDayScheduleBtn: byId('editDayScheduleBtn'),
         userManagerContainer: byId('userManagerContainer'),
         doctorManagerContainer: byId('doctorManagerContainer'),
         timelineContainer: byId('timelineContainer'),
@@ -45,11 +46,12 @@ document.addEventListener('DOMContentLoaded', () => {
         doctorDisplayName: byId('doctorDisplayName'),
         doctorSpecialty: byId('doctorSpecialty'),
         doctorIsActive: byId('doctorIsActive'),
-        doctorWorkdayStart: byId('doctorWorkdayStart'),
-        doctorWorkdayEnd: byId('doctorWorkdayEnd'),
-        doctorDuration: byId('doctorDuration'),
         doctorMonthsToShow: byId('doctorMonthsToShow'),
-        doctorWeekdays: byId('doctorWeekdays'),
+        doctorDayConfigList: byId('doctorDayConfigList'),
+        adminCalendarGrid: byId('adminCalendarGrid'),
+        adminCalendarMonthLabel: byId('adminCalendarMonthLabel'),
+        adminCalendarPrevMonth: byId('adminCalendarPrevMonth'),
+        adminCalendarNextMonth: byId('adminCalendarNextMonth'),
         toast: byId('toast'),
         toastTitle: byId('toastTitle'),
         toastMessage: byId('toastMessage')
@@ -62,12 +64,16 @@ document.addEventListener('DOMContentLoaded', () => {
     let initialized = false;
     let adminActiveDate = new Date();
     adminActiveDate.setHours(0, 0, 0, 0);
+    let adminCalendarMonth = new Date(adminActiveDate.getFullYear(), adminActiveDate.getMonth(), 1);
 
     let doctorsCache = [];
     let appointmentsCache = [];
     let usersCache = [];
     let searchTerm = '';
     let eventsBound = false;
+
+    const WEEKDAY_LABELS = ['Duminica', 'Luni', 'Marti', 'Miercuri', 'Joi', 'Vineri', 'Sambata'];
+    const WEEKDAY_SHORT = ['Du', 'Lu', 'Ma', 'Mi', 'Jo', 'Vi', 'Sa'];
 
     const isStaffRole = (role) => role === 'viewer' || role === 'scheduler' || role === 'superadmin';
     const isSuperadmin = () => (AUTH.getUser()?.role || '') === 'superadmin';
@@ -181,6 +187,290 @@ document.addEventListener('DOMContentLoaded', () => {
         el.currentAdminDateDisplay.textContent = (isToday ? 'Azi, ' : '') + dateStr;
     }
 
+    function parseTimeToMinutes(value) {
+        const [hours, minutes] = String(value || '').split(':').map(Number);
+        if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return NaN;
+        return (hours * 60) + minutes;
+    }
+
+    function isValidScheduleWindow(startTime, endTime, duration, { requireDivisible = true } = {}) {
+        const startMinutes = parseTimeToMinutes(startTime);
+        const endMinutes = parseTimeToMinutes(endTime);
+        const slotDuration = Number(duration);
+        if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes)) return false;
+        if (!Number.isInteger(slotDuration) || slotDuration < 5 || slotDuration > 120) return false;
+        const intervalMinutes = endMinutes - startMinutes;
+        if (intervalMinutes <= 0 || intervalMinutes < slotDuration) return false;
+        if (requireDivisible && (intervalMinutes % slotDuration !== 0)) return false;
+        return true;
+    }
+
+    function startOfDay(date) {
+        const out = new Date(date);
+        out.setHours(0, 0, 0, 0);
+        return out;
+    }
+
+    function getDoctorDayConfigs(doctor) {
+        if (!doctor || !doctor.availabilityRules) return [];
+        const fromConfigs = Array.isArray(doctor.availabilityRules.dayConfigs)
+            ? doctor.availabilityRules.dayConfigs
+            : [];
+        if (fromConfigs.length > 0) {
+            return fromConfigs
+                .map((config) => ({
+                    weekday: Number(config.weekday),
+                    startTime: String(config.startTime || ''),
+                    endTime: String(config.endTime || ''),
+                    consultationDurationMinutes: Number(config.consultationDurationMinutes)
+                }))
+                .filter((config) => Number.isInteger(config.weekday) && config.weekday >= 0 && config.weekday <= 6);
+        }
+        const weekdays = Array.isArray(doctor.availabilityRules.weekdays) ? doctor.availabilityRules.weekdays : [];
+        return weekdays.map((weekday) => ({
+            weekday: Number(weekday),
+            startTime: String(doctor.bookingSettings?.workdayStart || '09:00'),
+            endTime: String(doctor.bookingSettings?.workdayEnd || '14:00'),
+            consultationDurationMinutes: Number(doctor.bookingSettings?.consultationDurationMinutes || 20)
+        }));
+    }
+
+    function getCalendarContextDoctors() {
+        const selectedDoctorId = String(el.appointmentDoctorFilter?.value || '');
+        if (selectedDoctorId) {
+            const doctor = doctorsCache.find((entry) => String(entry._id) === selectedDoctorId);
+            return doctor ? [doctor] : [];
+        }
+        return doctorsCache.filter((doctor) => !!doctor.isActive);
+    }
+
+    function getDoctorRangeEndDate(doctor) {
+        const monthsToShow = Number(doctor?.bookingSettings?.monthsToShow || 1);
+        const today = startOfDay(new Date());
+        const out = new Date(today);
+        out.setMonth(out.getMonth() + monthsToShow);
+        return startOfDay(out);
+    }
+
+    function isDateInDoctorRange(date, doctor) {
+        const targetDate = startOfDay(date);
+        const today = startOfDay(new Date());
+        const maxDate = getDoctorRangeEndDate(doctor);
+        return targetDate >= today && targetDate <= maxDate;
+    }
+
+    function doctorHasProgramOnDate(doctor, date) {
+        const dateISO = toISODate(date);
+        if (!doctor || !isDateInDoctorRange(date, doctor)) return false;
+        const dayConfigs = getDoctorDayConfigs(doctor);
+        const weekday = date.getDay();
+        const hasWeekdayConfig = dayConfigs.some((config) => config.weekday === weekday);
+        if (!hasWeekdayConfig) return false;
+        const blockedDates = Array.isArray(doctor.blockedDates) ? doctor.blockedDates : [];
+        return !blockedDates.includes(dateISO);
+    }
+
+    function getCalendarBounds() {
+        const today = startOfDay(new Date());
+        const minMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+        const contextDoctors = getCalendarContextDoctors();
+        if (!contextDoctors.length) {
+            return { minMonth, maxMonth: minMonth };
+        }
+        let maxDate = startOfDay(today);
+        contextDoctors.forEach((doctor) => {
+            const doctorMax = getDoctorRangeEndDate(doctor);
+            if (doctorMax > maxDate) {
+                maxDate = doctorMax;
+            }
+        });
+        const maxMonth = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
+        return { minMonth, maxMonth };
+    }
+
+    function clampAdminDateWithinBounds() {
+        const { minMonth, maxMonth } = getCalendarBounds();
+        const minDate = startOfDay(new Date(minMonth));
+        const maxDate = startOfDay(new Date(maxMonth.getFullYear(), maxMonth.getMonth() + 1, 0));
+        if (adminActiveDate < minDate) {
+            adminActiveDate = minDate;
+        }
+        if (adminActiveDate > maxDate) {
+            adminActiveDate = maxDate;
+        }
+        adminCalendarMonth = new Date(adminActiveDate.getFullYear(), adminActiveDate.getMonth(), 1);
+    }
+
+    function renderAdminCalendar() {
+        if (!el.adminCalendarGrid || !el.adminCalendarMonthLabel) {
+            return;
+        }
+
+        clearNode(el.adminCalendarGrid);
+        const { minMonth, maxMonth } = getCalendarBounds();
+        if (adminCalendarMonth < minMonth) {
+            adminCalendarMonth = new Date(minMonth);
+        }
+        if (adminCalendarMonth > maxMonth) {
+            adminCalendarMonth = new Date(maxMonth);
+        }
+
+        const currentMonthLabel = new Intl.DateTimeFormat('ro-RO', { month: 'long', year: 'numeric' }).format(adminCalendarMonth);
+        el.adminCalendarMonthLabel.textContent = currentMonthLabel.charAt(0).toUpperCase() + currentMonthLabel.slice(1);
+
+        const year = adminCalendarMonth.getFullYear();
+        const month = adminCalendarMonth.getMonth();
+        const firstDayIndex = new Date(year, month, 1).getDay();
+        const lastDay = new Date(year, month + 1, 0).getDate();
+        const today = startOfDay(new Date());
+        const contextDoctors = getCalendarContextDoctors();
+
+        for (let i = 0; i < firstDayIndex; i += 1) {
+            const empty = document.createElement('div');
+            empty.className = 'admin-calendar-day disabled';
+            empty.style.visibility = 'hidden';
+            el.adminCalendarGrid.appendChild(empty);
+        }
+
+        for (let day = 1; day <= lastDay; day += 1) {
+            const dateObj = startOfDay(new Date(year, month, day));
+            const dateISO = toISODate(dateObj);
+            const inBounds = dateObj >= today && dateObj <= startOfDay(new Date(maxMonth.getFullYear(), maxMonth.getMonth() + 1, 0));
+            const hasProgram = contextDoctors.some((doctor) => doctorHasProgramOnDate(doctor, dateObj));
+
+            const dayBtn = document.createElement('button');
+            dayBtn.type = 'button';
+            dayBtn.className = 'admin-calendar-day';
+            dayBtn.textContent = String(day);
+            dayBtn.title = `${dateISO}${hasProgram ? ' - program activ' : ''}`;
+
+            if (!inBounds) {
+                dayBtn.classList.add('disabled');
+                dayBtn.disabled = true;
+            } else {
+                if (hasProgram) {
+                    dayBtn.classList.add('has-program');
+                }
+                if (adminActiveDate.getTime() === dateObj.getTime()) {
+                    dayBtn.classList.add('selected');
+                }
+                if (today.getTime() === dateObj.getTime()) {
+                    dayBtn.classList.add('today');
+                }
+
+                dayBtn.addEventListener('click', () => {
+                    adminActiveDate = dateObj;
+                    updateAdminDateDisplay();
+                    renderTimelineForCurrentFilters();
+                    renderAdminCalendar();
+                });
+            }
+
+            el.adminCalendarGrid.appendChild(dayBtn);
+        }
+
+        if (el.adminCalendarPrevMonth) {
+            el.adminCalendarPrevMonth.disabled = adminCalendarMonth <= minMonth;
+        }
+        if (el.adminCalendarNextMonth) {
+            el.adminCalendarNextMonth.disabled = adminCalendarMonth >= maxMonth;
+        }
+    }
+
+    function renderDoctorDayConfigList(initialConfigs = null) {
+        if (!el.doctorDayConfigList) return;
+
+        clearNode(el.doctorDayConfigList);
+        const configMap = new Map();
+        (Array.isArray(initialConfigs) ? initialConfigs : []).forEach((config) => {
+            configMap.set(Number(config.weekday), {
+                startTime: String(config.startTime || '09:00'),
+                endTime: String(config.endTime || '14:00'),
+                consultationDurationMinutes: Number(config.consultationDurationMinutes || 20)
+            });
+        });
+
+        WEEKDAY_LABELS.forEach((label, weekday) => {
+            const config = configMap.get(weekday) || {
+                startTime: '09:00',
+                endTime: '14:00',
+                consultationDurationMinutes: 20
+            };
+
+            const row = document.createElement('div');
+            row.className = 'admin-day-config-row';
+            row.dataset.weekday = String(weekday);
+
+            const checkboxWrap = document.createElement('label');
+            checkboxWrap.className = 'flex items-center gap-2 text-sm text-brand-300 font-semibold';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'day-enabled w-4 h-4 rounded border-brand-600 accent-brand-400';
+            checkbox.checked = configMap.size ? configMap.has(weekday) : weekday === 3;
+            checkboxWrap.appendChild(checkbox);
+            checkboxWrap.appendChild(document.createTextNode(`${WEEKDAY_SHORT[weekday]} - ${label}`));
+
+            const startInput = document.createElement('input');
+            startInput.type = 'time';
+            startInput.className = 'form-input day-start';
+            startInput.value = config.startTime;
+
+            const endInput = document.createElement('input');
+            endInput.type = 'time';
+            endInput.className = 'form-input day-end';
+            endInput.value = config.endTime;
+
+            const durationInput = document.createElement('input');
+            durationInput.type = 'number';
+            durationInput.min = '5';
+            durationInput.max = '120';
+            durationInput.className = 'form-input day-duration';
+            durationInput.value = String(config.consultationDurationMinutes);
+
+            row.appendChild(checkboxWrap);
+            row.appendChild(startInput);
+            row.appendChild(endInput);
+            row.appendChild(durationInput);
+            el.doctorDayConfigList.appendChild(row);
+        });
+    }
+
+    function collectDoctorDayConfigsFromForm() {
+        if (!el.doctorDayConfigList) return [];
+        const rows = Array.from(el.doctorDayConfigList.querySelectorAll('.admin-day-config-row'));
+        const dayConfigs = [];
+
+        for (const row of rows) {
+            const weekday = Number(row.dataset.weekday);
+            const enabled = row.querySelector('.day-enabled')?.checked;
+            if (!enabled) continue;
+
+            const startTime = String(row.querySelector('.day-start')?.value || '').trim();
+            const endTime = String(row.querySelector('.day-end')?.value || '').trim();
+            const consultationDurationMinutes = Number(row.querySelector('.day-duration')?.value);
+
+            if (!startTime || !endTime || !Number.isInteger(consultationDurationMinutes)) {
+                throw new Error(`Completeaza toate campurile pentru ${WEEKDAY_LABELS[weekday]}.`);
+            }
+            if (!isValidScheduleWindow(startTime, endTime, consultationDurationMinutes, { requireDivisible: true })) {
+                throw new Error(`Configuratia pentru ${WEEKDAY_LABELS[weekday]} este invalida sau intervalul nu se imparte perfect la durata.`);
+            }
+
+            dayConfigs.push({
+                weekday,
+                startTime,
+                endTime,
+                consultationDurationMinutes
+            });
+        }
+
+        if (!dayConfigs.length) {
+            throw new Error('Selecteaza cel putin o zi de consultatie.');
+        }
+
+        return dayConfigs.sort((a, b) => a.weekday - b.weekday);
+    }
+
     function setupAdminSearch() {
         if (!el.adminActionButtons || byId('adminSearchInput')) {
             return;
@@ -242,7 +532,7 @@ document.addEventListener('DOMContentLoaded', () => {
             doctorsCache.forEach((doctor) => {
                 const option = document.createElement('option');
                 option.value = String(doctor._id);
-                option.textContent = `${doctor.displayName} (${doctor.slug})`;
+                option.textContent = `${doctor.displayName} (${doctor.slug})${doctor.isActive ? '' : ' [inactiv]'}`;
                 el.appointmentDoctorFilter.appendChild(option);
             });
 
@@ -257,7 +547,7 @@ document.addEventListener('DOMContentLoaded', () => {
             doctorsCache.forEach((doctor) => {
                 const option = document.createElement('option');
                 option.value = String(doctor._id);
-                option.textContent = `${doctor.displayName} (${doctor.slug})`;
+                option.textContent = `${doctor.displayName} (${doctor.slug})${doctor.isActive ? '' : ' [inactiv]'}`;
                 option.selected = selectedValues.has(option.value);
                 el.newUserManagedDoctors.appendChild(option);
             });
@@ -271,14 +561,24 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!res.ok) {
                 doctorsCache = [];
                 fillDoctorSelectors();
+                clampAdminDateWithinBounds();
+                updateAdminDateDisplay();
+                renderAdminCalendar();
                 return;
             }
             doctorsCache = Array.isArray(data) ? data : [];
             fillDoctorSelectors();
+            clampAdminDateWithinBounds();
+            updateAdminDateDisplay();
+            renderAdminCalendar();
             renderDoctorsTable();
+            renderTimelineForCurrentFilters();
         } catch (_) {
             doctorsCache = [];
             fillDoctorSelectors();
+            clampAdminDateWithinBounds();
+            updateAdminDateDisplay();
+            renderAdminCalendar();
         }
     }
     function getFilteredAppointments() {
@@ -677,33 +977,46 @@ document.addEventListener('DOMContentLoaded', () => {
             el.createUserSubmit.disabled = false;
         }
     }
-    function weekdaysToArray(input) {
-        return String(input || '')
+    function parseWeekdaysInput(input) {
+        const raw = String(input || '')
             .split(',')
             .map((item) => Number(item.trim()))
             .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
+        return Array.from(new Set(raw)).sort((a, b) => a - b);
     }
 
     async function createDoctor() {
-        const weekdays = weekdaysToArray(el.doctorWeekdays.value);
-        if (!weekdays.length) {
-            showToast('Eroare', 'Introdu cel putin o zi valida (0-6).', 'error');
+        let dayConfigs;
+        try {
+            dayConfigs = collectDoctorDayConfigsFromForm();
+        } catch (error) {
+            showToast('Eroare', String(error?.message || 'Configuratie invalida pentru zile.'), 'error');
             return;
         }
 
+        const monthsToShow = Number(el.doctorMonthsToShow.value);
+        if (!Number.isInteger(monthsToShow) || monthsToShow < 1 || monthsToShow > 12) {
+            showToast('Eroare', 'Luni vizibile trebuie sa fie intre 1 si 12.', 'error');
+            return;
+        }
+
+        const firstConfig = dayConfigs[0];
         const payload = {
             slug: el.doctorSlug.value.trim().toLowerCase(),
             displayName: el.doctorDisplayName.value.trim(),
             specialty: el.doctorSpecialty.value.trim() || 'Oftalmologie',
             isActive: el.doctorIsActive.value === 'true',
             bookingSettings: {
-                consultationDurationMinutes: Number(el.doctorDuration.value),
-                workdayStart: el.doctorWorkdayStart.value,
-                workdayEnd: el.doctorWorkdayEnd.value,
-                monthsToShow: Number(el.doctorMonthsToShow.value),
+                consultationDurationMinutes: firstConfig.consultationDurationMinutes,
+                workdayStart: firstConfig.startTime,
+                workdayEnd: firstConfig.endTime,
+                monthsToShow,
                 timezone: 'Europe/Bucharest'
             },
-            availabilityRules: { weekdays },
+            availabilityRules: {
+                weekdays: dayConfigs.map((config) => config.weekday),
+                dayConfigs
+            },
             blockedDates: []
         };
 
@@ -725,6 +1038,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             showToast('Succes', 'Medic creat.');
             el.createDoctorForm.reset();
+            renderDoctorDayConfigList();
             await fetchDoctors();
         } catch (_) {
             showToast('Eroare', 'Eroare de conexiune.', 'error');
@@ -754,44 +1068,113 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function promptWeeklyDayConfigsForDoctor(doctor) {
+        const currentDayConfigs = getDoctorDayConfigs(doctor);
+        const defaultsMap = new Map(currentDayConfigs.map((config) => [config.weekday, config]));
+        const weekdaysPrompt = window.prompt(
+            'Zile disponibile (0-6, separate prin virgula):',
+            String(currentDayConfigs.map((config) => config.weekday).join(','))
+        );
+        if (weekdaysPrompt === null) return null;
+
+        const weekdays = parseWeekdaysInput(weekdaysPrompt);
+        if (!weekdays.length) {
+            throw new Error('Lista de zile este invalida.');
+        }
+
+        const fallbackConfig = currentDayConfigs[0] || {
+            startTime: doctor.bookingSettings?.workdayStart || '09:00',
+            endTime: doctor.bookingSettings?.workdayEnd || '14:00',
+            consultationDurationMinutes: Number(doctor.bookingSettings?.consultationDurationMinutes || 20)
+        };
+
+        const dayConfigs = [];
+        for (const weekday of weekdays) {
+            const base = defaultsMap.get(weekday) || fallbackConfig;
+            const startTime = window.prompt(`Ora inceput pentru ${WEEKDAY_LABELS[weekday]} (HH:mm):`, base.startTime || '09:00');
+            if (startTime === null) return null;
+            const endTime = window.prompt(`Ora sfarsit pentru ${WEEKDAY_LABELS[weekday]} (HH:mm):`, base.endTime || '14:00');
+            if (endTime === null) return null;
+            const durationRaw = window.prompt(
+                `Durata consultatie pentru ${WEEKDAY_LABELS[weekday]} (minute):`,
+                String(base.consultationDurationMinutes || 20)
+            );
+            if (durationRaw === null) return null;
+
+            const consultationDurationMinutes = Number(durationRaw);
+            if (!isValidScheduleWindow(startTime.trim(), endTime.trim(), consultationDurationMinutes, { requireDivisible: true })) {
+                throw new Error(`Configuratie invalida pentru ${WEEKDAY_LABELS[weekday]}.`);
+            }
+            dayConfigs.push({
+                weekday,
+                startTime: startTime.trim(),
+                endTime: endTime.trim(),
+                consultationDurationMinutes
+            });
+        }
+        return dayConfigs.sort((a, b) => a.weekday - b.weekday);
+    }
+
     async function openEditDoctorDialog(doctor) {
         const displayName = window.prompt('Nume afisat:', doctor.displayName || '');
         if (displayName === null) return;
         const specialty = window.prompt('Specialitate:', doctor.specialty || 'Oftalmologie');
         if (specialty === null) return;
-
-        const start = window.prompt('Ora inceput (HH:mm):', doctor.bookingSettings?.workdayStart || '09:00');
-        if (start === null) return;
-        const end = window.prompt('Ora sfarsit (HH:mm):', doctor.bookingSettings?.workdayEnd || '14:00');
-        if (end === null) return;
-        const duration = window.prompt('Durata consultatie (minute):', String(doctor.bookingSettings?.consultationDurationMinutes || 20));
-        if (duration === null) return;
-        const monthsToShow = window.prompt('Luni vizibile:', String(doctor.bookingSettings?.monthsToShow || 3));
-        if (monthsToShow === null) return;
-        const weekdays = window.prompt('Zile disponibile (0-6, separate prin virgula):', String((doctor.availabilityRules?.weekdays || []).join(',')));
-        if (weekdays === null) return;
+        const monthsToShowRaw = window.prompt('Luni vizibile:', String(doctor.bookingSettings?.monthsToShow || 3));
+        if (monthsToShowRaw === null) return;
         const isActiveRaw = window.prompt('Activ? (true/false):', String(!!doctor.isActive));
         if (isActiveRaw === null) return;
 
-        const weekdaysList = weekdaysToArray(weekdays);
-        if (!weekdaysList.length) {
-            showToast('Eroare', 'Lista de zile este invalida.', 'error');
+        const monthsToShow = Number(monthsToShowRaw);
+        if (!Number.isInteger(monthsToShow) || monthsToShow < 1 || monthsToShow > 12) {
+            showToast('Eroare', 'Luni vizibile trebuie sa fie intre 1 si 12.', 'error');
             return;
         }
 
-        await patchDoctor(doctor._id, {
+        const shouldUpdateSchedule = window.confirm('Doriti sa actualizati si programul saptamanal al medicului?');
+        let dayConfigs = null;
+        if (shouldUpdateSchedule) {
+            try {
+                dayConfigs = promptWeeklyDayConfigsForDoctor(doctor);
+            } catch (error) {
+                showToast('Eroare', String(error?.message || 'Configuratie invalida pentru program.'), 'error');
+                return;
+            }
+            if (dayConfigs === null) {
+                return;
+            }
+        }
+
+        const payload = {
             displayName: displayName.trim(),
             specialty: specialty.trim(),
-            isActive: isActiveRaw.trim().toLowerCase() === 'true',
-            bookingSettings: {
-                consultationDurationMinutes: Number(duration),
-                workdayStart: start.trim(),
-                workdayEnd: end.trim(),
-                monthsToShow: Number(monthsToShow),
+            isActive: isActiveRaw.trim().toLowerCase() === 'true'
+        };
+
+        if (shouldUpdateSchedule && dayConfigs) {
+            const firstConfig = dayConfigs[0];
+            payload.bookingSettings = {
+                consultationDurationMinutes: firstConfig.consultationDurationMinutes,
+                workdayStart: firstConfig.startTime,
+                workdayEnd: firstConfig.endTime,
+                monthsToShow,
                 timezone: doctor.bookingSettings?.timezone || 'Europe/Bucharest'
-            },
-            availabilityRules: { weekdays: weekdaysList }
-        }, 'Medic actualizat.');
+            };
+            payload.availabilityRules = {
+                weekdays: dayConfigs.map((config) => config.weekday),
+                dayConfigs
+            };
+        } else {
+            payload.bookingSettings = {
+                consultationDurationMinutes: Number(doctor.bookingSettings?.consultationDurationMinutes || 20),
+                workdayStart: doctor.bookingSettings?.workdayStart || '09:00',
+                workdayEnd: doctor.bookingSettings?.workdayEnd || '14:00',
+                monthsToShow,
+                timezone: doctor.bookingSettings?.timezone || 'Europe/Bucharest'
+            };
+        }
+
+        await patchDoctor(doctor._id, payload, 'Medic actualizat.');
     }
 
     async function blockDoctorDate(doctor) {
@@ -835,6 +1218,133 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function deleteDoctor(doctor) {
+        if (!isSuperadmin()) {
+            showToast('Acces interzis', 'Doar superadmin poate sterge medici.', 'error');
+            return;
+        }
+
+        const confirmed = window.confirm(`Esti sigur ca vrei sa stergi medicul ${doctor.displayName}? Medicul va fi dezactivat.`);
+        if (!confirmed) return;
+
+        const stepUpToken = await requestStepUp('doctor_delete', 'stergerea medicului');
+        if (!stepUpToken) return;
+
+        try {
+            const res = await AUTH.apiFetch(`/api/admin/doctors/${doctor._id}`, {
+                method: 'DELETE',
+                headers: { 'X-Step-Up-Token': stepUpToken }
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showToast('Eroare', data.error || 'Nu s-a putut sterge medicul.', 'error');
+                return;
+            }
+            showToast('Succes', data.message || 'Medic dezactivat.');
+            await fetchDoctors();
+            await fetchAdminAppointments();
+        } catch (_) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        }
+    }
+
+    async function editSelectedDaySchedule() {
+        if (!isSchedulerOrSuperadmin()) {
+            showToast('Acces interzis', 'Nu aveti drept de editare pentru programul zilnic.', 'error');
+            return;
+        }
+
+        const doctorId = String(el.appointmentDoctorFilter?.value || '');
+        if (!doctorId) {
+            showToast('Atentie', 'Selecteaza un medic pentru a edita programul zilei.', 'error');
+            return;
+        }
+
+        const selectedDate = getAdminActiveDateISO();
+
+        let current;
+        try {
+            const infoRes = await AUTH.apiFetch(`/api/admin/doctors/${doctorId}/day-schedule/${selectedDate}`);
+            const info = await infoRes.json().catch(() => ({}));
+            if (!infoRes.ok) {
+                showToast('Eroare', info.error || 'Nu s-au putut incarca detaliile zilei.', 'error');
+                return;
+            }
+            current = info;
+        } catch (_) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+            return;
+        }
+
+        const currentRule = current?.daySchedule?.overrideRule || current?.daySchedule?.defaultRule;
+        const currentStatus = current?.daySchedule?.blocked ? 'blocked' : 'active';
+        const statusInput = window.prompt('Status zi (active/blocked):', currentStatus);
+        if (statusInput === null) return;
+
+        const status = String(statusInput || '').trim().toLowerCase();
+        if (!['active', 'blocked'].includes(status)) {
+            showToast('Eroare', 'Status invalid. Folositi active sau blocked.', 'error');
+            return;
+        }
+
+        let payload;
+        if (status === 'blocked') {
+            payload = { status: 'blocked', clearOverride: true };
+        } else {
+            const clearOverride = window.confirm('OK = revino la programul standard pentru ziua selectata. Cancel = seteaza override personalizat.');
+            if (clearOverride) {
+                payload = { status: 'active', clearOverride: true };
+            } else {
+                const defaultStart = currentRule?.startTime || '09:00';
+                const defaultEnd = currentRule?.endTime || '14:00';
+                const defaultDuration = Number(currentRule?.consultationDurationMinutes || 20);
+
+                const startTime = window.prompt('Ora inceput (HH:mm):', defaultStart);
+                if (startTime === null) return;
+                const endTime = window.prompt('Ora sfarsit (HH:mm):', defaultEnd);
+                if (endTime === null) return;
+                const durationRaw = window.prompt('Durata consultatie (minute):', String(defaultDuration));
+                if (durationRaw === null) return;
+
+                const consultationDurationMinutes = Number(durationRaw);
+                if (!isValidScheduleWindow(startTime.trim(), endTime.trim(), consultationDurationMinutes, { requireDivisible: true })) {
+                    showToast('Eroare', 'Interval invalid sau intervalul nu se imparte perfect la durata.', 'error');
+                    return;
+                }
+
+                payload = {
+                    status: 'active',
+                    clearOverride: false,
+                    startTime: startTime.trim(),
+                    endTime: endTime.trim(),
+                    consultationDurationMinutes
+                };
+            }
+        }
+
+        try {
+            const res = await AUTH.apiFetch(`/api/admin/doctors/${doctorId}/day-schedule/${selectedDate}`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                if (res.status === 409 && Array.isArray(data.conflictTimes) && data.conflictTimes.length) {
+                    showToast('Conflict', `Programari afectate: ${data.conflictTimes.join(', ')}`, 'error');
+                } else {
+                    showToast('Eroare', data.error || 'Nu s-a putut actualiza ziua.', 'error');
+                }
+                return;
+            }
+
+            showToast('Succes', 'Programul zilei a fost actualizat.');
+            await fetchDoctors();
+            await fetchAdminAppointments();
+        } catch (_) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        }
+    }
+
     function renderDoctorsTable() {
         if (!el.doctorTableBody) return;
 
@@ -864,17 +1374,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const scheduleCell = document.createElement('td');
             scheduleCell.className = 'py-4 text-brand-300';
-            scheduleCell.textContent = `${doctor.bookingSettings?.workdayStart || '-'}-${doctor.bookingSettings?.workdayEnd || '-'} / ${doctor.bookingSettings?.consultationDurationMinutes || '-'} min`;
+            const dayConfigs = getDoctorDayConfigs(doctor);
+            if (dayConfigs.length) {
+                scheduleCell.textContent = dayConfigs
+                    .map((config) => `${WEEKDAY_SHORT[config.weekday]} ${config.startTime}-${config.endTime} / ${config.consultationDurationMinutes}m`)
+                    .join('; ');
+            } else {
+                scheduleCell.textContent = '-';
+            }
 
             const weekdaysCell = document.createElement('td');
             weekdaysCell.className = 'py-4 text-brand-300';
-            weekdaysCell.textContent = Array.isArray(doctor.availabilityRules?.weekdays)
-                ? doctor.availabilityRules.weekdays.join(', ')
+            weekdaysCell.textContent = dayConfigs.length
+                ? dayConfigs.map((config) => WEEKDAY_SHORT[config.weekday]).join(', ')
                 : '-';
 
             const activeCell = document.createElement('td');
             activeCell.className = 'py-4 text-brand-300';
             activeCell.textContent = doctor.isActive ? 'Da' : 'Nu';
+            if (!doctor.isActive) {
+                row.classList.add('opacity-70');
+            }
 
             const actionsCell = document.createElement('td');
             actionsCell.className = 'py-4 text-right';
@@ -904,6 +1424,14 @@ document.addEventListener('DOMContentLoaded', () => {
             toggleBtn.textContent = doctor.isActive ? 'Dezactiveaza' : 'Activeaza';
             toggleBtn.onclick = () => patchDoctor(doctor._id, { isActive: !doctor.isActive }, 'Status medic actualizat.');
             actionWrap.appendChild(toggleBtn);
+
+            if (isSuperadmin()) {
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'admin-action-btn bg-red-900/30 text-red-300 border-red-800/40 hover:bg-red-900/50';
+                deleteBtn.textContent = 'Sterge medic';
+                deleteBtn.onclick = () => deleteDoctor(doctor);
+                actionWrap.appendChild(deleteBtn);
+            }
 
             actionsCell.appendChild(actionWrap);
 
@@ -942,18 +1470,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
         el.prevAdminDate.onclick = () => {
             adminActiveDate.setDate(adminActiveDate.getDate() - 1);
+            clampAdminDateWithinBounds();
             updateAdminDateDisplay();
             renderTimelineForCurrentFilters();
+            renderAdminCalendar();
         };
 
         el.nextAdminDate.onclick = () => {
             adminActiveDate.setDate(adminActiveDate.getDate() + 1);
+            clampAdminDateWithinBounds();
             updateAdminDateDisplay();
             renderTimelineForCurrentFilters();
+            renderAdminCalendar();
         };
 
         el.appointmentDoctorFilter?.addEventListener('change', () => {
+            clampAdminDateWithinBounds();
+            updateAdminDateDisplay();
             renderTimelineForCurrentFilters();
+            renderAdminCalendar();
+        });
+
+        el.adminCalendarPrevMonth?.addEventListener('click', () => {
+            adminCalendarMonth = new Date(adminCalendarMonth.getFullYear(), adminCalendarMonth.getMonth() - 1, 1);
+            renderAdminCalendar();
+        });
+
+        el.adminCalendarNextMonth?.addEventListener('click', () => {
+            adminCalendarMonth = new Date(adminCalendarMonth.getFullYear(), adminCalendarMonth.getMonth() + 1, 1);
+            renderAdminCalendar();
         });
 
         el.manageUsersBtn.addEventListener('click', async () => {
@@ -990,6 +1535,10 @@ document.addEventListener('DOMContentLoaded', () => {
         el.createDoctorForm?.addEventListener('submit', async (event) => {
             event.preventDefault();
             createDoctor();
+        });
+
+        el.editDayScheduleBtn?.addEventListener('click', async () => {
+            await editSelectedDaySchedule();
         });
 
         el.resetDatabaseBtn.addEventListener('click', async () => {
@@ -1102,14 +1651,17 @@ document.addEventListener('DOMContentLoaded', () => {
         initialized = true;
         setupAdminSearch();
         updateAdminDateDisplay();
+        renderDoctorDayConfigList();
 
         await fetchDoctors();
         await fetchAdminAppointments();
         fetchAdminStats();
 
         const superadmin = isSuperadmin();
+        const schedulerOrSuperadmin = isSchedulerOrSuperadmin();
         el.manageUsersBtn.classList.toggle('hidden', !superadmin);
         el.manageDoctorsBtn?.classList.toggle('hidden', !superadmin);
+        el.editDayScheduleBtn?.classList.toggle('hidden', !schedulerOrSuperadmin);
         el.resetDatabaseBtn.classList.toggle('hidden', !superadmin);
         el.cancelDayAppointmentsBtn.classList.toggle('hidden', !superadmin);
         el.exportExcelBtn.classList.toggle('hidden', !superadmin);
@@ -1117,6 +1669,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el.createDoctorForm) {
             el.createDoctorForm.parentElement.classList.toggle('hidden', !superadmin);
         }
+
+        clampAdminDateWithinBounds();
+        updateAdminDateDisplay();
+        renderAdminCalendar();
 
         registerEvents();
     }

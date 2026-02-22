@@ -250,13 +250,24 @@ async function queryDoctorAvailabilityRuleForDate(doctorPgId, dateISO, client = 
             slot_minutes,
             is_active,
             effective_from,
-            effective_to
+            effective_to,
+            CASE
+                WHEN effective_from = $3::date AND effective_to = $3::date THEN 'override'
+                ELSE 'default'
+            END AS rule_source
          FROM doctor_availability_rules
          WHERE doctor_id = $1
-           AND weekday = $2
-           AND is_active = TRUE
-           AND (effective_from IS NULL OR effective_from <= $3::date)
-           AND (effective_to IS NULL OR effective_to >= $3::date)
+            AND weekday = $2
+            AND is_active = TRUE
+            AND (effective_from IS NULL OR effective_from <= $3::date)
+            AND (effective_to IS NULL OR effective_to >= $3::date)
+         ORDER BY
+            CASE
+                WHEN effective_from = $3::date AND effective_to = $3::date THEN 0
+                WHEN effective_from IS NULL AND effective_to IS NULL THEN 2
+                ELSE 1
+            END ASC,
+            effective_from DESC NULLS LAST
          LIMIT 1`,
         [doctorPgId, weekday, dateISO],
         client

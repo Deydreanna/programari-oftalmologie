@@ -56,7 +56,7 @@ def send_confirmation_email(patient_name, patient_email, appointment_type, start
         print(f"Error: Invalid date format {start_time_str}. Expected YYYY-MM-DD HH:MM")
         sys.exit(1)
 
-    summary = f"Programare Prof. Dr. Balta Florian - [{appointment_type}]"
+    summary = f"Programare INSTITUTUL CLINIC DE URGENTE OFTALMOLOGICE \"PROF. DR. MIRCEA OLTEANU\" - [{appointment_type}]"
     
     # Create the email container
     msg = MIMEMultipart('mixed')
@@ -80,7 +80,7 @@ def send_confirmation_email(patient_name, patient_email, appointment_type, start
         </div>
         <p>Detaliile se află în invitația de calendar atașată. Vă rugăm să confirmați prezența folosind butoanele din e-mail.</p>
         <p>Vă mulțumim!</p>
-        <p><em>Echipa Prof. Dr. Florian Balta</em></p>
+        <p><em>Echipa INSTITUTUL CLINIC DE URGENTE OFTALMOLOGICE "PROF. DR. MIRCEA OLTEANU"</em></p>
     </body>
     </html>
     """

@@ -96,6 +96,33 @@ function normalizeWeekdays(value = []) {
     return normalized.sort((a, b) => a - b);
 }
 
+function parseHHMMToMinutes(value) {
+    const normalized = normalizeTimeHHMM(value);
+    if (!normalized) return NaN;
+    const [hours, minutes] = normalized.split(':').map(Number);
+    return (hours * 60) + minutes;
+}
+
+function isValidTimeWindow(startTime, endTime, consultationDurationMinutes, { requireDivisible = false } = {}) {
+    const start = parseHHMMToMinutes(startTime);
+    const end = parseHHMMToMinutes(endTime);
+    const duration = Number(consultationDurationMinutes);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isInteger(duration)) {
+        return false;
+    }
+    if (duration < 5 || duration > 120) {
+        return false;
+    }
+    const intervalMinutes = end - start;
+    if (intervalMinutes <= 0 || intervalMinutes < duration) {
+        return false;
+    }
+    if (requireDivisible && (intervalMinutes % duration !== 0)) {
+        return false;
+    }
+    return true;
+}
+
 function normalizeBookingSettings(settings = {}) {
     const consultationDurationMinutes = Number(settings.consultationDurationMinutes);
     const duration = Number.isInteger(consultationDurationMinutes)
@@ -123,6 +150,110 @@ function normalizeBookingSettings(settings = {}) {
     };
 }
 
+function buildDayConfigsFromWeekdays(weekdays, bookingSettings) {
+    const normalizedWeekdays = normalizeWeekdays(weekdays);
+    const normalizedBooking = normalizeBookingSettings(bookingSettings);
+    return normalizedWeekdays.map((weekday) => ({
+        weekday,
+        startTime: normalizedBooking.workdayStart,
+        endTime: normalizedBooking.workdayEnd,
+        consultationDurationMinutes: normalizedBooking.consultationDurationMinutes
+    }));
+}
+
+function normalizeDayConfigs(value = [], bookingSettings = DEFAULT_BOOKING_SETTINGS, fallbackWeekdays = []) {
+    const normalizedBooking = normalizeBookingSettings(bookingSettings);
+    const out = [];
+    const seenWeekdays = new Set();
+
+    if (Array.isArray(value)) {
+        for (const entry of value) {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+                continue;
+            }
+
+            const weekday = Number(entry.weekday);
+            if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+                continue;
+            }
+            if (seenWeekdays.has(weekday)) {
+                continue;
+            }
+
+            const startTime = normalizeTimeHHMM(entry.startTime ?? entry.start_time, normalizedBooking.workdayStart);
+            const endTime = normalizeTimeHHMM(entry.endTime ?? entry.end_time, normalizedBooking.workdayEnd);
+            const durationRaw = Number(entry.consultationDurationMinutes ?? entry.slotMinutes ?? entry.slot_minutes);
+            const consultationDurationMinutes = Number.isInteger(durationRaw)
+                && durationRaw >= 5
+                && durationRaw <= 120
+                ? durationRaw
+                : normalizedBooking.consultationDurationMinutes;
+
+            if (!isValidTimeWindow(startTime, endTime, consultationDurationMinutes)) {
+                continue;
+            }
+
+            seenWeekdays.add(weekday);
+            out.push({
+                weekday,
+                startTime,
+                endTime,
+                consultationDurationMinutes
+            });
+        }
+    }
+
+    if (out.length > 0) {
+        return out.sort((a, b) => a.weekday - b.weekday);
+    }
+
+    const fallback = normalizeWeekdays(fallbackWeekdays);
+    if (!fallback.length) {
+        return [];
+    }
+    return buildDayConfigsFromWeekdays(fallback, normalizedBooking);
+}
+
+function normalizeAvailabilityRules(availabilityRules = {}, bookingSettings = DEFAULT_BOOKING_SETTINGS, { defaultIfEmpty = false } = {}) {
+    const normalizedBooking = normalizeBookingSettings(bookingSettings);
+    const payload = (availabilityRules && typeof availabilityRules === 'object' && !Array.isArray(availabilityRules))
+        ? availabilityRules
+        : {};
+
+    let dayConfigs = normalizeDayConfigs(payload.dayConfigs, normalizedBooking, []);
+    if (!dayConfigs.length) {
+        const requestedWeekdays = normalizeWeekdays(payload.weekdays || []);
+        if (requestedWeekdays.length) {
+            dayConfigs = buildDayConfigsFromWeekdays(requestedWeekdays, normalizedBooking);
+        }
+    }
+
+    if (!dayConfigs.length && defaultIfEmpty) {
+        dayConfigs = buildDayConfigsFromWeekdays(DEFAULT_AVAILABILITY_WEEKDAYS, normalizedBooking);
+    }
+
+    return {
+        weekdays: dayConfigs.map((config) => config.weekday),
+        dayConfigs
+    };
+}
+
+function inferLegacyBookingSettingsFromDayConfigs(bookingSettings, dayConfigs = []) {
+    const normalizedBooking = normalizeBookingSettings(bookingSettings);
+    const normalizedDayConfigs = normalizeDayConfigs(dayConfigs, normalizedBooking, []);
+    if (!normalizedDayConfigs.length) {
+        return normalizedBooking;
+    }
+    const firstConfig = normalizedDayConfigs[0];
+    return {
+        consultationDurationMinutes: firstConfig.consultationDurationMinutes,
+        workdayStart: firstConfig.startTime,
+        workdayEnd: firstConfig.endTime,
+        monthsToShow: normalizedBooking.monthsToShow,
+        timezone: normalizedBooking.timezone
+    };
+}
+
 function pgTimeToHHMM(value, fallback = '00:00') {
     const normalized = String(value || '').trim();
     const match = normalized.match(TIME_HHMM_REGEX);
@@ -132,8 +263,16 @@ function pgTimeToHHMM(value, fallback = '00:00') {
     return `${match[1]}:${match[2]}`;
 }
 
-function mapDoctorRow(row, { weekdays = [], blockedDates = [] } = {}) {
+function mapDoctorRow(row, { dayConfigs = [], blockedDates = [] } = {}) {
     const publicId = normalizeLegacyDoctorId(row.legacy_mongo_id) || String(row.id || '');
+    const bookingSettings = {
+        consultationDurationMinutes: Number(row.consultation_duration_minutes),
+        workdayStart: pgTimeToHHMM(row.workday_start, DEFAULT_BOOKING_SETTINGS.workdayStart),
+        workdayEnd: pgTimeToHHMM(row.workday_end, DEFAULT_BOOKING_SETTINGS.workdayEnd),
+        monthsToShow: Number(row.months_to_show),
+        timezone: row.timezone || DEFAULT_BOOKING_SETTINGS.timezone
+    };
+    const normalizedDayConfigs = normalizeDayConfigs(dayConfigs, bookingSettings, []);
     return {
         _id: publicId,
         pgId: String(row.id),
@@ -142,15 +281,10 @@ function mapDoctorRow(row, { weekdays = [], blockedDates = [] } = {}) {
         displayName: row.display_name,
         specialty: row.specialty || DEFAULT_SPECIALTY,
         isActive: !!row.is_active,
-        bookingSettings: {
-            consultationDurationMinutes: Number(row.consultation_duration_minutes),
-            workdayStart: pgTimeToHHMM(row.workday_start, DEFAULT_BOOKING_SETTINGS.workdayStart),
-            workdayEnd: pgTimeToHHMM(row.workday_end, DEFAULT_BOOKING_SETTINGS.workdayEnd),
-            monthsToShow: Number(row.months_to_show),
-            timezone: row.timezone || DEFAULT_BOOKING_SETTINGS.timezone
-        },
+        bookingSettings,
         availabilityRules: {
-            weekdays: normalizeWeekdays(weekdays)
+            weekdays: normalizedDayConfigs.map((config) => config.weekday),
+            dayConfigs: normalizedDayConfigs
         },
         blockedDates: normalizeBlockedDates(blockedDates),
         createdByUserId: row.created_by_public_id || null,
@@ -238,7 +372,7 @@ async function queryDoctorRowByLegacyId(legacyId, client = null) {
     );
 }
 
-async function queryDoctorWeekdaysByPgIds(doctorPgIds = [], client = null) {
+async function queryDoctorDayConfigsByPgIds(doctorPgIds = [], client = null) {
     const ids = Array.from(new Set((doctorPgIds || []).map((id) => String(id || '').trim()).filter(Boolean)));
     const out = new Map();
     if (!ids.length) {
@@ -247,12 +381,12 @@ async function queryDoctorWeekdaysByPgIds(doctorPgIds = [], client = null) {
 
     const executor = client || getPostgresPool();
     const result = await executor.query(
-        `SELECT doctor_id, weekday
+        `SELECT doctor_id, weekday, start_time, end_time, slot_minutes
          FROM doctor_availability_rules
          WHERE doctor_id = ANY($1::uuid[])
            AND is_active = TRUE
-           AND (effective_from IS NULL OR effective_from <= CURRENT_DATE)
-           AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
+           AND effective_from IS NULL
+           AND effective_to IS NULL
          ORDER BY weekday ASC`,
         [ids]
     );
@@ -262,7 +396,12 @@ async function queryDoctorWeekdaysByPgIds(doctorPgIds = [], client = null) {
         if (!out.has(key)) {
             out.set(key, []);
         }
-        out.get(key).push(Number(row.weekday));
+        out.get(key).push({
+            weekday: Number(row.weekday),
+            startTime: pgTimeToHHMM(row.start_time),
+            endTime: pgTimeToHHMM(row.end_time),
+            consultationDurationMinutes: Number(row.slot_minutes)
+        });
     }
     return out;
 }
@@ -300,12 +439,12 @@ async function mapDoctorRows(rows = [], client = null) {
         return [];
     }
     const pgIds = rowList.map((row) => String(row.id));
-    const [weekdayMap, blockedDatesMap] = await Promise.all([
-        queryDoctorWeekdaysByPgIds(pgIds, client),
+    const [dayConfigMap, blockedDatesMap] = await Promise.all([
+        queryDoctorDayConfigsByPgIds(pgIds, client),
         queryDoctorBlockedDatesByPgIds(pgIds, client)
     ]);
     return rowList.map((row) => mapDoctorRow(row, {
-        weekdays: weekdayMap.get(String(row.id)) || [],
+        dayConfigs: dayConfigMap.get(String(row.id)) || [],
         blockedDates: blockedDatesMap.get(String(row.id)) || []
     }));
 }
@@ -338,18 +477,20 @@ async function queryUserPgIdByPublicId(publicId, client = null) {
     return row ? String(row.id) : null;
 }
 
-async function replaceDoctorAvailabilityRulesByPgId(doctorPgId, weekdays, bookingSettings, client = null) {
+async function replaceDoctorAvailabilityRulesByPgId(doctorPgId, availabilityRules, bookingSettings, client = null) {
     const executor = client || getPostgresPool();
-    const normalizedWeekdays = normalizeWeekdays(weekdays);
     const normalizedSettings = normalizeBookingSettings(bookingSettings);
+    const normalizedAvailability = normalizeAvailabilityRules(availabilityRules, normalizedSettings, { defaultIfEmpty: true });
 
     await executor.query(
         `DELETE FROM doctor_availability_rules
-         WHERE doctor_id = $1`,
+         WHERE doctor_id = $1
+           AND effective_from IS NULL
+           AND effective_to IS NULL`,
         [doctorPgId]
     );
 
-    for (const weekday of normalizedWeekdays) {
+    for (const dayConfig of normalizedAvailability.dayConfigs) {
         await executor.query(
             `INSERT INTO doctor_availability_rules (
                 doctor_id,
@@ -364,13 +505,15 @@ async function replaceDoctorAvailabilityRulesByPgId(doctorPgId, weekdays, bookin
             VALUES ($1, $2, $3::time, $4::time, $5, TRUE, NULL, NULL)`,
             [
                 doctorPgId,
-                weekday,
-                normalizedSettings.workdayStart,
-                normalizedSettings.workdayEnd,
-                normalizedSettings.consultationDurationMinutes
+                dayConfig.weekday,
+                dayConfig.startTime,
+                dayConfig.endTime,
+                dayConfig.consultationDurationMinutes
             ]
         );
     }
+
+    return normalizedAvailability;
 }
 
 async function replaceDoctorBlockedDatesByPgId(doctorPgId, blockedDates, actorUserPgId = null, client = null) {
@@ -399,6 +542,256 @@ async function replaceDoctorBlockedDatesByPgId(doctorPgId, blockedDates, actorUs
             [doctorPgId, blockedDate, actorUserPgId]
         );
     }
+}
+
+function getUtcDateFromISO(dateISO) {
+    const [year, month, day] = String(dateISO).split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day));
+}
+
+function getWeekdayFromISO(dateISO) {
+    return getUtcDateFromISO(dateISO).getUTCDay();
+}
+
+function mapAvailabilityRuleRow(row, source = 'default') {
+    if (!row) return null;
+    return {
+        weekday: Number(row.weekday),
+        startTime: pgTimeToHHMM(row.start_time),
+        endTime: pgTimeToHHMM(row.end_time),
+        consultationDurationMinutes: Number(row.slot_minutes),
+        source
+    };
+}
+
+async function queryDoctorDateOverrideByPgId(doctorPgId, dateISO, client = null) {
+    return queryOneRow(
+        `SELECT weekday, start_time, end_time, slot_minutes
+         FROM doctor_availability_rules
+         WHERE doctor_id = $1
+           AND is_active = TRUE
+           AND effective_from = $2::date
+           AND effective_to = $2::date
+         LIMIT 1`,
+        [doctorPgId, dateISO],
+        client
+    );
+}
+
+async function queryDoctorBaseRuleForDateByPgId(doctorPgId, dateISO, client = null) {
+    const weekday = getWeekdayFromISO(dateISO);
+    return queryOneRow(
+        `SELECT weekday, start_time, end_time, slot_minutes
+         FROM doctor_availability_rules
+         WHERE doctor_id = $1
+           AND weekday = $2
+           AND is_active = TRUE
+           AND effective_from IS NULL
+           AND effective_to IS NULL
+         LIMIT 1`,
+        [doctorPgId, weekday],
+        client
+    );
+}
+
+async function isDoctorDateBlockedByPgId(doctorPgId, dateISO, client = null) {
+    const row = await queryOneRow(
+        `SELECT 1
+         FROM doctor_blocked_days
+         WHERE doctor_id = $1
+           AND blocked_date = $2::date
+           AND is_active = TRUE
+         LIMIT 1`,
+        [doctorPgId, dateISO],
+        client
+    );
+    return !!row;
+}
+
+async function queryDoctorDayScheduleByPgId(doctorPgId, dateISO, client = null) {
+    const normalizedDate = normalizeIsoDate(dateISO);
+    if (!normalizedDate) {
+        return null;
+    }
+
+    const [overrideRow, baseRow, blocked] = await Promise.all([
+        queryDoctorDateOverrideByPgId(doctorPgId, normalizedDate, client),
+        queryDoctorBaseRuleForDateByPgId(doctorPgId, normalizedDate, client),
+        isDoctorDateBlockedByPgId(doctorPgId, normalizedDate, client)
+    ]);
+
+    const chosenRule = overrideRow
+        ? mapAvailabilityRuleRow(overrideRow, 'override')
+        : mapAvailabilityRuleRow(baseRow, 'default');
+
+    return {
+        date: normalizedDate,
+        weekday: getWeekdayFromISO(normalizedDate),
+        blocked,
+        hasAvailability: !!chosenRule,
+        rule: chosenRule,
+        overrideRule: mapAvailabilityRuleRow(overrideRow, 'override'),
+        defaultRule: mapAvailabilityRuleRow(baseRow, 'default')
+    };
+}
+
+async function getDoctorDayScheduleByLegacyId(legacyDoctorId, dateISO, client = null) {
+    const normalizedLegacyDoctorId = normalizeLegacyDoctorId(legacyDoctorId);
+    const normalizedDate = normalizeIsoDate(dateISO);
+    if (!normalizedLegacyDoctorId || !normalizedDate) {
+        return null;
+    }
+
+    const task = async (txClient) => {
+        const doctorRow = await queryDoctorRowByLegacyId(normalizedLegacyDoctorId, txClient);
+        if (!doctorRow) {
+            return null;
+        }
+
+        const [doctor] = await mapDoctorRows([doctorRow], txClient);
+        const daySchedule = await queryDoctorDayScheduleByPgId(doctorRow.id, normalizedDate, txClient);
+        if (!daySchedule) {
+            return null;
+        }
+
+        return {
+            doctor,
+            ...daySchedule
+        };
+    };
+
+    if (client) {
+        return task(client);
+    }
+    return withTransaction(task);
+}
+
+async function upsertDoctorDayOverrideByLegacyId(
+    legacyDoctorId,
+    dateISO,
+    {
+        startTime,
+        endTime,
+        consultationDurationMinutes,
+        actorUserPublicId = null
+    } = {},
+    client = null
+) {
+    const normalizedLegacyDoctorId = normalizeLegacyDoctorId(legacyDoctorId);
+    const normalizedDate = normalizeIsoDate(dateISO);
+    const normalizedStartTime = normalizeTimeHHMM(startTime);
+    const normalizedEndTime = normalizeTimeHHMM(endTime);
+    const duration = Number(consultationDurationMinutes);
+
+    if (!normalizedLegacyDoctorId || !normalizedDate) {
+        return null;
+    }
+    if (!isValidTimeWindow(normalizedStartTime, normalizedEndTime, duration, { requireDivisible: true })) {
+        throw new Error('Invalid day override window.');
+    }
+
+    const task = async (txClient) => {
+        const doctorRow = await queryDoctorRowByLegacyId(normalizedLegacyDoctorId, txClient);
+        if (!doctorRow) {
+            return null;
+        }
+
+        const weekday = getWeekdayFromISO(normalizedDate);
+        const actorUserPgId = await queryUserPgIdByPublicId(actorUserPublicId, txClient);
+
+        await txClient.query(
+            `DELETE FROM doctor_availability_rules
+             WHERE doctor_id = $1
+               AND effective_from = $2::date
+               AND effective_to = $2::date`,
+            [doctorRow.id, normalizedDate]
+        );
+
+        await txClient.query(
+            `INSERT INTO doctor_availability_rules (
+                doctor_id,
+                weekday,
+                start_time,
+                end_time,
+                slot_minutes,
+                is_active,
+                effective_from,
+                effective_to
+            )
+            VALUES (
+                $1,
+                $2,
+                $3::time,
+                $4::time,
+                $5,
+                TRUE,
+                $6::date,
+                $6::date
+            )`,
+            [
+                doctorRow.id,
+                weekday,
+                normalizedStartTime,
+                normalizedEndTime,
+                duration,
+                normalizedDate
+            ]
+        );
+
+        await txClient.query(
+            `UPDATE doctors
+             SET updated_by_user_id = $1::uuid,
+                 updated_at = now()
+             WHERE id = $2`,
+            [actorUserPgId, doctorRow.id]
+        );
+
+        return getDoctorDayScheduleByLegacyId(normalizedLegacyDoctorId, normalizedDate, txClient);
+    };
+
+    if (client) {
+        return task(client);
+    }
+    return withTransaction(task);
+}
+
+async function removeDoctorDayOverrideByLegacyId(legacyDoctorId, dateISO, { actorUserPublicId = null } = {}, client = null) {
+    const normalizedLegacyDoctorId = normalizeLegacyDoctorId(legacyDoctorId);
+    const normalizedDate = normalizeIsoDate(dateISO);
+    if (!normalizedLegacyDoctorId || !normalizedDate) {
+        return null;
+    }
+
+    const task = async (txClient) => {
+        const doctorRow = await queryDoctorRowByLegacyId(normalizedLegacyDoctorId, txClient);
+        if (!doctorRow) {
+            return null;
+        }
+
+        const actorUserPgId = await queryUserPgIdByPublicId(actorUserPublicId, txClient);
+        await txClient.query(
+            `DELETE FROM doctor_availability_rules
+             WHERE doctor_id = $1
+               AND effective_from = $2::date
+               AND effective_to = $2::date`,
+            [doctorRow.id, normalizedDate]
+        );
+
+        await txClient.query(
+            `UPDATE doctors
+             SET updated_by_user_id = $1::uuid,
+                 updated_at = now()
+             WHERE id = $2`,
+            [actorUserPgId, doctorRow.id]
+        );
+
+        return getDoctorDayScheduleByLegacyId(normalizedLegacyDoctorId, normalizedDate, txClient);
+    };
+
+    if (client) {
+        return task(client);
+    }
+    return withTransaction(task);
 }
 
 async function listDoctors({ legacyIds = null, isActive = null } = {}, client = null) {
@@ -538,7 +931,11 @@ async function createDoctor({
     }
     const normalizedLegacyPublicId = normalizeLegacyDoctorId(legacyPublicId) || generateLegacyPublicId();
     const normalizedBookingSettings = normalizeBookingSettings(bookingSettings);
-    const normalizedWeekdays = normalizeWeekdays(availabilityRules?.weekdays || []);
+    const normalizedAvailability = normalizeAvailabilityRules(availabilityRules, normalizedBookingSettings, { defaultIfEmpty: true });
+    const bookingSettingsForLegacyColumns = inferLegacyBookingSettingsFromDayConfigs(
+        normalizedBookingSettings,
+        normalizedAvailability.dayConfigs
+    );
     const normalizedBlockedDates = normalizeBlockedDates(blockedDates);
 
     const task = async (txClient) => {
@@ -580,11 +977,11 @@ async function createDoctor({
                 normalizedDisplayName,
                 String(specialty || DEFAULT_SPECIALTY).trim() || DEFAULT_SPECIALTY,
                 !!isActive,
-                normalizedBookingSettings.consultationDurationMinutes,
-                normalizedBookingSettings.workdayStart,
-                normalizedBookingSettings.workdayEnd,
-                normalizedBookingSettings.monthsToShow,
-                normalizedBookingSettings.timezone,
+                bookingSettingsForLegacyColumns.consultationDurationMinutes,
+                bookingSettingsForLegacyColumns.workdayStart,
+                bookingSettingsForLegacyColumns.workdayEnd,
+                bookingSettingsForLegacyColumns.monthsToShow,
+                bookingSettingsForLegacyColumns.timezone,
                 createdByUserPgId,
                 updatedByUserPgId || createdByUserPgId
             ]
@@ -593,8 +990,8 @@ async function createDoctor({
         const doctorPgId = String(insertResult.rows[0].id);
         await replaceDoctorAvailabilityRulesByPgId(
             doctorPgId,
-            normalizedWeekdays.length ? normalizedWeekdays : DEFAULT_AVAILABILITY_WEEKDAYS,
-            normalizedBookingSettings,
+            normalizedAvailability,
+            bookingSettingsForLegacyColumns,
             txClient
         );
         await replaceDoctorBlockedDatesByPgId(
@@ -626,18 +1023,44 @@ async function updateDoctorByLegacyId(legacyDoctorId, updates = {}, client = nul
         }
 
         const existingMapped = (await mapDoctorRows([existingRow], txClient))[0];
-        const mergedBookingSettings = normalizeBookingSettings({
+        let mergedBookingSettings = normalizeBookingSettings({
             ...existingMapped.bookingSettings,
             ...(updates.bookingSettings || {})
         });
+
+        let availabilityToPersist = null;
+        if (Object.prototype.hasOwnProperty.call(updates, 'availabilityRules')) {
+            availabilityToPersist = normalizeAvailabilityRules(updates.availabilityRules, mergedBookingSettings, { defaultIfEmpty: true });
+            mergedBookingSettings = inferLegacyBookingSettingsFromDayConfigs(
+                mergedBookingSettings,
+                availabilityToPersist.dayConfigs
+            );
+        } else if (Object.prototype.hasOwnProperty.call(updates, 'bookingSettings')) {
+            const scheduleFieldsChanged = (
+                mergedBookingSettings.workdayStart !== existingMapped.bookingSettings.workdayStart
+                || mergedBookingSettings.workdayEnd !== existingMapped.bookingSettings.workdayEnd
+                || mergedBookingSettings.consultationDurationMinutes !== existingMapped.bookingSettings.consultationDurationMinutes
+            );
+            if (scheduleFieldsChanged) {
+                availabilityToPersist = normalizeAvailabilityRules(
+                    { weekdays: existingMapped.availabilityRules.weekdays },
+                    mergedBookingSettings,
+                    { defaultIfEmpty: true }
+                );
+            }
+        }
 
         const setClauses = [];
         const params = [];
         let index = 1;
 
         if (Object.prototype.hasOwnProperty.call(updates, 'slug')) {
+            const normalizedSlug = normalizeDoctorSlug(updates.slug);
+            if (!normalizedSlug) {
+                throw new Error('Invalid doctor slug.');
+            }
             setClauses.push(`slug = $${index++}`);
-            params.push(normalizeDoctorSlug(updates.slug));
+            params.push(normalizedSlug);
         }
         if (Object.prototype.hasOwnProperty.call(updates, 'displayName')) {
             setClauses.push(`display_name = $${index++}`);
@@ -651,7 +1074,10 @@ async function updateDoctorByLegacyId(legacyDoctorId, updates = {}, client = nul
             setClauses.push(`is_active = $${index++}`);
             params.push(!!updates.isActive);
         }
-        if (Object.prototype.hasOwnProperty.call(updates, 'bookingSettings')) {
+
+        const shouldPersistBookingColumns = Object.prototype.hasOwnProperty.call(updates, 'bookingSettings')
+            || Object.prototype.hasOwnProperty.call(updates, 'availabilityRules');
+        if (shouldPersistBookingColumns) {
             setClauses.push(`consultation_duration_minutes = $${index++}`);
             params.push(mergedBookingSettings.consultationDurationMinutes);
             setClauses.push(`workday_start = $${index++}::time`);
@@ -677,16 +1103,10 @@ async function updateDoctorByLegacyId(legacyDoctorId, updates = {}, client = nul
             params
         );
 
-        if (Object.prototype.hasOwnProperty.call(updates, 'availabilityRules')
-            || Object.prototype.hasOwnProperty.call(updates, 'bookingSettings')) {
-            const weekdays = normalizeWeekdays(
-                updates?.availabilityRules?.weekdays !== undefined
-                    ? updates.availabilityRules.weekdays
-                    : existingMapped.availabilityRules.weekdays
-            );
+        if (availabilityToPersist) {
             await replaceDoctorAvailabilityRulesByPgId(
                 existingRow.id,
-                weekdays.length ? weekdays : DEFAULT_AVAILABILITY_WEEKDAYS,
+                availabilityToPersist,
                 mergedBookingSettings,
                 txClient
             );
@@ -700,6 +1120,39 @@ async function updateDoctorByLegacyId(legacyDoctorId, updates = {}, client = nul
                 txClient
             );
         }
+
+        const refreshedRow = await queryDoctorRowByPgId(existingRow.id, txClient);
+        const mapped = await mapDoctorRows([refreshedRow], txClient);
+        return mapped[0] || null;
+    };
+
+    if (client) {
+        return task(client);
+    }
+    return withTransaction(task);
+}
+
+async function deactivateDoctorByLegacyId(legacyDoctorId, { actorUserPublicId = null } = {}, client = null) {
+    const normalizedLegacyDoctorId = normalizeLegacyDoctorId(legacyDoctorId);
+    if (!normalizedLegacyDoctorId) {
+        return null;
+    }
+
+    const task = async (txClient) => {
+        const existingRow = await queryDoctorRowByLegacyId(normalizedLegacyDoctorId, txClient);
+        if (!existingRow) {
+            return null;
+        }
+
+        const actorUserPgId = await queryUserPgIdByPublicId(actorUserPublicId, txClient);
+        await txClient.query(
+            `UPDATE doctors
+             SET is_active = FALSE,
+                 updated_by_user_id = $1::uuid,
+                 updated_at = now()
+             WHERE id = $2`,
+            [actorUserPgId, existingRow.id]
+        );
 
         const refreshedRow = await queryDoctorRowByPgId(existingRow.id, txClient);
         const mapped = await mapDoctorRows([refreshedRow], txClient);
@@ -825,12 +1278,18 @@ module.exports = {
     normalizeWeekdays,
     normalizeBlockedDates,
     normalizeBookingSettings,
+    normalizeDayConfigs,
+    normalizeAvailabilityRules,
     withTransaction,
     listDoctors,
     findDoctorByIdentifier,
     countDoctorsByLegacyIds,
     createDoctor,
     updateDoctorByLegacyId,
+    deactivateDoctorByLegacyId,
+    getDoctorDayScheduleByLegacyId,
+    upsertDoctorDayOverrideByLegacyId,
+    removeDoctorDayOverrideByLegacyId,
     blockDoctorDateByLegacyId,
     unblockDoctorDateByLegacyId
 };
