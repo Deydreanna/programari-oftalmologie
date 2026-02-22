@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { getPostgresPool } = require('./postgres');
 
-const MONGODB_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
+const LEGACY_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
 const POSTGRES_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DOCTOR_SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const TIME_HHMM_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
@@ -22,13 +22,13 @@ function isUniqueViolation(error) {
     return error?.code === '23505';
 }
 
-function generateLegacyMongoId() {
+function generateLegacyPublicId() {
     return crypto.randomBytes(12).toString('hex');
 }
 
 function normalizeLegacyDoctorId(value) {
     const candidate = String(value || '').trim();
-    if (!MONGODB_OBJECT_ID_REGEX.test(candidate)) {
+    if (!LEGACY_OBJECT_ID_REGEX.test(candidate)) {
         return null;
     }
     return candidate;
@@ -137,7 +137,7 @@ function mapDoctorRow(row, { weekdays = [], blockedDates = [] } = {}) {
     return {
         _id: publicId,
         pgId: String(row.id),
-        legacyMongoId: normalizeLegacyDoctorId(row.legacy_mongo_id) || null,
+        legacyPublicId: normalizeLegacyDoctorId(row.legacy_mongo_id) || null,
         slug: row.slug,
         displayName: row.display_name,
         specialty: row.specialty || DEFAULT_SPECIALTY,
@@ -315,7 +315,7 @@ async function queryUserPgIdByPublicId(publicId, client = null) {
     if (!normalized) return null;
 
     let row = null;
-    if (MONGODB_OBJECT_ID_REGEX.test(normalized)) {
+    if (LEGACY_OBJECT_ID_REGEX.test(normalized)) {
         row = await queryOneRow(
             `SELECT id
              FROM users
@@ -524,7 +524,7 @@ async function createDoctor({
     bookingSettings = DEFAULT_BOOKING_SETTINGS,
     availabilityRules = { weekdays: DEFAULT_AVAILABILITY_WEEKDAYS },
     blockedDates = [],
-    legacyMongoId = null,
+    legacyPublicId = null,
     createdByUserPublicId = null,
     updatedByUserPublicId = null
 } = {}, client = null) {
@@ -536,7 +536,7 @@ async function createDoctor({
     if (!normalizedDisplayName) {
         throw new Error('createDoctor requires displayName');
     }
-    const normalizedLegacyMongoId = normalizeLegacyDoctorId(legacyMongoId) || generateLegacyMongoId();
+    const normalizedLegacyPublicId = normalizeLegacyDoctorId(legacyPublicId) || generateLegacyPublicId();
     const normalizedBookingSettings = normalizeBookingSettings(bookingSettings);
     const normalizedWeekdays = normalizeWeekdays(availabilityRules?.weekdays || []);
     const normalizedBlockedDates = normalizeBlockedDates(blockedDates);
@@ -575,7 +575,7 @@ async function createDoctor({
             )
             RETURNING id`,
             [
-                normalizedLegacyMongoId,
+                normalizedLegacyPublicId,
                 normalizedSlug,
                 normalizedDisplayName,
                 String(specialty || DEFAULT_SPECIALTY).trim() || DEFAULT_SPECIALTY,
@@ -818,83 +818,8 @@ async function unblockDoctorDateByLegacyId(legacyDoctorId, blockedDate, { actorU
     return withTransaction(task);
 }
 
-async function upsertDoctorFromMongo(mongoDoctor = {}, client = null) {
-    const normalizedLegacyMongoId = normalizeLegacyDoctorId(mongoDoctor._id || mongoDoctor.legacyMongoId);
-    if (!normalizedLegacyMongoId) {
-        throw new Error('upsertDoctorFromMongo requires a valid legacy doctor id.');
-    }
-
-    const normalizedSlug = normalizeDoctorSlug(mongoDoctor.slug);
-    if (!normalizedSlug) {
-        throw new Error('upsertDoctorFromMongo requires a valid slug.');
-    }
-
-    const payload = {
-        legacyMongoId: normalizedLegacyMongoId,
-        slug: normalizedSlug,
-        displayName: String(mongoDoctor.displayName || '').trim() || 'Doctor',
-        specialty: String(mongoDoctor.specialty || DEFAULT_SPECIALTY).trim() || DEFAULT_SPECIALTY,
-        isActive: mongoDoctor.isActive !== false,
-        bookingSettings: normalizeBookingSettings(mongoDoctor.bookingSettings || {}),
-        availabilityRules: {
-            weekdays: normalizeWeekdays(mongoDoctor?.availabilityRules?.weekdays || DEFAULT_AVAILABILITY_WEEKDAYS)
-        },
-        blockedDates: normalizeBlockedDates(mongoDoctor.blockedDates || []),
-        createdByUserPublicId: normalizeLegacyDoctorId(mongoDoctor.createdByUserId) || null,
-        updatedByUserPublicId: normalizeLegacyDoctorId(mongoDoctor.updatedByUserId) || null
-    };
-
-    const task = async (txClient) => {
-        let existingRow = await queryDoctorRowByLegacyId(normalizedLegacyMongoId, txClient);
-        if (!existingRow) {
-            existingRow = await queryOneRow(
-                `SELECT id, TRIM(legacy_mongo_id) AS legacy_mongo_id
-                 FROM doctors
-                 WHERE slug = $1
-                 LIMIT 1`,
-                [payload.slug],
-                txClient
-            );
-        }
-
-        if (!existingRow) {
-            return createDoctor(payload, txClient);
-        }
-
-        if (!existingRow.legacy_mongo_id) {
-            await txClient.query(
-                `UPDATE doctors
-                 SET legacy_mongo_id = $1,
-                     updated_at = now()
-                 WHERE id = $2`,
-                [normalizedLegacyMongoId, existingRow.id]
-            );
-        }
-
-        return updateDoctorByLegacyId(
-            normalizedLegacyMongoId,
-            {
-                slug: payload.slug,
-                displayName: payload.displayName,
-                specialty: payload.specialty,
-                isActive: payload.isActive,
-                bookingSettings: payload.bookingSettings,
-                availabilityRules: payload.availabilityRules,
-                blockedDates: payload.blockedDates,
-                updatedByUserPublicId: payload.updatedByUserPublicId
-            },
-            txClient
-        );
-    };
-
-    if (client) {
-        return task(client);
-    }
-    return withTransaction(task);
-}
-
 module.exports = {
-    MONGODB_OBJECT_ID_REGEX,
+    LEGACY_OBJECT_ID_REGEX,
     isUniqueViolation,
     normalizeLegacyDoctorId,
     normalizeWeekdays,
@@ -907,6 +832,5 @@ module.exports = {
     createDoctor,
     updateDoctorByLegacyId,
     blockDoctorDateByLegacyId,
-    unblockDoctorDateByLegacyId,
-    upsertDoctorFromMongo
+    unblockDoctorDateByLegacyId
 };

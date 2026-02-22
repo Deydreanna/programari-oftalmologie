@@ -1,11 +1,8 @@
-const DB_PROVIDER = Object.freeze({
-    MONGO: 'mongo',
-    POSTGRES: 'postgres',
-    DUAL: 'dual'
-});
-const DEFAULT_DB_PROVIDER = DB_PROVIDER.POSTGRES;
-const VALID_DB_PROVIDERS = new Set(Object.values(DB_PROVIDER));
 const REQUIRED_ENV_VARS = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'JWT_STEPUP_SECRET', 'ALLOWED_ORIGINS'];
+const SECURE_SSL_MODES = new Set(['require', 'verify-ca', 'verify-full']);
+const INSECURE_SSL_MODES = new Set(['disable', 'allow', 'prefer']);
+const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
+const FALSE_VALUES = new Set(['0', 'false', 'no', 'off']);
 
 function parseAllowedOrigins(raw) {
     if (!raw) return [];
@@ -16,20 +13,14 @@ function parseAllowedOrigins(raw) {
         .filter(Boolean);
 }
 
-function normalizeDbProvider(rawValue = DEFAULT_DB_PROVIDER) {
-    const normalized = String(rawValue || DEFAULT_DB_PROVIDER).trim().toLowerCase();
-    if (!VALID_DB_PROVIDERS.has(normalized)) {
-        return null;
-    }
-    return normalized;
+function hasFalseLikeValue(rawValue) {
+    const normalized = String(rawValue || '').trim().toLowerCase();
+    return normalized && FALSE_VALUES.has(normalized);
 }
 
-function isPostgresProvider(provider = DEFAULT_DB_PROVIDER) {
-    return provider === DB_PROVIDER.POSTGRES || provider === DB_PROVIDER.DUAL;
-}
-
-function isMongoRuntimeProvider(provider = DEFAULT_DB_PROVIDER) {
-    return provider === DB_PROVIDER.MONGO || provider === DB_PROVIDER.DUAL;
+function hasTrueLikeValue(rawValue) {
+    const normalized = String(rawValue || '').trim().toLowerCase();
+    return normalized && TRUE_VALUES.has(normalized);
 }
 
 function validateDatabaseUrl(value) {
@@ -37,7 +28,7 @@ function validateDatabaseUrl(value) {
     const trimmed = String(value || '').trim();
 
     if (!trimmed) {
-        errors.push('DATABASE_URL is required when DB_PROVIDER is postgres or dual.');
+        errors.push('DATABASE_URL is required.');
         return {
             ok: false,
             errors,
@@ -71,6 +62,23 @@ function validateDatabaseUrl(value) {
         errors.push('DATABASE_URL must include a database name in the path.');
     }
 
+    const sslMode = String(parsedUrl.searchParams.get('sslmode') || '').trim().toLowerCase();
+    if (sslMode) {
+        if (INSECURE_SSL_MODES.has(sslMode)) {
+            errors.push('DATABASE_URL must not use insecure sslmode values (disable/allow/prefer).');
+        } else if (!SECURE_SSL_MODES.has(sslMode)) {
+            errors.push('DATABASE_URL sslmode must be one of: require, verify-ca, verify-full.');
+        }
+    }
+
+    const sslParam = parsedUrl.searchParams.get('ssl');
+    if (sslParam !== null && hasFalseLikeValue(sslParam)) {
+        errors.push('DATABASE_URL must not set ssl=false.');
+    }
+    if (sslParam !== null && !hasFalseLikeValue(sslParam) && !hasTrueLikeValue(sslParam)) {
+        errors.push('DATABASE_URL ssl query value must be true/false when provided.');
+    }
+
     return {
         ok: errors.length === 0,
         errors,
@@ -78,19 +86,14 @@ function validateDatabaseUrl(value) {
             protocol,
             hostname: parsedUrl.hostname || '',
             port: parsedUrl.port || '5432',
-            database
+            database,
+            sslMode: sslMode || null
         }
     };
 }
 
 function validateBaseEnv(env = process.env) {
     const errors = [];
-    const rawDbProvider = String(env.DB_PROVIDER || DEFAULT_DB_PROVIDER).trim().toLowerCase();
-    const dbProvider = normalizeDbProvider(rawDbProvider);
-
-    if (!dbProvider) {
-        errors.push(`DB_PROVIDER must be one of: ${Array.from(VALID_DB_PROVIDERS).join(', ')}.`);
-    }
 
     for (const key of REQUIRED_ENV_VARS) {
         if (!env[key] || !String(env[key]).trim()) {
@@ -118,38 +121,22 @@ function validateBaseEnv(env = process.env) {
         errors.push('ALLOWED_ORIGINS must include at least one origin.');
     }
 
-    const normalizedProvider = dbProvider || DEFAULT_DB_PROVIDER;
-    if (isMongoRuntimeProvider(normalizedProvider)) {
-        if (!env.MONGODB_URI || !String(env.MONGODB_URI).trim()) {
-            errors.push('MONGODB_URI is required when DB_PROVIDER is mongo or dual.');
-        }
-    }
-
-    if (isPostgresProvider(normalizedProvider)) {
-        const databaseUrlValidation = validateDatabaseUrl(env.DATABASE_URL);
-        if (!databaseUrlValidation.ok) {
-            errors.push(...databaseUrlValidation.errors);
-        }
+    const databaseUrlValidation = validateDatabaseUrl(env.DATABASE_URL);
+    if (!databaseUrlValidation.ok) {
+        errors.push(...databaseUrlValidation.errors);
     }
 
     return {
         ok: errors.length === 0,
         errors,
         parsed: {
-            allowedOrigins: origins,
-            dbProvider: normalizedProvider
+            allowedOrigins: origins
         }
     };
 }
 
 module.exports = {
-    DB_PROVIDER,
-    DEFAULT_DB_PROVIDER,
-    VALID_DB_PROVIDERS,
     REQUIRED_ENV_VARS,
-    normalizeDbProvider,
-    isPostgresProvider,
-    isMongoRuntimeProvider,
     validateDatabaseUrl,
     parseAllowedOrigins,
     validateBaseEnv

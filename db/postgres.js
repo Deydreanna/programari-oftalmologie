@@ -1,9 +1,12 @@
 const { Pool } = require('pg');
-const { normalizeDbProvider, isPostgresProvider, validateDatabaseUrl } = require('../scripts/env-utils');
+const { validateDatabaseUrl } = require('../scripts/env-utils');
 
 const DEFAULT_POOL_MAX = 10;
 const DEFAULT_IDLE_TIMEOUT_MS = 30000;
 const DEFAULT_CONNECTION_TIMEOUT_MS = 5000;
+const REQUIRED_SSL_CONFIG = Object.freeze({
+    rejectUnauthorized: true
+});
 const POSTGRES_URI_REGEX = /postgres(?:ql)?:\/\/[^\s'"]+/gi;
 
 let poolInstance = null;
@@ -30,6 +33,7 @@ function getPostgresConfig(connectionString = process.env.DATABASE_URL) {
 
     return {
         connectionString: String(connectionString).trim(),
+        ssl: REQUIRED_SSL_CONFIG,
         max: toPositiveInt(process.env.PG_POOL_MAX, DEFAULT_POOL_MAX),
         idleTimeoutMillis: toPositiveInt(process.env.PG_IDLE_TIMEOUT_MS, DEFAULT_IDLE_TIMEOUT_MS),
         connectionTimeoutMillis: toPositiveInt(process.env.PG_CONNECTION_TIMEOUT_MS, DEFAULT_CONNECTION_TIMEOUT_MS)
@@ -67,16 +71,7 @@ async function closePostgresPool() {
     console.log(`[POSTGRES] Pool closed (${targetSummary}).`);
 }
 
-async function runPostgresHealthCheck({ force = false } = {}) {
-    const dbProvider = normalizeDbProvider(process.env.DB_PROVIDER) || 'postgres';
-    if (!force && !isPostgresProvider(dbProvider)) {
-        return {
-            ok: true,
-            skipped: true,
-            reason: `DB_PROVIDER=${dbProvider} does not enable postgres`
-        };
-    }
-
+async function runPostgresHealthCheck() {
     const validation = validateDatabaseUrl(process.env.DATABASE_URL);
     if (!validation.ok) {
         const error = new Error(validation.errors.join(' '));
@@ -95,8 +90,6 @@ async function runPostgresHealthCheck({ force = false } = {}) {
 
     return {
         ok: true,
-        skipped: false,
-        provider: dbProvider,
         latencyMs: Date.now() - start,
         target: getPostgresTargetSummary(process.env.DATABASE_URL)
     };

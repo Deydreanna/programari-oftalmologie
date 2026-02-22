@@ -1,7 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const mongoose = require('mongoose');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const xlsx = require('xlsx');
@@ -10,18 +9,11 @@ const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const path = require('path');
-const { validateBaseEnv, normalizeDbProvider, isPostgresProvider, isMongoRuntimeProvider } = require('./scripts/env-utils');
-const { runPostgresHealthCheck, redactPostgresUrlInText } = require('./db/postgres');
+const { validateBaseEnv } = require('./scripts/env-utils');
+const { runPostgresHealthCheck, getPostgresPool, redactPostgresUrlInText } = require('./db/postgres');
 const pgUsers = require('./db/users-postgres');
 const pgDoctors = require('./db/doctors-postgres');
 const pgAppointments = require('./db/appointments-postgres');
-const {
-    buildMongoTlsPolicy,
-    buildMongoDriverTlsOptions,
-    getSafeMongoErrorSummary,
-    isLikelyTlsCompatibilityError,
-    FALLBACK_MONGO_TLS_MIN_VERSION
-} = require('./utils/mongo-tls-config');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -33,6 +25,7 @@ const LOGIN_LOCKOUT_DURATION_MS = 15 * 60 * 1000;
 const MAX_DIAGNOSTIC_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_DIAGNOSTIC_MIME_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png']);
 const ENABLE_DIAGNOSTIC_UPLOAD = process.env.ENABLE_DIAGNOSTIC_UPLOAD === 'true';
+const ENABLE_DEBUG_CHARSET_ENDPOINT = process.env.ENABLE_DEBUG_CHARSET_ENDPOINT === 'true';
 const TIME_HHMM_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const DEFAULT_DOCTOR_SLUG = 'prof-dr-balta-florian';
 const DEFAULT_DOCTOR_DISPLAY_NAME = 'Prof. Dr. Balta Florian';
@@ -47,35 +40,7 @@ const DEFAULT_BOOKING_SETTINGS = Object.freeze({
 const DEFAULT_AVAILABILITY_WEEKDAYS = Object.freeze([3]);
 
 const baseEnvValidation = validateBaseEnv(process.env);
-const DB_PROVIDER = baseEnvValidation.parsed.dbProvider || normalizeDbProvider(process.env.DB_PROVIDER) || 'postgres';
-const POSTGRES_ENABLED = isPostgresProvider(DB_PROVIDER);
-const MONGO_RUNTIME_ENABLED = isMongoRuntimeProvider(DB_PROVIDER);
-const USERS_IN_POSTGRES = POSTGRES_ENABLED;
-const DOCTORS_IN_POSTGRES = POSTGRES_ENABLED;
-const APPOINTMENTS_IN_POSTGRES = POSTGRES_ENABLED;
-const AUDIT_IN_POSTGRES = POSTGRES_ENABLED;
-const DUAL_MONGO_USER_FALLBACK = DB_PROVIDER === 'dual';
-const DUAL_MONGO_DOCTOR_FALLBACK = DB_PROVIDER === 'dual';
-const DUAL_MONGO_APPOINTMENT_FALLBACK = DB_PROVIDER === 'dual';
-const mongoTlsPolicy = MONGO_RUNTIME_ENABLED
-    ? buildMongoTlsPolicy(process.env)
-    : {
-        mongodbUri: '',
-        validationErrors: [],
-        uriScheme: 'disabled',
-        hostCount: 0,
-        redactedHosts: [],
-        configuredMinVersion: 'n/a',
-        allowFallbackTo12: false,
-        connectOptions: { tls: true },
-        tlsCAFileConfigured: false,
-        tlsCertificateKeyFileConfigured: false,
-        tlsCertificateKeyPasswordConfigured: false
-    };
-const startupValidationErrors = Array.from(new Set([
-    ...baseEnvValidation.errors,
-    ...mongoTlsPolicy.validationErrors
-]));
+const startupValidationErrors = [...baseEnvValidation.errors];
 if (startupValidationErrors.length) {
     console.error('Startup environment validation failed:');
     for (const error of startupValidationErrors) {
@@ -87,7 +52,6 @@ if (startupValidationErrors.length) {
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 const JWT_STEPUP_SECRET = process.env.JWT_STEPUP_SECRET;
-const MONGODB_URI = mongoTlsPolicy.mongodbUri;
 const ALLOWED_ORIGINS = baseEnvValidation.parsed.allowedOrigins || [];
 const ACCESS_TOKEN_TTL_MINUTES = Number(process.env.ACCESS_TOKEN_TTL_MINUTES || 15);
 const REFRESH_TOKEN_TTL_DAYS = Number(process.env.REFRESH_TOKEN_TTL_DAYS || 30);
@@ -116,19 +80,6 @@ const CSRF_COOKIE_OPTIONS = Object.freeze({
 });
 const loginAttempts = new Map();
 const refreshAttempts = new Map();
-let mongoBootstrapPromise = null;
-let mongoBootstrapped = false;
-const MONGOOSE_READY_STATE_LABELS = Object.freeze({
-    0: 'disconnected',
-    1: 'connected',
-    2: 'connecting',
-    3: 'disconnecting'
-});
-const mongoTlsRuntime = {
-    fallbackToTls12Used: false,
-    effectiveMinVersion: mongoTlsPolicy.configuredMinVersion,
-    lastConnectionError: null
-};
 
 function parseHHMMToMinutes(value) {
     if (typeof value !== 'string') return NaN;
@@ -157,393 +108,27 @@ function sanitizeInlineString(value) {
     return String(value || '').replace(/\0/g, '').trim();
 }
 
-// =====================
-//  SCHEMAS
-// =====================
-
-// User Schema
-const userSchema = new mongoose.Schema({
-    email: { type: String, unique: true, sparse: true, lowercase: true, trim: true },
-    phone: { type: String, unique: true, sparse: true, trim: true },
-    password: String,
-    googleId: String,
-    displayName: String,
-    role: { type: String, enum: [ROLE.VIEWER, ROLE.SCHEDULER, ROLE.SUPERADMIN], default: ROLE.VIEWER },
-    managedDoctorIds: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Doctor' }], default: () => [] },
-    createdAt: { type: Date, default: Date.now }
-}, { strict: 'throw' });
-
-const User = mongoose.model('User', userSchema);
-
-const doctorSchema = new mongoose.Schema({
-    slug: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    displayName: { type: String, required: true, trim: true },
-    specialty: { type: String, default: DEFAULT_DOCTOR_SPECIALTY, trim: true },
-    isActive: { type: Boolean, default: true },
-    bookingSettings: {
-        consultationDurationMinutes: { type: Number, default: DEFAULT_BOOKING_SETTINGS.consultationDurationMinutes },
-        workdayStart: { type: String, default: DEFAULT_BOOKING_SETTINGS.workdayStart },
-        workdayEnd: { type: String, default: DEFAULT_BOOKING_SETTINGS.workdayEnd },
-        monthsToShow: { type: Number, default: DEFAULT_BOOKING_SETTINGS.monthsToShow },
-        timezone: { type: String, default: DEFAULT_BOOKING_SETTINGS.timezone, trim: true }
-    },
-    availabilityRules: {
-        weekdays: { type: [Number], default: () => [...DEFAULT_AVAILABILITY_WEEKDAYS] }
-    },
-    blockedDates: { type: [String], default: () => [] },
-    createdByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    updatedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
-}, { strict: 'throw', timestamps: true });
-
-doctorSchema.path('slug').validate((value) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(String(value || '')), 'Doctor slug format is invalid.');
-doctorSchema.path('bookingSettings.consultationDurationMinutes').validate((value) => Number.isInteger(value) && value >= 5 && value <= 120, 'Invalid consultation duration.');
-doctorSchema.path('bookingSettings.workdayStart').validate((value) => isValidHHMM(value), 'Invalid workdayStart.');
-doctorSchema.path('bookingSettings.workdayEnd').validate((value) => isValidHHMM(value), 'Invalid workdayEnd.');
-doctorSchema.path('bookingSettings.monthsToShow').validate((value) => Number.isInteger(value) && value >= 1 && value <= 12, 'Invalid monthsToShow.');
-doctorSchema.path('availabilityRules.weekdays').validate((value) => isValidWeekdayList(value), 'Invalid availability weekdays.');
-doctorSchema.path('blockedDates').validate((value) => {
-    if (!Array.isArray(value)) return false;
-    const seen = new Set();
-    for (const item of value) {
-        if (typeof item !== 'string') return false;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(item)) return false;
-        if (seen.has(item)) return false;
-        seen.add(item);
-    }
-    return true;
-}, 'Invalid blockedDates.');
-doctorSchema.pre('validate', function doctorValidate(next) {
-    const start = parseHHMMToMinutes(this.bookingSettings?.workdayStart);
-    const end = parseHHMMToMinutes(this.bookingSettings?.workdayEnd);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-        return next(new Error('Doctor workday interval is invalid.'));
-    }
-    return next();
-});
-
-const Doctor = mongoose.model('Doctor', doctorSchema);
-
-// Appointment Schema
-const appointmentSchema = new mongoose.Schema({
-    name: String,
-    phone: String,
-    type: String,
-    date: String,
-    time: String,
-    notes: { type: String, default: '' },
-    email: String,
-    emailSent: { type: Boolean, default: false },
-    hasDiagnosis: { type: Boolean, default: false },
-    diagnosticFileMeta: {
-        key: { type: String, default: null },
-        mime: { type: String, default: null },
-        size: { type: Number, default: null },
-        uploadedAt: { type: Date, default: null }
-    },
-    doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true },
-    doctorSnapshotName: { type: String, default: '' },
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    createdAt: { type: Date, default: Date.now }
-}, { strict: 'throw' });
-appointmentSchema.index({ doctorId: 1, date: 1, time: 1 }, { unique: true });
-
-const Appointment = mongoose.model('Appointment', appointmentSchema);
-
-const auditLogSchema = new mongoose.Schema({
-    actorUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    actorRole: { type: String, default: 'anonymous' },
-    action: { type: String, required: true },
-    targetType: { type: String, default: '' },
-    targetId: { type: String, default: '' },
-    result: { type: String, enum: ['success', 'failure', 'denied'], required: true },
-    ip: { type: String, default: '' },
-    userAgent: { type: String, default: '' },
-    metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
-    timestamp: { type: Date, default: Date.now }
-}, { strict: 'throw' });
-auditLogSchema.index({ timestamp: -1 });
-auditLogSchema.index({ action: 1, timestamp: -1 });
-
-const AuditLog = mongoose.model('AuditLog', auditLogSchema);
-
-const charsetProbeSchema = new mongoose.Schema({
-    text: { type: String, required: true, trim: false },
-    createdAt: { type: Date, default: Date.now }
-}, { strict: 'throw' });
-charsetProbeSchema.index({ createdAt: -1 });
-
-const CharsetProbe = mongoose.model('CharsetProbe', charsetProbeSchema);
-
 async function ensureDefaultDoctorAndBackfill() {
-    if (DOCTORS_IN_POSTGRES && DUAL_MONGO_DOCTOR_FALLBACK) {
-        const mongoDoctors = await Doctor.find().lean();
-        for (const mongoDoctor of mongoDoctors) {
-            await migrateMongoDoctorToPostgres(mongoDoctor);
-        }
-    }
-
-    let defaultDoctor;
-    if (DOCTORS_IN_POSTGRES) {
-        defaultDoctor = await pgDoctors.findDoctorByIdentifier(DEFAULT_DOCTOR_SLUG, { requireActive: false });
-        if (!defaultDoctor) {
-            defaultDoctor = await pgDoctors.createDoctor({
-                slug: DEFAULT_DOCTOR_SLUG,
-                displayName: DEFAULT_DOCTOR_DISPLAY_NAME,
-                specialty: DEFAULT_DOCTOR_SPECIALTY,
-                isActive: true,
-                bookingSettings: DEFAULT_BOOKING_SETTINGS,
-                availabilityRules: { weekdays: DEFAULT_AVAILABILITY_WEEKDAYS },
-                blockedDates: []
-            });
-        }
-    } else {
-        defaultDoctor = await Doctor.findOneAndUpdate(
-            { slug: DEFAULT_DOCTOR_SLUG },
-            {
-                $setOnInsert: {
-                    slug: DEFAULT_DOCTOR_SLUG,
-                    displayName: DEFAULT_DOCTOR_DISPLAY_NAME,
-                    specialty: DEFAULT_DOCTOR_SPECIALTY,
-                    isActive: true,
-                    bookingSettings: {
-                        consultationDurationMinutes: DEFAULT_BOOKING_SETTINGS.consultationDurationMinutes,
-                        workdayStart: DEFAULT_BOOKING_SETTINGS.workdayStart,
-                        workdayEnd: DEFAULT_BOOKING_SETTINGS.workdayEnd,
-                        monthsToShow: DEFAULT_BOOKING_SETTINGS.monthsToShow,
-                        timezone: DEFAULT_BOOKING_SETTINGS.timezone
-                    },
-                    availabilityRules: { weekdays: DEFAULT_AVAILABILITY_WEEKDAYS },
-                    blockedDates: [],
-                    createdByUserId: null,
-                    updatedByUserId: null
-                }
-            },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
-    }
-
-    let appointmentsBackfillCount = 0;
-    let snapshotsBackfillCount = 0;
-    let appointmentsMigratedCount = 0;
-    if (!APPOINTMENTS_IN_POSTGRES || DUAL_MONGO_APPOINTMENT_FALLBACK) {
-        const appointmentsBackfill = await Appointment.updateMany(
-            {
-                $or: [
-                    { doctorId: { $exists: false } },
-                    { doctorId: null }
-                ]
-            },
-            {
-                $set: {
-                    doctorId: defaultDoctor._id,
-                    doctorSnapshotName: defaultDoctor.displayName
-                }
-            }
-        );
-        appointmentsBackfillCount = appointmentsBackfill.modifiedCount || 0;
-
-        const snapshotBackfill = await Appointment.updateMany(
-            { doctorSnapshotName: { $in: [null, ''] }, doctorId: { $exists: true, $ne: null } },
-            { $set: { doctorSnapshotName: defaultDoctor.displayName } }
-        );
-        snapshotsBackfillCount = snapshotBackfill.modifiedCount || 0;
-    }
-
-    if (APPOINTMENTS_IN_POSTGRES && DUAL_MONGO_APPOINTMENT_FALLBACK) {
-        const mongoAppointments = await Appointment.find().lean();
-        for (const mongoAppointment of mongoAppointments) {
-            const migrated = await migrateMongoAppointmentToPostgres(mongoAppointment, { defaultDoctorId: defaultDoctor._id });
-            if (migrated) {
-                appointmentsMigratedCount += 1;
-            }
-        }
-    }
-
-    let usersBackfillCount = 0;
-    if (!USERS_IN_POSTGRES) {
-        const usersBackfill = await User.updateMany(
-            { managedDoctorIds: { $exists: false } },
-            { $set: { managedDoctorIds: [] } }
-        );
-        usersBackfillCount = usersBackfill.modifiedCount || 0;
+    let defaultDoctor = await pgDoctors.findDoctorByIdentifier(DEFAULT_DOCTOR_SLUG, { requireActive: false });
+    if (!defaultDoctor) {
+        defaultDoctor = await pgDoctors.createDoctor({
+            slug: DEFAULT_DOCTOR_SLUG,
+            displayName: DEFAULT_DOCTOR_DISPLAY_NAME,
+            specialty: DEFAULT_DOCTOR_SPECIALTY,
+            isActive: true,
+            bookingSettings: DEFAULT_BOOKING_SETTINGS,
+            availabilityRules: { weekdays: DEFAULT_AVAILABILITY_WEEKDAYS },
+            blockedDates: []
+        });
     }
 
     return {
         defaultDoctorId: String(defaultDoctor._id),
-        appointmentsBackfilled: appointmentsBackfillCount,
-        snapshotsBackfilled: snapshotsBackfillCount,
-        appointmentsMigratedToPostgres: appointmentsMigratedCount,
-        usersBackfilled: usersBackfillCount
+        appointmentsBackfilled: 0,
+        snapshotsBackfilled: 0,
+        appointmentsMigratedToPostgres: 0,
+        usersBackfilled: 0
     };
-}
-
-function getMongoConnectionStateLabel() {
-    return MONGOOSE_READY_STATE_LABELS[mongoose.connection.readyState] || 'unknown';
-}
-
-function getMongoTlsDiagnosticsSnapshot() {
-    if (!MONGO_RUNTIME_ENABLED) {
-        return {
-            runtimeEnabled: false,
-            connectionState: 'disabled',
-            tlsRequired: true,
-            configuredMinVersion: 'n/a',
-            effectiveMinVersion: 'n/a',
-            fallbackToTls12Used: false,
-            allowFallbackToTls12: false,
-            uriScheme: 'disabled',
-            hostCount: 0,
-            redactedHosts: [],
-            tlsCAFileConfigured: false,
-            tlsCertificateKeyFileConfigured: false,
-            tlsCertificateKeyPasswordConfigured: false,
-            lastConnectionError: null,
-            nodeVersion: process.version
-        };
-    }
-
-    return {
-        runtimeEnabled: true,
-        connectionState: getMongoConnectionStateLabel(),
-        tlsRequired: true,
-        configuredMinVersion: mongoTlsPolicy.configuredMinVersion,
-        effectiveMinVersion: mongoTlsRuntime.effectiveMinVersion,
-        fallbackToTls12Used: mongoTlsRuntime.fallbackToTls12Used,
-        allowFallbackToTls12: mongoTlsPolicy.allowFallbackTo12,
-        uriScheme: mongoTlsPolicy.uriScheme,
-        hostCount: mongoTlsPolicy.hostCount,
-        redactedHosts: mongoTlsPolicy.redactedHosts,
-        tlsCAFileConfigured: mongoTlsPolicy.tlsCAFileConfigured,
-        tlsCertificateKeyFileConfigured: mongoTlsPolicy.tlsCertificateKeyFileConfigured,
-        tlsCertificateKeyPasswordConfigured: mongoTlsPolicy.tlsCertificateKeyPasswordConfigured,
-        lastConnectionError: mongoTlsRuntime.lastConnectionError,
-        nodeVersion: process.version
-    };
-}
-
-function formatSafeMongoError(error) {
-    const summary = getSafeMongoErrorSummary(error);
-    const codePart = summary.code ? ` code=${summary.code}` : '';
-    return `${summary.name}${codePart}: ${summary.message}`;
-}
-
-async function connectMongoWithTlsPolicy() {
-    if (!MONGO_RUNTIME_ENABLED) {
-        return;
-    }
-
-    const primaryMinVersion = mongoTlsPolicy.configuredMinVersion;
-    const primaryOptions = buildMongoDriverTlsOptions(mongoTlsPolicy, primaryMinVersion);
-
-    try {
-        await mongoose.connect(MONGODB_URI, primaryOptions);
-        mongoTlsRuntime.effectiveMinVersion = primaryMinVersion;
-        mongoTlsRuntime.fallbackToTls12Used = false;
-        mongoTlsRuntime.lastConnectionError = null;
-        return;
-    } catch (primaryError) {
-        const tlsCompatibilityError = isLikelyTlsCompatibilityError(primaryError);
-        const fallbackEnabled = mongoTlsPolicy.allowFallbackTo12;
-        const canFallbackTo12 = primaryMinVersion !== FALLBACK_MONGO_TLS_MIN_VERSION;
-
-        if (tlsCompatibilityError && !fallbackEnabled && canFallbackTo12) {
-            const compatibilityError = new Error(
-                `MongoDB TLS compatibility failure while enforcing ${primaryMinVersion}. `
-                + 'Fallback to TLSv1.2 is disabled. Set MONGO_TLS_ALLOW_FALLBACK_TO_1_2=true '
-                + 'to retry with TLSv1.2.'
-            );
-            compatibilityError.cause = primaryError;
-            throw compatibilityError;
-        }
-
-        if (!(tlsCompatibilityError && fallbackEnabled && canFallbackTo12)) {
-            throw primaryError;
-        }
-
-        console.warn(
-            `[HIGH][MONGO_TLS] TLS compatibility issue detected. `
-            + `Retrying once with ${FALLBACK_MONGO_TLS_MIN_VERSION} because `
-            + 'MONGO_TLS_ALLOW_FALLBACK_TO_1_2=true.'
-        );
-        console.warn(`[HIGH][MONGO_TLS] Primary connection error: ${formatSafeMongoError(primaryError)}`);
-
-        await mongoose.disconnect().catch(() => {});
-
-        try {
-            await mongoose.connect(
-                MONGODB_URI,
-                buildMongoDriverTlsOptions(mongoTlsPolicy, FALLBACK_MONGO_TLS_MIN_VERSION)
-            );
-            mongoTlsRuntime.fallbackToTls12Used = true;
-            mongoTlsRuntime.effectiveMinVersion = FALLBACK_MONGO_TLS_MIN_VERSION;
-            mongoTlsRuntime.lastConnectionError = null;
-        } catch (fallbackError) {
-            const fallbackSummary = formatSafeMongoError(fallbackError);
-            const fallbackFailure = new Error(
-                `MongoDB connection failed after fallback to ${FALLBACK_MONGO_TLS_MIN_VERSION}. `
-                + `Reason: ${fallbackSummary}`
-            );
-            fallbackFailure.cause = fallbackError;
-            throw fallbackFailure;
-        }
-    }
-}
-
-async function ensureMongoReady() {
-    if (!MONGO_RUNTIME_ENABLED) {
-        return;
-    }
-
-    if (mongoBootstrapped && mongoose.connection.readyState === 1) {
-        return;
-    }
-
-    if (!mongoBootstrapPromise) {
-        mongoBootstrapPromise = connectMongoWithTlsPolicy()
-            .then(async () => {
-                if (!mongoBootstrapped) {
-                    const migrationSummary = await ensureDefaultDoctorAndBackfill();
-                    if (!DOCTORS_IN_POSTGRES) {
-                        await Doctor.syncIndexes();
-                    }
-                    if (!USERS_IN_POSTGRES) {
-                        await User.syncIndexes();
-                    }
-                    if (!APPOINTMENTS_IN_POSTGRES) {
-                        await Appointment.syncIndexes();
-                    }
-                    mongoBootstrapped = true;
-                    const tlsDiagnostics = getMongoTlsDiagnosticsSnapshot();
-                    console.log(
-                        `[MONGO_TLS] Connected to MongoDB `
-                        + `(state=${tlsDiagnostics.connectionState}, `
-                        + `tlsRequired=${tlsDiagnostics.tlsRequired}, `
-                        + `configuredMinVersion=${tlsDiagnostics.configuredMinVersion}, `
-                        + `effectiveMinVersion=${tlsDiagnostics.effectiveMinVersion}, `
-                        + `fallbackToTls12Used=${tlsDiagnostics.fallbackToTls12Used}, `
-                        + `uriScheme=${tlsDiagnostics.uriScheme}, `
-                        + `hosts=${tlsDiagnostics.hostCount}, `
-                        + `node=${tlsDiagnostics.nodeVersion})`
-                    );
-                    console.log('Startup migration summary:', migrationSummary);
-                }
-            })
-            .catch((error) => {
-                mongoBootstrapPromise = null;
-                mongoTlsRuntime.lastConnectionError = getSafeMongoErrorSummary(error);
-                throw error;
-            });
-    }
-
-    await mongoBootstrapPromise;
-}
-
-if (MONGO_RUNTIME_ENABLED) {
-    ensureMongoReady().catch((err) => {
-        console.error(`MongoDB connection error: ${formatSafeMongoError(err)}`);
-    });
-} else {
-    console.log(`[MONGO_TLS] Mongo runtime disabled (DB_PROVIDER=${DB_PROVIDER}).`);
 }
 
 // =====================
@@ -598,15 +183,6 @@ app.use('/api', (req, res, next) => {
 app.use(['/api', '/debug'], (req, res, next) => {
     res.set('Content-Type', 'application/json; charset=utf-8');
     return next();
-});
-app.use(['/api', '/debug'], async (req, res, next) => {
-    try {
-        await ensureMongoReady();
-        return next();
-    } catch (error) {
-        console.error(`MongoDB unavailable for request: ${formatSafeMongoError(error)}`);
-        return res.status(503).json({ error: 'Database unavailable. Please retry shortly.' });
-    }
 });
 
 app.use((req, res, next) => {
@@ -664,7 +240,7 @@ app.get('/adminpanel', (req, res) => {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^(\+?40|0)7\d{8}$/;
-const MONGODB_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
+const LEGACY_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
 const POSTGRES_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DOCTOR_SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const STRONG_PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{10,128}$/;
@@ -700,10 +276,6 @@ function resolveBootstrapSuperadminEmail() {
 }
 
 async function ensureBootstrapSuperadmin() {
-    if (!USERS_IN_POSTGRES) {
-        return { skipped: true, reason: 'users are not stored in postgres for current DB_PROVIDER' };
-    }
-
     const email = resolveBootstrapSuperadminEmail();
     const password = typeof process.env.SUPERADMIN_PASSWORD === 'string'
         ? process.env.SUPERADMIN_PASSWORD
@@ -834,7 +406,7 @@ function parseTimeField(value, fieldName) {
 
 function parseObjectIdField(value, fieldName) {
     const idValue = parseStringField(value, fieldName, { min: 24, max: 24 });
-    if (!MONGODB_OBJECT_ID_REGEX.test(idValue)) {
+    if (!LEGACY_OBJECT_ID_REGEX.test(idValue)) {
         throw new Error(`${fieldName} is invalid.`);
     }
     return idValue;
@@ -842,7 +414,7 @@ function parseObjectIdField(value, fieldName) {
 
 function isValidUserIdentifier(value) {
     const normalized = String(value || '').trim();
-    return MONGODB_OBJECT_ID_REGEX.test(normalized) || POSTGRES_UUID_REGEX.test(normalized);
+    return LEGACY_OBJECT_ID_REGEX.test(normalized) || POSTGRES_UUID_REGEX.test(normalized);
 }
 
 function parseUserIdField(value, fieldName) {
@@ -1251,7 +823,7 @@ function normalizeManagedDoctorIds(value) {
     const normalized = [];
     for (const item of value) {
         const id = String(item || '');
-        if (!MONGODB_OBJECT_ID_REGEX.test(id)) continue;
+        if (!LEGACY_OBJECT_ID_REGEX.test(id)) continue;
         if (seen.has(id)) continue;
         seen.add(id);
         normalized.push(id);
@@ -1294,100 +866,41 @@ function normalizeRoleValue(rawRole) {
     return ROLE.VIEWER;
 }
 
-function getMongoCompatibleUserId(user) {
+function getUserPublicId(user) {
     const candidates = [
-        user?.legacyMongoId,
+        user?.legacyPublicId,
         user?._id,
         user?.id
     ];
     for (const candidate of candidates) {
         const value = String(candidate || '').trim();
-        if (MONGODB_OBJECT_ID_REGEX.test(value)) {
+        if (LEGACY_OBJECT_ID_REGEX.test(value)) {
             return value;
         }
     }
     return null;
 }
 
-async function migrateMongoUserToPostgres(mongoUser) {
-    if (!USERS_IN_POSTGRES || !mongoUser) {
-        return mongoUser || null;
-    }
-
-    const managedDoctorIds = normalizeManagedDoctorIds(mongoUser.managedDoctorIds || []);
-    return pgUsers.upsertUserFromMongo({
-        _id: String(mongoUser._id),
-        email: mongoUser.email || null,
-        phone: mongoUser.phone || null,
-        password: mongoUser.password || '',
-        googleId: mongoUser.googleId || null,
-        displayName: mongoUser.displayName || '',
-        role: normalizeRoleValue(mongoUser.role),
-        managedDoctorIds,
-        createdAt: mongoUser.createdAt || new Date()
-    });
-}
-
-async function findUserById(userId, { allowDualFallback = true } = {}) {
+async function findUserById(userId) {
     const normalizedUserId = String(userId || '').trim();
     if (!normalizedUserId) return null;
-
-    if (!USERS_IN_POSTGRES) {
-        return User.findById(normalizedUserId);
-    }
-
-    let user = await pgUsers.findUserByPublicId(normalizedUserId);
-    if (user || !allowDualFallback || !DUAL_MONGO_USER_FALLBACK || !MONGODB_OBJECT_ID_REGEX.test(normalizedUserId)) {
-        return user;
-    }
-
-    const mongoUser = await User.findById(normalizedUserId);
-    if (!mongoUser) return null;
-    return migrateMongoUserToPostgres(mongoUser);
+    return pgUsers.findUserByPublicId(normalizedUserId);
 }
 
-async function findUserByEmail(email, { allowDualFallback = true } = {}) {
+async function findUserByEmail(email) {
     const normalizedEmail = String(email || '').trim().toLowerCase();
     if (!normalizedEmail) return null;
-
-    if (!USERS_IN_POSTGRES) {
-        return User.findOne({ email: normalizedEmail });
-    }
-
-    let user = await pgUsers.findUserByEmail(normalizedEmail);
-    if (user || !allowDualFallback || !DUAL_MONGO_USER_FALLBACK) {
-        return user;
-    }
-
-    const mongoUser = await User.findOne({ email: normalizedEmail });
-    if (!mongoUser) return null;
-    return migrateMongoUserToPostgres(mongoUser);
+    return pgUsers.findUserByEmail(normalizedEmail);
 }
 
-async function findUserByPhone(phone, { allowDualFallback = true } = {}) {
+async function findUserByPhone(phone) {
     const normalizedPhone = String(phone || '').trim();
     if (!normalizedPhone) return null;
-
-    if (!USERS_IN_POSTGRES) {
-        return User.findOne({ phone: normalizedPhone });
-    }
-
-    let user = await pgUsers.findUserByPhone(normalizedPhone);
-    if (user || !allowDualFallback || !DUAL_MONGO_USER_FALLBACK) {
-        return user;
-    }
-
-    const mongoUser = await User.findOne({ phone: normalizedPhone });
-    if (!mongoUser) return null;
-    return migrateMongoUserToPostgres(mongoUser);
+    return pgUsers.findUserByPhone(normalizedPhone);
 }
 
 async function persistUser(user, { managedDoctorIdsChanged = false } = {}) {
     if (!user) return null;
-    if (!USERS_IN_POSTGRES) {
-        await user.save();
-        return user;
-    }
     return pgUsers.updateUserByPublicId(user._id, {
         email: user.email ?? null,
         phone: user.phone ?? null,
@@ -1396,59 +909,6 @@ async function persistUser(user, { managedDoctorIdsChanged = false } = {}) {
         displayName: user.displayName,
         role: normalizeRoleValue(user.role),
         ...(managedDoctorIdsChanged ? { managedDoctorIds: normalizeManagedDoctorIds(user.managedDoctorIds || []) } : {})
-    });
-}
-
-async function migrateMongoDoctorToPostgres(mongoDoctor) {
-    if (!DOCTORS_IN_POSTGRES || !mongoDoctor) {
-        return mongoDoctor || null;
-    }
-
-    return pgDoctors.upsertDoctorFromMongo({
-        _id: String(mongoDoctor._id),
-        slug: mongoDoctor.slug || '',
-        displayName: mongoDoctor.displayName || '',
-        specialty: mongoDoctor.specialty || DEFAULT_DOCTOR_SPECIALTY,
-        isActive: mongoDoctor.isActive !== false,
-        bookingSettings: mongoDoctor.bookingSettings || DEFAULT_BOOKING_SETTINGS,
-        availabilityRules: mongoDoctor.availabilityRules || { weekdays: DEFAULT_AVAILABILITY_WEEKDAYS },
-        blockedDates: Array.isArray(mongoDoctor.blockedDates) ? mongoDoctor.blockedDates : [],
-        createdByUserId: getMongoCompatibleUserId({ _id: mongoDoctor.createdByUserId }) || null,
-        updatedByUserId: getMongoCompatibleUserId({ _id: mongoDoctor.updatedByUserId }) || null
-    });
-}
-
-async function migrateMongoAppointmentToPostgres(mongoAppointment, { defaultDoctorId = null } = {}) {
-    if (!APPOINTMENTS_IN_POSTGRES || !mongoAppointment) {
-        return mongoAppointment || null;
-    }
-
-    const doctorLegacyId = String(mongoAppointment.doctorId || defaultDoctorId || '').trim();
-    if (!MONGODB_OBJECT_ID_REGEX.test(doctorLegacyId)) {
-        return null;
-    }
-
-    const ensuredDoctor = await resolveDoctorByIdentifier(doctorLegacyId, { requireActive: false, allowDualFallback: true });
-    if (!ensuredDoctor) {
-        return null;
-    }
-
-    return pgAppointments.upsertAppointmentFromMongo({
-        _id: String(mongoAppointment._id || ''),
-        name: mongoAppointment.name || '',
-        phone: mongoAppointment.phone || '',
-        type: mongoAppointment.type || '',
-        date: mongoAppointment.date || '',
-        time: mongoAppointment.time || '',
-        notes: mongoAppointment.notes || '',
-        email: mongoAppointment.email || '',
-        emailSent: !!mongoAppointment.emailSent,
-        hasDiagnosis: !!mongoAppointment.hasDiagnosis,
-        diagnosticFileMeta: mongoAppointment.diagnosticFileMeta || null,
-        doctorId: doctorLegacyId,
-        doctorSnapshotName: mongoAppointment.doctorSnapshotName || ensuredDoctor.displayName || '',
-        userId: getMongoCompatibleUserId({ _id: mongoAppointment.userId }) || null,
-        createdAt: mongoAppointment.createdAt || new Date()
     });
 }
 
@@ -1478,26 +938,11 @@ function getUserManagedDoctorIds(user) {
     return normalizeManagedDoctorIds(user?.managedDoctorIds || []);
 }
 
-function getScopedDoctorObjectIds(user) {
-    return getUserManagedDoctorIds(user).map((id) => new mongoose.Types.ObjectId(id));
-}
-
 function canUserAccessDoctor(user, doctorId) {
     if (!doctorId) return false;
     if (isSuperadminUser(user)) return true;
     const wanted = String(doctorId);
     return getUserManagedDoctorIds(user).includes(wanted);
-}
-
-function doctorScopeQueryForUser(user, fieldName = '_id') {
-    if (isSuperadminUser(user)) {
-        return {};
-    }
-    const doctorIds = getScopedDoctorObjectIds(user);
-    if (doctorIds.length === 0) {
-        return null;
-    }
-    return { [fieldName]: { $in: doctorIds } };
 }
 
 function toISODateUTC(date) {
@@ -1591,40 +1036,10 @@ function sanitizeDoctorForAdmin(doctor, { includeAudit = false } = {}) {
     return payload;
 }
 
-async function resolveDoctorByIdentifier(rawIdentifier, { requireActive = true, allowDualFallback = true } = {}) {
+async function resolveDoctorByIdentifier(rawIdentifier, { requireActive = true } = {}) {
     const normalized = sanitizeInlineString(rawIdentifier).toLowerCase();
     if (!normalized) return null;
-
-    if (!DOCTORS_IN_POSTGRES) {
-        const query = MONGODB_OBJECT_ID_REGEX.test(normalized)
-            ? { _id: normalized }
-            : { slug: normalized };
-        if (requireActive) {
-            query.isActive = true;
-        }
-        return Doctor.findOne(query);
-    }
-
-    let doctor = await pgDoctors.findDoctorByIdentifier(normalized, { requireActive });
-    if (doctor || !allowDualFallback || !DUAL_MONGO_DOCTOR_FALLBACK) {
-        return doctor;
-    }
-
-    const query = MONGODB_OBJECT_ID_REGEX.test(normalized)
-        ? { _id: normalized }
-        : { slug: normalized };
-    if (requireActive) {
-        query.isActive = true;
-    }
-    const mongoDoctor = await Doctor.findOne(query);
-    if (!mongoDoctor) {
-        return null;
-    }
-    doctor = await migrateMongoDoctorToPostgres(mongoDoctor);
-    if (doctor && requireActive && !doctor.isActive) {
-        return null;
-    }
-    return doctor;
+    return pgDoctors.findDoctorByIdentifier(normalized, { requireActive });
 }
 
 async function validateDoctorIdsExist(ids = []) {
@@ -1632,24 +1047,9 @@ async function validateDoctorIdsExist(ids = []) {
         return true;
     }
 
-    if (!DOCTORS_IN_POSTGRES) {
-        const count = await Doctor.countDocuments({ _id: { $in: ids } });
-        return count === ids.length;
-    }
-
     const normalizedLegacyIds = normalizeManagedDoctorIds(ids.map((id) => String(id)));
     if (!normalizedLegacyIds.length) {
         return false;
-    }
-
-    if (DUAL_MONGO_DOCTOR_FALLBACK) {
-        for (const legacyId of normalizedLegacyIds) {
-            const existing = await pgDoctors.findDoctorByIdentifier(legacyId, { requireActive: false });
-            if (existing) continue;
-            const mongoDoctor = await Doctor.findById(legacyId);
-            if (!mongoDoctor) continue;
-            await migrateMongoDoctorToPostgres(mongoDoctor);
-        }
     }
 
     const count = await pgDoctors.countDoctorsByLegacyIds(normalizedLegacyIds);
@@ -1738,9 +1138,6 @@ function shouldRequireCsrf(req) {
         return false;
     }
     if (req.path === '/api/auth/login') {
-        return false;
-    }
-    if (req.path === '/debug/charset') {
         return false;
     }
     return true;
@@ -1866,29 +1263,14 @@ async function writeAuditLog(req, {
     metadata = {}
 } = {}) {
     try {
-        const actorUserId = getMongoCompatibleUserId(actorUser) || String(actorUser?._id || actorUser?.id || '').trim() || null;
-        if (AUDIT_IN_POSTGRES) {
-            await pgAppointments.createAuditLog({
-                action: String(action || 'unknown_action'),
-                result: String(result || 'success'),
-                targetType: String(targetType || ''),
-                targetId: String(targetId || ''),
-                actorUserPublicId: actorUserId,
-                actorRole: actorUser?.role || 'anonymous',
-                ip: getClientIp(req),
-                userAgent: getUserAgent(req),
-                metadata: metadata && typeof metadata === 'object' ? metadata : {}
-            });
-            return;
-        }
-
-        await AuditLog.create({
-            actorUserId: getMongoCompatibleUserId(actorUser) || null,
-            actorRole: actorUser?.role || 'anonymous',
+        const actorUserId = getUserPublicId(actorUser) || String(actorUser?._id || actorUser?.id || '').trim() || null;
+        await pgAppointments.createAuditLog({
             action: String(action || 'unknown_action'),
+            result: String(result || 'success'),
             targetType: String(targetType || ''),
             targetId: String(targetId || ''),
-            result,
+            actorUserPublicId: actorUserId,
+            actorRole: actorUser?.role || 'anonymous',
             ip: getClientIp(req),
             userAgent: getUserAgent(req),
             metadata: metadata && typeof metadata === 'object' ? metadata : {}
@@ -2092,7 +1474,7 @@ async function getAuthenticatedUser(req) {
     if (!accessToken) return null;
 
     const payload = verifyAccessToken(accessToken);
-    const user = await findUserById(payload.sub, { allowDualFallback: true });
+    const user = await findUserById(payload.sub);
     return ensureNormalizedRole(user || null);
 }
 
@@ -2214,12 +1596,14 @@ app.use('/api/book', bookingLimiter);
 app.use('/api/appointments', bookingLimiter);
 app.use('/api/admin', adminLimiter);
 
-app.get('/debug/charset', async (req, res) => {
+app.get('/debug/charset', requireSuperadminOnly, async (req, res) => {
+    if (!ENABLE_DEBUG_CHARSET_ENDPOINT) {
+        return res.status(404).json({ error: 'Not found.' });
+    }
     setAuthNoStore(res);
     res.set('Content-Type', 'application/json; charset=utf-8');
 
     const responseContentType = String(res.getHeader('Content-Type') || '');
-    console.log(`[DEBUG CHARSET] GET response Content-Type: ${responseContentType}`);
 
     return res.status(200).json({
         ok: true,
@@ -2228,27 +1612,25 @@ app.get('/debug/charset', async (req, res) => {
     });
 });
 
-app.post('/debug/charset', async (req, res) => {
+app.post('/debug/charset', requireSuperadminOnly, async (req, res) => {
+    if (!ENABLE_DEBUG_CHARSET_ENDPOINT) {
+        return res.status(404).json({ error: 'Not found.' });
+    }
     setAuthNoStore(res);
     res.set('Content-Type', 'application/json; charset=utf-8');
 
     const incomingText = typeof req.body?.text === 'string' ? req.body.text : DEBUG_CHARSET_SAMPLE_TEXT;
-    console.log('[DEBUG CHARSET] POST req.body:', req.body);
 
     try {
-        const created = await CharsetProbe.create({ text: incomingText });
-        const loaded = await CharsetProbe.findById(created._id).lean();
-        const loadedText = loaded?.text || '';
+        const pool = getPostgresPool();
+        const result = await pool.query('SELECT $1::text AS text', [incomingText]);
+        const loadedText = String(result.rows?.[0]?.text || '');
         const responseContentType = String(res.getHeader('Content-Type') || '');
-
-        console.log(`[DEBUG CHARSET] POST response Content-Type: ${responseContentType}`);
-        console.log(`[DEBUG CHARSET] DB write text: ${JSON.stringify(incomingText)}`);
-        console.log(`[DEBUG CHARSET] DB read text: ${JSON.stringify(loadedText)}`);
 
         return res.status(200).json({
             ok: true,
             incomingText,
-            writtenText: created.text,
+            writtenText: incomingText,
             readText: loadedText,
             dbRoundtripMatches: incomingText === loadedText,
             responseContentType
@@ -2303,10 +1685,10 @@ app.post('/api/auth/login', validateBody(loginBodySchema), async (req, res) => {
 
         let user;
         if (isEmail(identifier)) {
-            user = await findUserByEmail(identifier.toLowerCase(), { allowDualFallback: true });
+            user = await findUserByEmail(identifier.toLowerCase());
         } else {
             const cleanedPhone = cleanPhone(identifier);
-            user = await findUserByPhone(cleanedPhone, { allowDualFallback: true });
+            user = await findUserByPhone(cleanedPhone);
         }
 
         if (!user) {
@@ -2398,7 +1780,7 @@ app.post('/api/auth/refresh', async (req, res) => {
 
     try {
         const payload = verifyRefreshToken(refreshToken);
-        const user = await findUserById(payload.sub, { allowDualFallback: true });
+        const user = await findUserById(payload.sub);
 
         if (!user) {
             throw new Error('User not found for refresh token.');
@@ -2428,7 +1810,7 @@ app.get('/api/auth/me', async (req, res) => {
 
     try {
         const payload = verifyAccessToken(accessToken);
-        const user = await ensureNormalizedRole(await findUserById(payload.sub, { allowDualFallback: true }));
+        const user = await ensureNormalizedRole(await findUserById(payload.sub));
         if (!user) {
             return res.status(401).json({ error: 'Sesiune invalida.' });
         }
@@ -2490,9 +1872,7 @@ app.post('/api/auth/step-up', requireAuthenticated, validateBody(stepUpBodySchem
 
 app.get('/api/public/doctors', async (req, res) => {
     try {
-        const doctors = DOCTORS_IN_POSTGRES
-            ? await pgDoctors.listDoctors({ isActive: true })
-            : await Doctor.find({ isActive: true }).sort({ displayName: 1 }).lean();
+        const doctors = await pgDoctors.listDoctors({ isActive: true });
         return res.json({
             doctors: doctors.map(sanitizeDoctorForPublic)
         });
@@ -2509,51 +1889,22 @@ app.get('/api/slots', validateQuery(slotsQuerySchema), async (req, res) => {
         if (!doctor) {
             return res.status(404).json({ error: 'Doctor not found.' });
         }
-
-        if (APPOINTMENTS_IN_POSTGRES) {
-            const slotMatrix = await pgAppointments.getSlotMatrixForDoctorDate(doctor._id, date);
-            if (!slotMatrix.found) {
-                return res.status(404).json({ error: 'Doctor not found.' });
-            }
-            if (slotMatrix.inRange === false) {
-                return res.status(400).json({ error: 'Data selectata este in afara intervalului permis pentru acest medic.' });
-            }
-            if (slotMatrix.hasAvailability === false) {
-                return res.status(400).json({ error: 'Medicul selectat nu are disponibilitate in aceasta zi.' });
-            }
-
-            return res.json({
-                doctor: sanitizeDoctorForPublic(doctor),
-                date,
-                blocked: !!slotMatrix.blocked,
-                slots: slotMatrix.slots
-            });
+        const slotMatrix = await pgAppointments.getSlotMatrixForDoctorDate(doctor._id, date);
+        if (!slotMatrix.found) {
+            return res.status(404).json({ error: 'Doctor not found.' });
         }
-
-        if (!isDateInDoctorRange(date, doctor.bookingSettings?.monthsToShow)) {
+        if (slotMatrix.inRange === false) {
             return res.status(400).json({ error: 'Data selectata este in afara intervalului permis pentru acest medic.' });
         }
-
-        const day = getUtcDateFromISO(date).getUTCDay();
-        const weekdays = Array.isArray(doctor.availabilityRules?.weekdays) ? doctor.availabilityRules.weekdays : DEFAULT_AVAILABILITY_WEEKDAYS;
-        if (!weekdays.includes(day)) {
+        if (slotMatrix.hasAvailability === false) {
             return res.status(400).json({ error: 'Medicul selectat nu are disponibilitate in aceasta zi.' });
         }
-
-        const allSlots = generateDoctorSlots(doctor);
-        const isBlockedDate = Array.isArray(doctor.blockedDates) && doctor.blockedDates.includes(date);
-
-        const bookedTimes = (await Appointment.find({ date, doctorId: doctor._id }).select('time').lean()).map((a) => a.time);
-        const availableSlots = allSlots.map((time) => ({
-            time,
-            available: !isBlockedDate && !bookedTimes.includes(time)
-        }));
 
         return res.json({
             doctor: sanitizeDoctorForPublic(doctor),
             date,
-            blocked: !!isBlockedDate,
-            slots: availableSlots
+            blocked: !!slotMatrix.blocked,
+            slots: slotMatrix.slots
         });
     } catch (_) {
         return res.status(500).json({ error: 'Database error' });
@@ -2576,23 +1927,6 @@ async function handleAppointmentBooking(req, res) {
 
         if (!isDateInDoctorRange(date, doctor.bookingSettings?.monthsToShow)) {
             return res.status(400).json({ error: 'Data selectata este in afara intervalului permis pentru acest medic.' });
-        }
-
-        if (!APPOINTMENTS_IN_POSTGRES) {
-            const appointmentDay = getUtcDateFromISO(date).getUTCDay();
-            const weekdays = Array.isArray(doctor.availabilityRules?.weekdays) ? doctor.availabilityRules.weekdays : DEFAULT_AVAILABILITY_WEEKDAYS;
-            if (!weekdays.includes(appointmentDay)) {
-                return res.status(400).json({ error: 'Medicul selectat nu are disponibilitate in aceasta zi.' });
-            }
-
-            if (Array.isArray(doctor.blockedDates) && doctor.blockedDates.includes(date)) {
-                return res.status(409).json({ error: 'Ziua selectata este indisponibila pentru medicul ales.' });
-            }
-
-            const allowedSlots = generateDoctorSlots(doctor);
-            if (!allowedSlots.includes(time)) {
-                return res.status(400).json({ error: 'Ora selectata este invalida pentru medicul ales.' });
-            }
         }
 
         if (diagnosticFile) {
@@ -2620,56 +1954,33 @@ async function handleAppointmentBooking(req, res) {
             }
         }
 
-        let newAppointment;
-        if (APPOINTMENTS_IN_POSTGRES) {
-            newAppointment = await pgAppointments.createAppointmentTransactional({
-                doctorIdentifier: doctor._id,
-                name,
-                phone: cleanPhone(phone),
-                email: email.toLowerCase().trim(),
-                type,
-                date,
-                time,
-                notes: '',
-                hasDiagnosis: !!hasDiagnosis,
-                diagnosticFileMeta: safeDiagnosticFileMeta || null,
-                userPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null,
-                auditContext: {
-                    action: 'appointment_book',
-                    result: 'success',
-                    targetType: 'appointment',
-                    actorUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null,
-                    actorRole: req.user?.role || 'anonymous',
-                    ip: getClientIp(req),
-                    userAgent: getUserAgent(req),
-                    metadata: {
-                        doctorId: doctor._id,
-                        date,
-                        time
-                    }
+        const newAppointment = await pgAppointments.createAppointmentTransactional({
+            doctorIdentifier: doctor._id,
+            name,
+            phone: cleanPhone(phone),
+            email: email.toLowerCase().trim(),
+            type,
+            date,
+            time,
+            notes: '',
+            hasDiagnosis: !!hasDiagnosis,
+            diagnosticFileMeta: safeDiagnosticFileMeta || null,
+            userPublicId: getUserPublicId(req.user) || req.user?._id || null,
+            auditContext: {
+                action: 'appointment_book',
+                result: 'success',
+                targetType: 'appointment',
+                actorUserPublicId: getUserPublicId(req.user) || req.user?._id || null,
+                actorRole: req.user?.role || 'anonymous',
+                ip: getClientIp(req),
+                userAgent: getUserAgent(req),
+                metadata: {
+                    doctorId: doctor._id,
+                    date,
+                    time
                 }
-            });
-        } else {
-            const newAppointmentPayload = {
-                name,
-                phone: cleanPhone(phone),
-                email: email.toLowerCase().trim(),
-                type,
-                date,
-                time,
-                doctorId: doctor._id,
-                doctorSnapshotName: doctor.displayName,
-                hasDiagnosis: !!hasDiagnosis,
-                userId: getMongoCompatibleUserId(req.user) || null
-            };
-            if (safeDiagnosticFileMeta) {
-                newAppointmentPayload.diagnosticFileMeta = safeDiagnosticFileMeta;
             }
-
-            const mongoAppointment = new Appointment(newAppointmentPayload);
-            await mongoAppointment.save();
-            newAppointment = mongoAppointment;
-        }
+        });
 
         const appointmentData = {
             name,
@@ -2686,11 +1997,7 @@ async function handleAppointmentBooking(req, res) {
             if (stderr) console.error(`[EMAIL STDERR]: ${stderr}`);
 
             try {
-                if (APPOINTMENTS_IN_POSTGRES) {
-                    await pgAppointments.setAppointmentEmailSentByPublicId(newAppointment._id, true);
-                } else {
-                    await Appointment.findByIdAndUpdate(newAppointment._id, { emailSent: true });
-                }
+                await pgAppointments.setAppointmentEmailSentByPublicId(newAppointment._id, true);
             } catch (updateErr) {
                 console.error('[EMAIL DB UPDATE ERROR]:', updateErr.message);
             }
@@ -2704,7 +2011,7 @@ async function handleAppointmentBooking(req, res) {
             return res.status(err.status || 400).json({ error: err.message || 'Eroare la salvare.' });
         }
         console.error('Booking save failed:', err?.message || err, err?.code || '');
-        if (err?.code === 11000 || (APPOINTMENTS_IN_POSTGRES && pgAppointments.isUniqueViolation(err))) {
+        if (pgAppointments.isUniqueViolation(err)) {
             return res.status(409).json({ error: 'Interval deja rezervat.' });
         }
         return res.status(500).json({ error: 'Eroare la salvare.' });
@@ -2713,14 +2020,6 @@ async function handleAppointmentBooking(req, res) {
 
 app.post('/api/book', optionalAuth, validateBody(bookBodySchema), handleAppointmentBooking);
 app.post('/api/appointments', optionalAuth, validateBody(bookBodySchema), handleAppointmentBooking);
-
-function getAdminDoctorScopeQuery(user, fieldName = 'doctorId') {
-    const scope = doctorScopeQueryForUser(user, fieldName);
-    if (scope === null) {
-        return null;
-    }
-    return scope;
-}
 
 function sanitizeUserForAdmin(userDoc, doctorMap = new Map()) {
     const managedDoctorIds = normalizeManagedDoctorIds(userDoc.managedDoctorIds);
@@ -2739,11 +2038,7 @@ function sanitizeUserForAdmin(userDoc, doctorMap = new Map()) {
 }
 
 async function assertManagedDoctorsExist(managedDoctorIds) {
-    if (DOCTORS_IN_POSTGRES) {
-        return validateDoctorIdsExist((managedDoctorIds || []).map((id) => String(id)));
-    }
-    const ids = (managedDoctorIds || []).map((id) => new mongoose.Types.ObjectId(id));
-    return validateDoctorIdsExist(ids);
+    return validateDoctorIdsExist((managedDoctorIds || []).map((id) => String(id)));
 }
 
 async function loadDoctorsMapByIds(rawIds = []) {
@@ -2752,12 +2047,7 @@ async function loadDoctorsMapByIds(rawIds = []) {
         return new Map();
     }
 
-    let doctors;
-    if (DOCTORS_IN_POSTGRES) {
-        doctors = await pgDoctors.listDoctors({ legacyIds: ids, isActive: null });
-    } else {
-        doctors = await Doctor.find({ _id: { $in: ids } }).select('_id slug displayName').lean();
-    }
+    const doctors = await pgDoctors.listDoctors({ legacyIds: ids, isActive: null });
 
     const map = new Map();
     for (const doctor of doctors) {
@@ -2777,22 +2067,14 @@ app.get('/api/admin/appointments', requireViewerSchedulerOrSuperadmin, async (re
 
     try {
         let appointments;
-        if (APPOINTMENTS_IN_POSTGRES) {
-            if (isSuperadminUser(req.user)) {
-                appointments = await pgAppointments.listAppointments();
-            } else {
-                const scopedDoctorIds = getUserManagedDoctorIds(req.user);
-                if (scopedDoctorIds.length === 0) {
-                    return res.status(403).json({ error: 'Nu aveti niciun medic asignat.' });
-                }
-                appointments = await pgAppointments.listAppointments({ doctorLegacyIds: scopedDoctorIds });
-            }
+        if (isSuperadminUser(req.user)) {
+            appointments = await pgAppointments.listAppointments();
         } else {
-            const scopeQuery = getAdminDoctorScopeQuery(req.user, 'doctorId');
-            if (scopeQuery === null) {
+            const scopedDoctorIds = getUserManagedDoctorIds(req.user);
+            if (scopedDoctorIds.length === 0) {
                 return res.status(403).json({ error: 'Nu aveti niciun medic asignat.' });
             }
-            appointments = await Appointment.find(scopeQuery).sort({ date: 1, time: 1 }).lean();
+            appointments = await pgAppointments.listAppointments({ doctorLegacyIds: scopedDoctorIds });
         }
 
         await writeAuditLog(req, {
@@ -2812,14 +2094,12 @@ app.get('/api/admin/appointments/:id', requireViewerSchedulerOrSuperadmin, async
     setAuthNoStore(res);
 
     const appointmentId = String(req.params.id || '').trim();
-    if (!MONGODB_OBJECT_ID_REGEX.test(appointmentId)) {
+    if (!LEGACY_OBJECT_ID_REGEX.test(appointmentId)) {
         return res.status(400).json({ error: 'Programare invalida.' });
     }
 
     try {
-        const appointment = APPOINTMENTS_IN_POSTGRES
-            ? await pgAppointments.findAppointmentByPublicId(appointmentId)
-            : await Appointment.findById(appointmentId).lean();
+        const appointment = await pgAppointments.findAppointmentByPublicId(appointmentId);
         if (!appointment) {
             return res.status(404).json({ error: 'Programare negasita.' });
         }
@@ -2844,14 +2124,12 @@ app.get('/api/admin/appointments/:id/file-url', requireSchedulerOrSuperadmin, as
     setAuthNoStore(res);
 
     const appointmentId = String(req.params.id || '').trim();
-    if (!MONGODB_OBJECT_ID_REGEX.test(appointmentId)) {
+    if (!LEGACY_OBJECT_ID_REGEX.test(appointmentId)) {
         return res.status(400).json({ error: 'Programare invalida.' });
     }
 
     try {
-        const appointment = APPOINTMENTS_IN_POSTGRES
-            ? await pgAppointments.findAppointmentByPublicId(appointmentId)
-            : await Appointment.findById(appointmentId).lean();
+        const appointment = await pgAppointments.findAppointmentByPublicId(appointmentId);
         if (!appointment) {
             return res.status(404).json({ error: 'Programare negasita.' });
         }
@@ -2881,14 +2159,12 @@ app.post('/api/admin/resend-email/:id', requireSchedulerOrSuperadmin, async (req
     setAuthNoStore(res);
 
     const appointmentId = String(req.params.id || '').trim();
-    if (!MONGODB_OBJECT_ID_REGEX.test(appointmentId)) {
+    if (!LEGACY_OBJECT_ID_REGEX.test(appointmentId)) {
         return res.status(400).json({ error: 'Programare invalida.' });
     }
 
     try {
-        const appointment = APPOINTMENTS_IN_POSTGRES
-            ? await pgAppointments.findAppointmentByPublicId(appointmentId)
-            : await Appointment.findById(appointmentId);
+        const appointment = await pgAppointments.findAppointmentByPublicId(appointmentId);
         if (!appointment) return res.status(404).json({ error: 'Programare negasita.' });
         if (!canUserAccessDoctor(req.user, appointment.doctorId)) {
             return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
@@ -2908,11 +2184,7 @@ app.post('/api/admin/resend-email/:id', requireSchedulerOrSuperadmin, async (req
 
         try {
             await executeEmailScript(base64Data);
-            if (APPOINTMENTS_IN_POSTGRES) {
-                await pgAppointments.setAppointmentEmailSentByPublicId(appointment._id, true);
-            } else {
-                await Appointment.findByIdAndUpdate(appointment._id, { emailSent: true });
-            }
+            await pgAppointments.setAppointmentEmailSentByPublicId(appointment._id, true);
             await writeAuditLog(req, {
                 action: 'appointment_resend_email',
                 result: 'success',
@@ -2944,14 +2216,8 @@ app.get('/api/admin/stats', requireSuperadminOnly, async (req, res) => {
     setAuthNoStore(res);
 
     try {
-        let usedSize = 0;
-        if (APPOINTMENTS_IN_POSTGRES) {
-            const stats = await pgAppointments.getAppointmentStorageStats();
-            usedSize = Number(stats.appointmentsBytes || 0);
-        } else {
-            const stats = await mongoose.connection.db.command({ dbStats: 1 });
-            usedSize = stats.storageSize || stats.dataSize;
-        }
+        const stats = await pgAppointments.getAppointmentStorageStats();
+        const usedSize = Number(stats.appointmentsBytes || 0);
         await writeAuditLog(req, {
             action: 'admin_stats_view',
             result: 'success',
@@ -2969,76 +2235,24 @@ app.get('/api/admin/stats', requireSuperadminOnly, async (req, res) => {
     }
 });
 
-app.get('/api/admin/mongo-tls', requireSuperadminOnly, async (req, res) => {
-    setAuthNoStore(res);
-
-    if (!MONGO_RUNTIME_ENABLED) {
-        return res.status(404).json({ error: 'Mongo runtime is disabled for current DB provider.' });
-    }
-
-    try {
-        const diagnostics = getMongoTlsDiagnosticsSnapshot();
-        await writeAuditLog(req, {
-            action: 'admin_mongo_tls_view',
-            result: 'success',
-            targetType: 'system',
-            targetId: 'mongo_tls',
-            actorUser: req.user,
-            metadata: {
-                connectionState: diagnostics.connectionState,
-                configuredMinVersion: diagnostics.configuredMinVersion,
-                effectiveMinVersion: diagnostics.effectiveMinVersion,
-                fallbackToTls12Used: diagnostics.fallbackToTls12Used
-            }
-        });
-        return res.json(diagnostics);
-    } catch (_) {
-        await writeAuditLog(req, {
-            action: 'admin_mongo_tls_view',
-            result: 'failure',
-            targetType: 'system',
-            targetId: 'mongo_tls',
-            actorUser: req.user
-        });
-        return res.status(500).json({ error: 'Could not fetch MongoDB TLS diagnostics' });
-    }
-});
-
 app.post('/api/admin/reset', requireSuperadminOnly, requireStepUp('appointments_reset'), async (req, res) => {
     setAuthNoStore(res);
 
     try {
-        let deletedCount;
-        if (APPOINTMENTS_IN_POSTGRES && AUDIT_IN_POSTGRES) {
-            deletedCount = await pgAppointments.withTransaction(async (client) => {
-                const count = await pgAppointments.deleteAllAppointments(client);
-                await pgAppointments.createAuditLog({
-                    action: 'appointments_reset',
-                    result: 'success',
-                    targetType: 'appointment_collection',
-                    actorUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null,
-                    actorRole: req.user?.role || 'anonymous',
-                    ip: getClientIp(req),
-                    userAgent: getUserAgent(req),
-                    metadata: { deletedCount: count }
-                }, client);
-                return count;
-            });
-        } else {
-            deletedCount = APPOINTMENTS_IN_POSTGRES
-                ? await pgAppointments.deleteAllAppointments()
-                : (await Appointment.deleteMany({})).deletedCount || 0;
-        }
-
-        if (!(APPOINTMENTS_IN_POSTGRES && AUDIT_IN_POSTGRES)) {
-            await writeAuditLog(req, {
+        const deletedCount = await pgAppointments.withTransaction(async (client) => {
+            const count = await pgAppointments.deleteAllAppointments(client);
+            await pgAppointments.createAuditLog({
                 action: 'appointments_reset',
                 result: 'success',
                 targetType: 'appointment_collection',
-                actorUser: req.user,
-                metadata: { deletedCount }
-            });
-        }
+                actorUserPublicId: getUserPublicId(req.user) || req.user?._id || null,
+                actorRole: req.user?.role || 'anonymous',
+                ip: getClientIp(req),
+                userAgent: getUserAgent(req),
+                metadata: { deletedCount: count }
+            }, client);
+            return count;
+        });
         return res.json({ success: true, message: 'Baza de date a fost resetata.' });
     } catch (_) {
         await writeAuditLog(req, {
@@ -3055,51 +2269,35 @@ app.delete('/api/admin/appointment/:id', requireSuperadminOnly, requireStepUp('a
     setAuthNoStore(res);
 
     const appointmentId = String(req.params.id || '').trim();
-    if (!MONGODB_OBJECT_ID_REGEX.test(appointmentId)) {
+    if (!LEGACY_OBJECT_ID_REGEX.test(appointmentId)) {
         return res.status(400).json({ error: 'Programare invalida.' });
     }
 
     try {
-        let deleted;
-        if (APPOINTMENTS_IN_POSTGRES && AUDIT_IN_POSTGRES) {
-            deleted = await pgAppointments.withTransaction(async (client) => {
-                const removed = await pgAppointments.deleteAppointmentByPublicId(appointmentId, client);
-                if (!removed) {
-                    return null;
-                }
-                await pgAppointments.createAuditLog({
-                    action: 'appointment_delete',
-                    result: 'success',
-                    targetType: 'appointment',
-                    targetId: appointmentId,
-                    actorUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null,
-                    actorRole: req.user?.role || 'anonymous',
-                    ip: getClientIp(req),
-                    userAgent: getUserAgent(req),
-                    metadata: {
-                        doctorId: removed.doctorId || null,
-                        date: removed.date || null,
-                        time: removed.time || null
-                    }
-                }, client);
-                return removed;
-            });
-        } else {
-            deleted = APPOINTMENTS_IN_POSTGRES
-                ? await pgAppointments.deleteAppointmentByPublicId(appointmentId)
-                : await Appointment.findByIdAndDelete(appointmentId);
-        }
-        if (!deleted) {
-            return res.status(404).json({ error: 'Programare negasita.' });
-        }
-        if (!(APPOINTMENTS_IN_POSTGRES && AUDIT_IN_POSTGRES)) {
-            await writeAuditLog(req, {
+        const deleted = await pgAppointments.withTransaction(async (client) => {
+            const removed = await pgAppointments.deleteAppointmentByPublicId(appointmentId, client);
+            if (!removed) {
+                return null;
+            }
+            await pgAppointments.createAuditLog({
                 action: 'appointment_delete',
                 result: 'success',
                 targetType: 'appointment',
                 targetId: appointmentId,
-                actorUser: req.user
-            });
+                actorUserPublicId: getUserPublicId(req.user) || req.user?._id || null,
+                actorRole: req.user?.role || 'anonymous',
+                ip: getClientIp(req),
+                userAgent: getUserAgent(req),
+                metadata: {
+                    doctorId: removed.doctorId || null,
+                    date: removed.date || null,
+                    time: removed.time || null
+                }
+            }, client);
+            return removed;
+        });
+        if (!deleted) {
+            return res.status(404).json({ error: 'Programare negasita.' });
         }
         return res.json({ success: true, message: 'Programarea pacientului a fost anulata.' });
     } catch (_) {
@@ -3119,39 +2317,21 @@ app.delete('/api/admin/appointments/by-date', requireSuperadminOnly, requireStep
 
     try {
         const { date } = req.validatedBody;
-        let deletedCount;
-        if (APPOINTMENTS_IN_POSTGRES && AUDIT_IN_POSTGRES) {
-            deletedCount = await pgAppointments.withTransaction(async (client) => {
-                const count = await pgAppointments.deleteAppointmentsByDate(date, client);
-                await pgAppointments.createAuditLog({
-                    action: 'appointments_delete_by_date',
-                    result: 'success',
-                    targetType: 'appointment_collection',
-                    targetId: date,
-                    actorUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null,
-                    actorRole: req.user?.role || 'anonymous',
-                    ip: getClientIp(req),
-                    userAgent: getUserAgent(req),
-                    metadata: { deletedCount: count }
-                }, client);
-                return count;
-            });
-        } else {
-            deletedCount = APPOINTMENTS_IN_POSTGRES
-                ? await pgAppointments.deleteAppointmentsByDate(date)
-                : (await Appointment.deleteMany({ date })).deletedCount || 0;
-        }
-
-        if (!(APPOINTMENTS_IN_POSTGRES && AUDIT_IN_POSTGRES)) {
-            await writeAuditLog(req, {
+        const deletedCount = await pgAppointments.withTransaction(async (client) => {
+            const count = await pgAppointments.deleteAppointmentsByDate(date, client);
+            await pgAppointments.createAuditLog({
                 action: 'appointments_delete_by_date',
                 result: 'success',
                 targetType: 'appointment_collection',
                 targetId: date,
-                actorUser: req.user,
-                metadata: { deletedCount }
-            });
-        }
+                actorUserPublicId: getUserPublicId(req.user) || req.user?._id || null,
+                actorRole: req.user?.role || 'anonymous',
+                ip: getClientIp(req),
+                userAgent: getUserAgent(req),
+                metadata: { deletedCount: count }
+            }, client);
+            return count;
+        });
         return res.json({
             success: true,
             deletedCount,
@@ -3172,9 +2352,7 @@ app.get('/api/admin/export', requireSuperadminOnly, requireStepUp('appointments_
     setAuthNoStore(res);
 
     try {
-        const appointments = APPOINTMENTS_IN_POSTGRES
-            ? await pgAppointments.listAppointments()
-            : await Appointment.find().sort({ date: 1, time: 1 }).lean();
+        const appointments = await pgAppointments.listAppointments();
 
         const metadataRows = [{
             NOTICE: 'CONFIDENTIAL - authorized superadmin use only',
@@ -3237,22 +2415,14 @@ app.get('/api/admin/doctors', requireViewerSchedulerOrSuperadmin, async (req, re
 
     try {
         let doctors;
-        if (DOCTORS_IN_POSTGRES) {
-            if (isSuperadminUser(req.user)) {
-                doctors = await pgDoctors.listDoctors({ isActive: null });
-            } else {
-                const scopedDoctorIds = getUserManagedDoctorIds(req.user);
-                if (scopedDoctorIds.length === 0) {
-                    return res.status(403).json({ error: 'Nu aveti niciun medic asignat.' });
-                }
-                doctors = await pgDoctors.listDoctors({ legacyIds: scopedDoctorIds, isActive: null });
-            }
+        if (isSuperadminUser(req.user)) {
+            doctors = await pgDoctors.listDoctors({ isActive: null });
         } else {
-            const scopeQuery = doctorScopeQueryForUser(req.user);
-            if (scopeQuery === null) {
+            const scopedDoctorIds = getUserManagedDoctorIds(req.user);
+            if (scopedDoctorIds.length === 0) {
                 return res.status(403).json({ error: 'Nu aveti niciun medic asignat.' });
             }
-            doctors = await Doctor.find(scopeQuery).sort({ displayName: 1 }).lean();
+            doctors = await pgDoctors.listDoctors({ legacyIds: scopedDoctorIds, isActive: null });
         }
 
         await writeAuditLog(req, {
@@ -3274,33 +2444,17 @@ app.post('/api/admin/doctors', requireSuperadminOnly, validateBody(doctorCreateB
 
     try {
         const payload = req.validatedBody;
-        const doctor = DOCTORS_IN_POSTGRES
-            ? await pgDoctors.createDoctor({
-                slug: payload.slug,
-                displayName: sanitizeInlineString(payload.displayName),
-                specialty: sanitizeInlineString(payload.specialty),
-                isActive: !!payload.isActive,
-                bookingSettings: payload.bookingSettings,
-                availabilityRules: payload.availabilityRules,
-                blockedDates: payload.blockedDates,
-                createdByUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null,
-                updatedByUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null
-            })
-            : await (async () => {
-                const mongoDoctor = new Doctor({
-                    slug: payload.slug,
-                    displayName: sanitizeInlineString(payload.displayName),
-                    specialty: sanitizeInlineString(payload.specialty),
-                    isActive: !!payload.isActive,
-                    bookingSettings: payload.bookingSettings,
-                    availabilityRules: payload.availabilityRules,
-                    blockedDates: payload.blockedDates,
-                    createdByUserId: getMongoCompatibleUserId(req.user) || null,
-                    updatedByUserId: getMongoCompatibleUserId(req.user) || null
-                });
-                await mongoDoctor.save();
-                return mongoDoctor.toObject();
-            })();
+        const doctor = await pgDoctors.createDoctor({
+            slug: payload.slug,
+            displayName: sanitizeInlineString(payload.displayName),
+            specialty: sanitizeInlineString(payload.specialty),
+            isActive: !!payload.isActive,
+            bookingSettings: payload.bookingSettings,
+            availabilityRules: payload.availabilityRules,
+            blockedDates: payload.blockedDates,
+            createdByUserPublicId: getUserPublicId(req.user) || req.user?._id || null,
+            updatedByUserPublicId: getUserPublicId(req.user) || req.user?._id || null
+        });
 
         await writeAuditLog(req, {
             action: 'doctor_create',
@@ -3318,7 +2472,7 @@ app.post('/api/admin/doctors', requireSuperadminOnly, validateBody(doctorCreateB
             targetType: 'doctor',
             actorUser: req.user
         });
-        if ((!DOCTORS_IN_POSTGRES && error?.code === 11000) || (DOCTORS_IN_POSTGRES && pgDoctors.isUniqueViolation(error))) {
+        if (pgDoctors.isUniqueViolation(error)) {
             return res.status(409).json({ error: 'Slug-ul medicului exista deja.' });
         }
         return res.status(500).json({ error: 'Eroare la crearea medicului.' });
@@ -3329,7 +2483,7 @@ app.patch('/api/admin/doctors/:id', requireSchedulerOrSuperadmin, validateBody(d
     setAuthNoStore(res);
 
     const doctorId = String(req.params.id || '').trim();
-    if (!MONGODB_OBJECT_ID_REGEX.test(doctorId)) {
+    if (!LEGACY_OBJECT_ID_REGEX.test(doctorId)) {
         return res.status(400).json({ error: 'Medic invalid.' });
     }
     if (!isSuperadminUser(req.user) && !canUserAccessDoctor(req.user, doctorId)) {
@@ -3346,32 +2500,14 @@ app.patch('/api/admin/doctors/:id', requireSchedulerOrSuperadmin, validateBody(d
         if (updates.bookingSettings !== undefined) updateDoc.bookingSettings = updates.bookingSettings;
         if (updates.availabilityRules !== undefined) updateDoc.availabilityRules = updates.availabilityRules;
         if (updates.blockedDates !== undefined) updateDoc.blockedDates = updates.blockedDates;
-        updateDoc.updatedByUserPublicId = getMongoCompatibleUserId(req.user) || req.user?._id || null;
+        updateDoc.updatedByUserPublicId = getUserPublicId(req.user) || req.user?._id || null;
 
-        const doctor = DOCTORS_IN_POSTGRES
-            ? await pgDoctors.updateDoctorByLegacyId(doctorId, updateDoc)
-            : await (async () => {
-                const mongoUpdateDoc = { ...updateDoc };
-                delete mongoUpdateDoc.updatedByUserPublicId;
-                mongoUpdateDoc.updatedByUserId = getMongoCompatibleUserId(req.user) || null;
-                return Doctor.findByIdAndUpdate(
-                    doctorId,
-                    { $set: mongoUpdateDoc },
-                    { new: true, runValidators: true }
-                );
-            })();
+        const doctor = await pgDoctors.updateDoctorByLegacyId(doctorId, updateDoc);
         if (!doctor) {
             return res.status(404).json({ error: 'Medic negasit.' });
         }
 
-        if (APPOINTMENTS_IN_POSTGRES) {
-            await pgAppointments.updateDoctorSnapshotNameByDoctorLegacyId(doctor._id, doctor.displayName);
-        } else {
-            await Appointment.updateMany(
-                { doctorId: doctor._id, doctorSnapshotName: { $ne: sanitizeInlineString(doctor.displayName) } },
-                { $set: { doctorSnapshotName: doctor.displayName } }
-            );
-        }
+        await pgAppointments.updateDoctorSnapshotNameByDoctorLegacyId(doctor._id, doctor.displayName);
 
         await writeAuditLog(req, {
             action: 'doctor_update',
@@ -3381,7 +2517,7 @@ app.patch('/api/admin/doctors/:id', requireSchedulerOrSuperadmin, validateBody(d
             actorUser: req.user,
             metadata: { fields: Object.keys(updates || {}) }
         });
-        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(DOCTORS_IN_POSTGRES ? doctor : doctor.toObject(), { includeAudit: true }) });
+        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(doctor, { includeAudit: true }) });
     } catch (error) {
         await writeAuditLog(req, {
             action: 'doctor_update',
@@ -3390,7 +2526,7 @@ app.patch('/api/admin/doctors/:id', requireSchedulerOrSuperadmin, validateBody(d
             targetId: doctorId,
             actorUser: req.user
         });
-        if ((!DOCTORS_IN_POSTGRES && error?.code === 11000) || (DOCTORS_IN_POSTGRES && pgDoctors.isUniqueViolation(error))) {
+        if (pgDoctors.isUniqueViolation(error)) {
             return res.status(409).json({ error: 'Slug-ul medicului exista deja.' });
         }
         return res.status(500).json({ error: 'Eroare la actualizarea medicului.' });
@@ -3401,7 +2537,7 @@ app.post('/api/admin/doctors/:id/block-date', requireSchedulerOrSuperadmin, vali
     setAuthNoStore(res);
 
     const doctorId = String(req.params.id || '').trim();
-    if (!MONGODB_OBJECT_ID_REGEX.test(doctorId)) {
+    if (!LEGACY_OBJECT_ID_REGEX.test(doctorId)) {
         return res.status(400).json({ error: 'Medic invalid.' });
     }
     if (!isSuperadminUser(req.user) && !canUserAccessDoctor(req.user, doctorId)) {
@@ -3410,20 +2546,11 @@ app.post('/api/admin/doctors/:id/block-date', requireSchedulerOrSuperadmin, vali
 
     try {
         const { date } = req.validatedBody;
-        const doctor = DOCTORS_IN_POSTGRES
-            ? await pgDoctors.blockDoctorDateByLegacyId(
-                doctorId,
-                date,
-                { actorUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null }
-            )
-            : await Doctor.findByIdAndUpdate(
-                doctorId,
-                {
-                    $addToSet: { blockedDates: date },
-                    $set: { updatedByUserId: getMongoCompatibleUserId(req.user) || null }
-                },
-                { new: true, runValidators: true }
-            );
+        const doctor = await pgDoctors.blockDoctorDateByLegacyId(
+            doctorId,
+            date,
+            { actorUserPublicId: getUserPublicId(req.user) || req.user?._id || null }
+        );
 
         if (!doctor) {
             return res.status(404).json({ error: 'Medic negasit.' });
@@ -3437,7 +2564,7 @@ app.post('/api/admin/doctors/:id/block-date', requireSchedulerOrSuperadmin, vali
             actorUser: req.user,
             metadata: { date }
         });
-        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(DOCTORS_IN_POSTGRES ? doctor : doctor.toObject(), { includeAudit: true }) });
+        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(doctor, { includeAudit: true }) });
     } catch (_) {
         return res.status(500).json({ error: 'Eroare la blocarea zilei.' });
     }
@@ -3447,7 +2574,7 @@ app.delete('/api/admin/doctors/:id/block-date/:date', requireSchedulerOrSuperadm
     setAuthNoStore(res);
 
     const doctorId = String(req.params.id || '').trim();
-    if (!MONGODB_OBJECT_ID_REGEX.test(doctorId)) {
+    if (!LEGACY_OBJECT_ID_REGEX.test(doctorId)) {
         return res.status(400).json({ error: 'Medic invalid.' });
     }
     if (!isSuperadminUser(req.user) && !canUserAccessDoctor(req.user, doctorId)) {
@@ -3460,20 +2587,11 @@ app.delete('/api/admin/doctors/:id/block-date/:date', requireSchedulerOrSuperadm
     }
 
     try {
-        const doctor = DOCTORS_IN_POSTGRES
-            ? await pgDoctors.unblockDoctorDateByLegacyId(
-                doctorId,
-                rawDate,
-                { actorUserPublicId: getMongoCompatibleUserId(req.user) || req.user?._id || null }
-            )
-            : await Doctor.findByIdAndUpdate(
-                doctorId,
-                {
-                    $pull: { blockedDates: rawDate },
-                    $set: { updatedByUserId: getMongoCompatibleUserId(req.user) || null }
-                },
-                { new: true, runValidators: true }
-            );
+        const doctor = await pgDoctors.unblockDoctorDateByLegacyId(
+            doctorId,
+            rawDate,
+            { actorUserPublicId: getUserPublicId(req.user) || req.user?._id || null }
+        );
         if (!doctor) {
             return res.status(404).json({ error: 'Medic negasit.' });
         }
@@ -3487,7 +2605,7 @@ app.delete('/api/admin/doctors/:id/block-date/:date', requireSchedulerOrSuperadm
             metadata: { date: rawDate }
         });
 
-        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(DOCTORS_IN_POSTGRES ? doctor : doctor.toObject(), { includeAudit: true }) });
+        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(doctor, { includeAudit: true }) });
     } catch (_) {
         return res.status(500).json({ error: 'Eroare la reactivarea zilei.' });
     }
@@ -3515,38 +2633,25 @@ app.post('/api/admin/users', requireSuperadminOnly, validateBody(adminCreateUser
             return res.status(400).json({ error: 'Unul sau mai multi doctori asignati nu exista.' });
         }
 
-        const existingEmail = await findUserByEmail(normalizedEmail, { allowDualFallback: true });
+        const existingEmail = await findUserByEmail(normalizedEmail);
         if (existingEmail) {
             return res.status(409).json({ error: 'Acest email este deja inregistrat.' });
         }
 
-        const existingPhone = await findUserByPhone(cleanedPhone, { allowDualFallback: true });
+        const existingPhone = await findUserByPhone(cleanedPhone);
         if (existingPhone) {
             return res.status(409).json({ error: 'Acest numar de telefon este deja inregistrat.' });
         }
 
         const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
-        let user;
-        if (USERS_IN_POSTGRES) {
-            user = await pgUsers.withTransaction(async (client) => pgUsers.createUser({
-                email: normalizedEmail,
-                phone: cleanedPhone,
-                passwordHash: hashedPassword,
-                displayName: displayName.trim(),
-                role,
-                managedDoctorIds: normalizedDoctorIds
-            }, client));
-        } else {
-            user = new User({
-                email: normalizedEmail,
-                phone: cleanedPhone,
-                password: hashedPassword,
-                displayName: displayName.trim(),
-                role,
-                managedDoctorIds: normalizedDoctorIds.map((id) => new mongoose.Types.ObjectId(id))
-            });
-            await user.save();
-        }
+        const user = await pgUsers.withTransaction(async (client) => pgUsers.createUser({
+            email: normalizedEmail,
+            phone: cleanedPhone,
+            passwordHash: hashedPassword,
+            displayName: displayName.trim(),
+            role,
+            managedDoctorIds: normalizedDoctorIds
+        }, client));
 
         const doctorsMap = await loadDoctorsMapByIds(normalizedDoctorIds);
         await writeAuditLog(req, {
@@ -3560,7 +2665,7 @@ app.post('/api/admin/users', requireSuperadminOnly, validateBody(adminCreateUser
 
         return res.status(201).json({
             success: true,
-            user: sanitizeUserForAdmin(USERS_IN_POSTGRES ? user : user.toObject(), doctorsMap)
+            user: sanitizeUserForAdmin(user, doctorsMap)
         });
     } catch (error) {
         await writeAuditLog(req, {
@@ -3569,10 +2674,7 @@ app.post('/api/admin/users', requireSuperadminOnly, validateBody(adminCreateUser
             targetType: 'user',
             actorUser: req.user
         });
-        if (!USERS_IN_POSTGRES && error?.code === 11000) {
-            return res.status(409).json({ error: 'Email sau telefon deja inregistrat.' });
-        }
-        if (USERS_IN_POSTGRES && pgUsers.isUniqueViolation(error)) {
+        if (pgUsers.isUniqueViolation(error)) {
             return res.status(409).json({ error: 'Email sau telefon deja inregistrat.' });
         }
         return res.status(500).json({ error: 'Database error' });
@@ -3583,16 +2685,7 @@ app.get('/api/admin/users', requireSuperadminOnly, async (req, res) => {
     setAuthNoStore(res);
 
     try {
-        if (USERS_IN_POSTGRES && DUAL_MONGO_USER_FALLBACK) {
-            const mongoUsers = await User.find().lean();
-            for (const mongoUser of mongoUsers) {
-                await migrateMongoUserToPostgres(mongoUser);
-            }
-        }
-
-        const users = USERS_IN_POSTGRES
-            ? await pgUsers.listUsers()
-            : await User.find().select('-password').sort({ createdAt: -1 }).lean();
+        const users = await pgUsers.listUsers();
         const allDoctorIds = users.flatMap((user) => normalizeManagedDoctorIds(user.managedDoctorIds));
         const doctorMap = await loadDoctorsMapByIds(allDoctorIds);
         const normalizedUsers = users.map((user) => sanitizeUserForAdmin(user, doctorMap));
@@ -3615,7 +2708,7 @@ app.post('/api/admin/users/role', requireSuperadminOnly, requireStepUp('user_rol
     try {
         const { userId, role } = req.validatedBody;
 
-        const user = await findUserById(userId, { allowDualFallback: true });
+        const user = await findUserById(userId);
         if (!user) {
             return res.status(404).json({ error: 'Utilizator negasit.' });
         }
@@ -3658,7 +2751,7 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
     }
 
     try {
-        const existingUser = await findUserById(userId, { allowDualFallback: true });
+        const existingUser = await findUserById(userId);
         if (!existingUser) {
             return res.status(404).json({ error: 'Utilizator negasit.' });
         }
@@ -3668,7 +2761,7 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
 
         if (updates.email !== undefined) {
             const normalizedEmail = updates.email.toLowerCase();
-            const duplicate = await findUserByEmail(normalizedEmail, { allowDualFallback: true });
+            const duplicate = await findUserByEmail(normalizedEmail);
             if (duplicate && String(duplicate._id) !== String(existingUser._id)) {
                 return res.status(409).json({ error: 'Acest email este deja inregistrat.' });
             }
@@ -3681,7 +2774,7 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
                 return res.status(400).json({ error: 'Format telefon invalid.' });
             }
             const cleanedPhone = cleanPhone(updates.phone);
-            const duplicatePhone = await findUserByPhone(cleanedPhone, { allowDualFallback: true });
+            const duplicatePhone = await findUserByPhone(cleanedPhone);
             if (duplicatePhone && String(duplicatePhone._id) !== String(existingUser._id)) {
                 return res.status(409).json({ error: 'Acest numar de telefon este deja inregistrat.' });
             }
@@ -3700,9 +2793,7 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
             }
 
             if (existingUser.role === ROLE.SUPERADMIN && updates.role !== ROLE.SUPERADMIN) {
-                const superadminCount = USERS_IN_POSTGRES
-                    ? await pgUsers.countUsersByRole(ROLE.SUPERADMIN)
-                    : await User.countDocuments({ role: ROLE.SUPERADMIN });
+                const superadminCount = await pgUsers.countUsersByRole(ROLE.SUPERADMIN);
                 if (superadminCount <= 1) {
                     return res.status(403).json({ error: 'Nu puteti retrograda ultimul superadmin.' });
                 }
@@ -3723,9 +2814,7 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
             if (!exists) {
                 return res.status(400).json({ error: 'Unul sau mai multi doctori asignati nu exista.' });
             }
-            existingUser.managedDoctorIds = USERS_IN_POSTGRES
-                ? normalizedDoctorIds
-                : normalizedDoctorIds.map((id) => new mongoose.Types.ObjectId(id));
+            existingUser.managedDoctorIds = normalizedDoctorIds;
             changedFields.push('managedDoctorIds');
         }
 
@@ -3747,7 +2836,7 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
 
         return res.json({
             success: true,
-            user: sanitizeUserForAdmin(USERS_IN_POSTGRES ? savedUser : savedUser.toObject(), doctorsMap)
+            user: sanitizeUserForAdmin(savedUser, doctorsMap)
         });
     } catch (error) {
         await writeAuditLog(req, {
@@ -3757,10 +2846,7 @@ app.patch('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_upd
             targetId: userId,
             actorUser: req.user
         });
-        if (!USERS_IN_POSTGRES && error?.code === 11000) {
-            return res.status(409).json({ error: 'Email sau telefon deja inregistrat.' });
-        }
-        if (USERS_IN_POSTGRES && pgUsers.isUniqueViolation(error)) {
+        if (pgUsers.isUniqueViolation(error)) {
             return res.status(409).json({ error: 'Email sau telefon deja inregistrat.' });
         }
         return res.status(500).json({ error: 'Database error' });
@@ -3780,25 +2866,19 @@ app.delete('/api/admin/users/:id', requireSuperadminOnly, requireStepUp('user_de
     }
 
     try {
-        const target = await findUserById(userId, { allowDualFallback: true });
+        const target = await findUserById(userId);
         if (!target) {
             return res.status(404).json({ error: 'Utilizator negasit.' });
         }
 
         if (target.role === ROLE.SUPERADMIN) {
-            const superadminCount = USERS_IN_POSTGRES
-                ? await pgUsers.countUsersByRole(ROLE.SUPERADMIN)
-                : await User.countDocuments({ role: ROLE.SUPERADMIN });
+            const superadminCount = await pgUsers.countUsersByRole(ROLE.SUPERADMIN);
             if (superadminCount <= 1) {
                 return res.status(403).json({ error: 'Nu puteti sterge ultimul superadmin.' });
             }
         }
 
-        if (USERS_IN_POSTGRES) {
-            await pgUsers.deleteUserByPublicId(target._id);
-        } else {
-            await User.deleteOne({ _id: target._id });
-        }
+        await pgUsers.deleteUserByPublicId(target._id);
         await writeAuditLog(req, {
             action: 'user_delete',
             result: 'success',
@@ -3836,20 +2916,11 @@ app.use((err, req, res, next) => {
 });
 
 async function validatePostgresStartupHealth() {
-    if (!POSTGRES_ENABLED) {
-        console.log(`[POSTGRES] Startup health check skipped (DB_PROVIDER=${DB_PROVIDER}).`);
-        return;
-    }
-
     const health = await runPostgresHealthCheck();
-    if (health.skipped) {
-        console.log(`[POSTGRES] Startup health check skipped (${health.reason}).`);
-        return;
-    }
 
     console.log(
         `[POSTGRES] Startup health check OK `
-        + `(provider=${DB_PROVIDER}, target=${health.target}, latencyMs=${health.latencyMs}).`
+        + `(target=${health.target}, latencyMs=${health.latencyMs}).`
     );
 }
 
@@ -3860,21 +2931,15 @@ async function bootstrapServer() {
         if (superadminBootstrap?.skipped) {
             console.log(`[AUTH] Superadmin bootstrap skipped: ${superadminBootstrap.reason}.`);
         }
-        if (POSTGRES_ENABLED && !MONGO_RUNTIME_ENABLED) {
-            const migrationSummary = await ensureDefaultDoctorAndBackfill();
-            console.log('Startup migration summary:', migrationSummary);
-        }
+        const migrationSummary = await ensureDefaultDoctorAndBackfill();
+        console.log('Startup migration summary:', migrationSummary);
     } catch (error) {
         console.error(`[BOOTSTRAP] Startup initialization failed: ${redactPostgresUrlInText(error?.message || String(error))}`);
         process.exit(1);
     }
 
     app.listen(PORT, () => {
-        console.log(
-            `Server running on http://localhost:${PORT} `
-            + `(DB_PROVIDER=${DB_PROVIDER}, postgres=${POSTGRES_ENABLED ? 'enabled' : 'disabled'}, `
-            + `mongoRuntime=${MONGO_RUNTIME_ENABLED ? 'enabled' : 'disabled'})`
-        );
+        console.log(`Server running on http://localhost:${PORT} (postgres-only mode)`);
     });
 }
 

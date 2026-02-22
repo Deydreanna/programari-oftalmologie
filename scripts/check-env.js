@@ -1,18 +1,10 @@
 #!/usr/bin/env node
 require('dotenv').config();
 
-const { validateBaseEnv, isMongoRuntimeProvider } = require('./env-utils');
-const { buildMongoTlsPolicy } = require('../utils/mongo-tls-config');
+const { validateBaseEnv } = require('./env-utils');
 
 const result = validateBaseEnv(process.env);
-const shouldValidateMongoTls = isMongoRuntimeProvider(result.parsed.dbProvider);
-const mongoTlsPolicy = shouldValidateMongoTls
-    ? buildMongoTlsPolicy(process.env)
-    : { validationErrors: [] };
-const errors = Array.from(new Set([
-    ...result.errors,
-    ...mongoTlsPolicy.validationErrors
-]));
+const errors = Array.from(new Set(result.errors));
 
 if (errors.length) {
     console.error('Environment validation failed:');

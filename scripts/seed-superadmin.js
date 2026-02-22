@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 require('dotenv').config();
 
-const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
-const { validateBaseEnv, normalizeDbProvider, isPostgresProvider } = require('./env-utils');
+const { validateBaseEnv } = require('./env-utils');
 const pgUsers = require('../db/users-postgres');
 const { closePostgresPool } = require('../db/postgres');
 
@@ -34,34 +33,6 @@ function validateSeedEnv(env) {
     }
 
     return errors;
-}
-
-const userSchema = new mongoose.Schema({
-    email: { type: String, unique: true, sparse: true, lowercase: true, trim: true },
-    phone: { type: String, unique: true, sparse: true, trim: true },
-    password: String,
-    googleId: String,
-    displayName: String,
-    role: { type: String, enum: ['viewer', 'scheduler', 'superadmin'], default: 'viewer' },
-    createdAt: { type: Date, default: Date.now }
-});
-
-const User = mongoose.models.User || mongoose.model('User', userSchema);
-
-async function seedMongoSuperadmin({ mongodbUri, email, hashedPassword }) {
-    await mongoose.connect(mongodbUri);
-    const update = {
-        email,
-        password: hashedPassword,
-        role: 'superadmin',
-        displayName: 'Super Admin'
-    };
-    const user = await User.findOneAndUpdate(
-        { email },
-        { $set: update, $setOnInsert: { createdAt: new Date() } },
-        { new: true, upsert: true }
-    );
-    return { provider: 'mongo', publicId: String(user?._id || ''), email: user.email };
 }
 
 async function seedPostgresSuperadmin({ email, hashedPassword }) {
@@ -98,45 +69,27 @@ async function run() {
         process.exit(1);
     }
 
-    const mongodbUri = process.env.MONGODB_URI;
     const email = process.env.SUPERADMIN_EMAIL.toLowerCase().trim();
     const password = process.env.SUPERADMIN_PASSWORD;
-    const dbProvider = normalizeDbProvider(process.env.DB_PROVIDER) || 'postgres';
-
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
-    let result;
-
-    if (isPostgresProvider(dbProvider)) {
-        result = await seedPostgresSuperadmin({ email, hashedPassword });
-    } else {
-        result = await seedMongoSuperadmin({ mongodbUri, email, hashedPassword });
-    }
-
+    const result = await seedPostgresSuperadmin({ email, hashedPassword });
     console.log(`Superadmin ready (${result.provider}): ${result.email}`);
 }
 
-run().catch(async (error) => {
-    console.error('Failed to seed superadmin:', error.message);
-    try {
-        await mongoose.disconnect();
-    } catch (_) {
-        // no-op
-    }
-    try {
-        await closePostgresPool();
-    } catch (_) {
-        // no-op
-    }
-    process.exit(1);
-}).finally(async () => {
-    try {
-        await mongoose.disconnect();
-    } catch (_) {
-        // no-op
-    }
-    try {
-        await closePostgresPool();
-    } catch (_) {
-        // no-op
-    }
-});
+run()
+    .catch(async (error) => {
+        console.error('Failed to seed superadmin:', error.message);
+        try {
+            await closePostgresPool();
+        } catch (_) {
+            // no-op
+        }
+        process.exit(1);
+    })
+    .finally(async () => {
+        try {
+            await closePostgresPool();
+        } catch (_) {
+            // no-op
+        }
+    });

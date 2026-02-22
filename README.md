@@ -1,423 +1,61 @@
-﻿# Ophthalmology Appointments
+# programari-oftalmologie
 
-Node.js + Express application for ophthalmology bookings, with secure cookie auth, CSRF, RBAC, and audit logging. Postgres (Neon-compatible) is the primary runtime storage (`DB_PROVIDER=postgres` by default). MongoDB runtime remains available temporarily behind feature flags for rollback (`DB_PROVIDER=mongo` or `dual`).
+Aplicatie Node.js + Express pentru programari oftalmologie, cu autentificare pe cookie securizat, CSRF double-submit, RBAC, rate limiting si audit logging.
 
-## What changed (multi-doctor refactor)
+Runtime-ul este **Postgres-only** (compatibil Neon). Suportul MongoDB a fost eliminat.
 
-- Booking is now **multi-doctor**.
-- Public flow is: **doctor -> date -> slot -> patient data**.
-- Admin panel remains at **`/adminpanel`**.
-- Public self-signup remains disabled (`POST /api/auth/signup` returns 403).
-- Users can be created/managed only by **superadmin**.
-- Scheduler/viewer access is doctor-scoped through `managedDoctorIds`.
+## Cerinte
+- Node.js `20.x`
+- O baza Postgres accesibila prin `DATABASE_URL` cu TLS activ
 
-## Security baseline (kept)
+## Configurare mediu
+Variabile obligatorii:
+- `DATABASE_URL`  
+  Trebuie sa fie `postgres://` sau `postgresql://`, cu baza in path.  
+  Conexiunile folosesc TLS obligatoriu.
+- `JWT_ACCESS_SECRET` (minim 32 caractere)
+- `JWT_REFRESH_SECRET` (minim 32 caractere)
+- `JWT_STEPUP_SECRET` (minim 32 caractere)
+- `ALLOWED_ORIGINS` (lista separata prin virgula)
 
-- Cookie-based auth (`__Host-*` cookies), no bearer-token localStorage auth.
-- CSRF double-submit protection.
-- Helmet hardening and CORS allowlist.
-- RBAC (`viewer`, `scheduler`, `superadmin`) enforced server-side.
-- Step-up auth for destructive/sensitive actions.
-- Rate limits + login lockout/backoff.
-- Audit logging for auth/admin operations.
-- `Cache-Control: no-store` on API/auth-sensitive paths.
+Variabile optionale:
+- `ACCESS_TOKEN_TTL_MINUTES` (default `15`)
+- `REFRESH_TOKEN_TTL_DAYS` (default `30`)
+- `STEP_UP_TOKEN_TTL_MINUTES` (default `5`)
+- `ENABLE_DIAGNOSTIC_UPLOAD` (`true` / `false`)
+- `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, `EMAIL_SMTP_SECURE`, `EMAIL_USER`, `EMAIL_PASS`, `EMAIL_FROM_NAME`
+- `SUPERADMIN_EMAIL` si `SUPERADMIN_PASSWORD` (pentru bootstrap/seed)
 
-## Data model highlights
-
-### Doctor
-
-Collection fields include:
-
-- `slug` (unique)
-- `displayName`, `specialty`, `isActive`
-- `bookingSettings`:
-  - `consultationDurationMinutes`
-  - `workdayStart`, `workdayEnd`
-  - `monthsToShow`
-  - `timezone`
-- `availabilityRules.weekdays`
-- `blockedDates`
-- `createdByUserId`, `updatedByUserId`, timestamps
-
-### Appointment
-
-Now includes:
-
-- `doctorId` (required)
-- `doctorSnapshotName`
-
-Unique booking constraint:
-
-- `UNIQUE (doctorId, date, time)`
-
-### User
-
-Now includes:
-
-- `managedDoctorIds: ObjectId[]`
-
-## Startup migration (idempotent)
-
-On startup, the app runs a safe migration routine:
-
-1. Ensures a default doctor exists (`prof-dr-balta-florian`).
-2. Backfills legacy appointments missing `doctorId`.
-3. Backfills missing `doctorSnapshotName` on appointments.
-4. Backfills missing `managedDoctorIds` on users.
-
-Scope decision:
-
-- Existing non-superadmin users are kept with `managedDoctorIds: []` (safer default), so superadmin must assign doctor scope explicitly.
-
-## Install and run
-
+## Instalare si rulare
 ```bash
 npm install
 npm run check:env
+npm run db:migrate
 npm start
 ```
 
-## Required env vars
-
-```bash
-DB_PROVIDER=postgres
-DATABASE_URL=postgresql://<user>:<password>@<host>/<database>?sslmode=require
-JWT_ACCESS_SECRET=<at least 32 chars>
-JWT_REFRESH_SECRET=<at least 32 chars>
-JWT_STEPUP_SECRET=<at least 32 chars>
-ALLOWED_ORIGINS=https://your-app.vercel.app,http://localhost:3000
-```
-
-### Postgres env vars (Phase 1)
-
-- `DB_PROVIDER`: `postgres` (default), `mongo`, or `dual`
-- `DATABASE_URL`: required when `DB_PROVIDER=postgres` or `DB_PROVIDER=dual`
-- Optional pool tuning:
-  - `PG_POOL_MAX` (default `10`)
-  - `PG_IDLE_TIMEOUT_MS` (default `30000`)
-  - `PG_CONNECTION_TIMEOUT_MS` (default `5000`)
-
-Example:
-
-```bash
-DB_PROVIDER=postgres
-DATABASE_URL=postgresql://<user>:<password>@<host>/<database>?sslmode=require
-```
-
-### Mongo rollback env vars (temporary compatibility path)
-
-Set these only if you intentionally run in `mongo` or `dual` mode:
-
-- `MONGODB_URI`
-- Optional Mongo TLS vars:
-  - `MONGO_TLS_MIN_VERSION`
-  - `MONGO_TLS_ALLOW_FALLBACK_TO_1_2`
-  - `MONGO_TLS_CA_FILE`
-  - `MONGO_TLS_CERT_KEY_FILE`
-  - `MONGO_TLS_CERT_KEY_PASSWORD`
-
-## Postgres (Phase 1 infrastructure)
-
-- Connection module: `db/postgres.js`
-- SQL migrations: `db/migrations/*.sql`
-- Migration runner: `npm run db:migrate`
-- Connectivity check: `npm run db:check:postgres`
-
-Current behavior:
-
-- `DB_PROVIDER=postgres` (default): users/auth/roles + doctors/availability + appointments + audit logs use Postgres.
-- `DB_PROVIDER=dual`: Postgres primary with temporary Mongo lazy-import compatibility for user/doctor/appointment startup migration.
-- `DB_PROVIDER=mongo`: legacy rollback mode for one release cycle.
-- Appointment API responses keep `_id` as 24-char legacy-compatible IDs backed by `legacy_mongo_id` in Postgres.
-
-### Run migrations
-
-```bash
-npm run db:migrate
-```
-
-### Test Postgres connectivity
-
-```bash
-npm run db:check:postgres
-```
-
-## One-time Mongo -> Postgres migration (Phase 3)
-
-Script: `scripts/migrate-mongo-to-postgres.js`
-
-NPM command:
-
-```bash
-npm run db:migrate:mongo-to-postgres
-```
-
-### Prerequisites
-
-1. Run this in staging first.
-2. Ensure Postgres schema is migrated (`npm run db:migrate`).
-3. Ensure both `MONGODB_URI` and `DATABASE_URL` are set.
-4. Keep production on current provider during staging validation; switch to `DB_PROVIDER=postgres` only after migration checks pass.
-
-### Idempotency strategy
-
-- The script is rerun-safe:
-  - upserts core entities by `legacy_mongo_id` (`users`, `doctors`, `appointments`, optional `audit_logs`)
-  - replaces per-source child rows for `doctor_admin_assignments`, `doctor_availability_rules`, and `doctor_blocked_days`
-- MongoDB source data is never deleted by this script.
-
-### Commands
-
-Dry run (no Postgres writes):
-
-```bash
-npm run db:migrate:mongo-to-postgres -- --dry-run --report-file=./migration-report-dry-run.json
-```
-
-Real run:
-
-```bash
-npm run db:migrate:mongo-to-postgres -- --report-file=./migration-report.json
-```
-
-Include audit logs (optional):
-
-```bash
-npm run db:migrate:mongo-to-postgres -- --include-audit-logs --report-file=./migration-report-with-audit.json
-```
-
-### Migration report format
-
-The script prints a JSON report and can also save it to disk (`--report-file`).
-
-Top-level fields:
-
-- `startedAt`, `finishedAt`, `durationMs`
-- `options` (`dryRun`, `includeAuditLogs`, `batchSize`, `sampleSize`)
-- `source` / `target`
-- `idempotencyStrategy`
-- `entities`:
-  - `mongoCount`, `processed`, `inserted`, `updated`, `skipped`
-  - `conflicts`, `errors`, `unresolvedReferences`, `dryRunPlanned`
-  - `errorSamples`
-- `validations`:
-  - `counts` (Mongo vs Postgres)
-  - `samples` (random sample checks for users/doctors/appointments)
-  - `referentialIntegrity` checks
-  - `duplicateAndConflictSummary`
-- `totals`
-
-### Verification checklist
-
-1. Inspect `validations.counts` differences and confirm expected variance.
-2. Check `validations.samples` for mismatches.
-3. Ensure referential checks are acceptable:
-   - `assignmentsMissingDoctorBinding`
-   - `appointmentsMissingDoctorRow`
-   - `duplicateAppointmentSlots` (should be `0`)
-4. Review `entities.*.errorSamples` and re-run after fixing source data issues if needed.
-5. Run existing API verification scripts against staging (`test:auth-rbac`, `test:multidoctor`, `test:race`).
-
-### Rollback approach
-
-- Source of truth remains MongoDB.
-- If issues are found after migration, keep or switch runtime to:
-
-```bash
-DB_PROVIDER=mongo
-```
-
-- Fix migration/data issues, then rerun the migration script.
-
-## Deployment (Vercel)
-
-### Required env vars
-
-- `DB_PROVIDER=postgres`
-- `DATABASE_URL` (Neon connection string)
-- `JWT_ACCESS_SECRET`
-- `JWT_REFRESH_SECRET`
-- `JWT_STEPUP_SECRET`
-- `ALLOWED_ORIGINS`
-
-### Recommended optional env vars
-
-- `PG_POOL_MAX`
-- `PG_IDLE_TIMEOUT_MS`
-- `PG_CONNECTION_TIMEOUT_MS`
-- `ACCESS_TOKEN_TTL_MINUTES`
-- `REFRESH_TOKEN_TTL_DAYS`
-- `STEP_UP_TOKEN_TTL_MINUTES`
-- `SUPERADMIN_EMAIL` (or `SUPERADMIN_IDENTIFIER`) + `SUPERADMIN_PASSWORD`
-  - if set, startup bootstraps/updates a Postgres superadmin account with these credentials
-  - use only one identifier var (`SUPERADMIN_EMAIL` preferred)
-
-### Deploy sequence
-
-1. Run SQL migrations:
-   - `npm run db:migrate`
-2. Run data migration in staging first:
-   - `npm run db:migrate:mongo-to-postgres -- --dry-run --report-file=./migration-report-dry-run.json`
-   - `npm run db:migrate:mongo-to-postgres -- --report-file=./migration-report.json`
-3. Deploy with `DB_PROVIDER=postgres`.
-4. Execute post-deploy verification checklist (below).
-
-### Verify auth + RBAC flow (requires running server + superadmin creds)
-
-```bash
-$env:BASE_URL="http://localhost:3000"
-$env:SUPERADMIN_IDENTIFIER="superadmin@example.com"
-$env:SUPERADMIN_PASSWORD="YourSuperadminPassword"
-npm run test:auth-rbac
-```
-
-## MongoDB TLS hardening
-
-Mongo transport security is enforced in code via `mongoose.connect(MONGODB_URI, options)` with TLS options, not only via URI defaults.
-
-### Added env vars
-
-- `MONGO_TLS_MIN_VERSION` (default: `TLSv1.3`, allowed values: `TLSv1.3`, `TLSv1.2`)
-- `MONGO_TLS_ALLOW_FALLBACK_TO_1_2` (default: `false`)
-- `MONGO_TLS_CA_FILE` (optional, custom CA bundle path)
-- `MONGO_TLS_CERT_KEY_FILE` (optional, client cert/key bundle path)
-- `MONGO_TLS_CERT_KEY_PASSWORD` (optional, client cert/key password)
-
-### Behavior
-
-1. Startup fails if `MONGODB_URI` is missing or contains insecure TLS overrides.
-2. First connection attempt always uses `tls: true` and `minVersion` from `MONGO_TLS_MIN_VERSION` (default `TLSv1.3`).
-3. If and only if a TLS protocol compatibility error is detected and `MONGO_TLS_ALLOW_FALLBACK_TO_1_2=true`, the app retries once with `minVersion: TLSv1.2`.
-4. The app does not fallback for authentication, DNS, URI parsing, certificate validation, or unrelated errors.
-5. Startup logs include effective TLS policy and Node runtime version, without logging full Mongo URI or credentials.
-
-### Atlas example (recommended)
-
-```bash
-MONGODB_URI=mongodb+srv://<user>:<password>@cluster0.example.mongodb.net/appointments?retryWrites=true&w=majority
-MONGO_TLS_MIN_VERSION=TLSv1.3
-MONGO_TLS_ALLOW_FALLBACK_TO_1_2=false
-```
-
-### Self-hosted example (custom CA/client cert)
-
-```bash
-MONGODB_URI=mongodb://db1.example.internal:27017,db2.example.internal:27017/appointments?replicaSet=rs0
-MONGO_TLS_MIN_VERSION=TLSv1.3
-MONGO_TLS_ALLOW_FALLBACK_TO_1_2=false
-MONGO_TLS_CA_FILE=/etc/certs/mongo-ca.pem
-MONGO_TLS_CERT_KEY_FILE=/etc/certs/mongo-client.pem
-MONGO_TLS_CERT_KEY_PASSWORD=<optional-password>
-```
-
-### Diagnostics
-
-- `GET /api/admin/mongo-tls` (superadmin only) returns non-sensitive Mongo TLS metadata and connection state.
-
-### Insecure flags to avoid
-
-Never add these to `MONGODB_URI`: `tls=false`, `ssl=false`, `tlsAllowInvalidCertificates=true`, `tlsAllowInvalidHostnames=true`, `tlsInsecure=true`.
-
-## Node runtime
-
-- `package.json` pins Node: `20.x`
-- In Vercel Project Settings set **Node.js Version = 20.x**
-
-## Core endpoints
-
-### Public
-
-- `GET /api/public/doctors` (active doctors only, safe fields)
-- `GET /api/slots?doctor=<slug-or-id>&date=YYYY-MM-DD`
-- `POST /api/book` (or `POST /api/appointments`) with `doctorId` or `doctorSlug`
-
-### Admin (role protected)
-
-- Doctors:
-  - `GET /api/admin/doctors`
-  - `POST /api/admin/doctors` (superadmin)
-  - `PATCH /api/admin/doctors/:id` (scheduler scoped to assigned doctors, or superadmin)
-  - `POST /api/admin/doctors/:id/block-date` (scheduler scoped to assigned doctors, or superadmin)
-  - `DELETE /api/admin/doctors/:id/block-date/:date` (scheduler scoped to assigned doctors, or superadmin)
-- Users:
-  - `POST /api/admin/users` (superadmin)
-  - `GET /api/admin/users` (superadmin)
-  - `PATCH /api/admin/users/:id` (superadmin + step-up)
-  - `DELETE /api/admin/users/:id` (superadmin + step-up)
-- System diagnostics:
-  - `GET /api/admin/mongo-tls` (superadmin, only when `DB_PROVIDER` includes Mongo runtime)
-
-## Verification scripts
-
-- Security baseline:
-
-```bash
-npm test
-npm run scan:secrets
-```
-
-- Booking race protection:
-
-```bash
-npm run test:race
-```
-
-- Multi-doctor verification (requires superadmin credentials):
-
-```bash
-$env:BASE_URL="http://localhost:3000"
-$env:SUPERADMIN_IDENTIFIER="superadmin@example.com"
-$env:SUPERADMIN_PASSWORD="YourSuperadminPassword"
-npm run test:multidoctor
-```
-
-## Manual sanity checks (quick)
-
-1. Public signup blocked:
-
-```bash
-curl -i -X POST "$BASE_URL/api/auth/signup" -H "Content-Type: application/json" --data '{"email":"x@y.com","phone":"0712345678","password":"Password123!","displayName":"X"}'
-```
-
-2. Public slots require doctor:
-
-```bash
-curl -i "$BASE_URL/api/slots?date=2026-03-04"
-```
-
-3. Admin panel route is dedicated:
-
-```bash
-curl -I "$BASE_URL/"
-curl -I "$BASE_URL/adminpanel"
-```
-
-## Post-deploy verification checklist
-
-1. Authentication:
-   - login with known superadmin and scheduler accounts
-   - verify cookie auth + CSRF flows still pass
-2. Admin panel:
-   - load `/adminpanel`
-   - confirm appointments/users/doctors views render correctly
-3. Doctor management:
-   - create/update doctor
-   - modify availability rules
-4. Booking:
-   - book a new appointment
-   - verify slot exclusion after booking
-   - run race test (`npm run test:race`) to verify anti-double-booking
-5. Cancellation/reactivation:
-   - block a date for a doctor
-   - reactivate (unblock) the same date
-   - verify slots reflect state changes
-6. Audit logs:
-   - verify auth/admin/booking actions are persisted in `audit_logs`
-7. Role scoping:
-   - verify doctor-scoped admin can manage only assigned doctors
-   - verify access denied on non-assigned doctors
-
-## Notes
-
-- `/adminpanel` HTML is static, but all sensitive data/actions require authenticated API calls with RBAC + CSRF.
-- Do not hardcode secrets in repo; keep them in Vercel/project environment variables.
+## Scripturi utile
+- `npm run check:env` - validare stricta a variabilelor de mediu
+- `npm run db:migrate` - ruleaza migrarile SQL
+- `npm run db:check:postgres` - health check Postgres
+- `npm run seed:superadmin` - creeaza/actualizeaza superadmin in Postgres
+- `npm run test:security` - verificari frontend security
+- `npm run test:race` - test cursa pe slot booking
+- `npm run test:multidoctor` - verificari multidoctor/scoping
+- `npm run test:auth-rbac` - verificari auth + RBAC
+- `npm run scan:secrets` - scan simplu pentru secrete hardcodate
+
+## Note de compatibilitate API
+- Identificatorii publici `_id` pentru utilizatori/medici/programari raman in format legacy de 24 caractere unde este cazul (din campuri `legacy_mongo_id` in Postgres).
+- Contractele de raspuns admin/public au fost pastrate.
+
+## Securitate
+Aplicatia mentine:
+- cookie-uri `__Host-*` securizate
+- CSRF double-submit (`X-CSRF-Token`)
+- Helmet + CORS allowlist strict
+- RBAC server-side (`viewer`, `scheduler`, `superadmin`)
+- step-up auth pentru actiuni sensibile
+- rate limiting + lockout/backoff login
+- audit logging in Postgres
+- `Cache-Control: no-store` pe endpointuri sensibile

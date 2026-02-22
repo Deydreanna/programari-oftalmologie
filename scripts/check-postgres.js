@@ -8,7 +8,7 @@ const {
 } = require('../db/postgres');
 
 async function run() {
-    const result = await runPostgresHealthCheck({ force: true });
+    const result = await runPostgresHealthCheck();
     if (result.ok) {
         console.log(
             `[POSTGRES] Health check OK `

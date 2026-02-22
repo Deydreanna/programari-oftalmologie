@@ -14,7 +14,6 @@
         "check:env": "node scripts/check-env.js",
         "db:migrate": "node scripts/run-pg-migrations.js",
         "db:check:postgres": "node scripts/check-postgres.js",
-        "db:migrate:mongo-to-postgres": "node scripts/migrate-mongo-to-postgres.js",
         "seed:superadmin": "node scripts/seed-superadmin.js",
         "test:race": "node scripts/test-booking-race.js",
         "test:multidoctor": "node scripts/verify-multidoctor.js",
@@ -29,8 +28,6 @@
         "express-rate-limit": "^7.5.1",
         "helmet": "^8.1.0",
         "jsonwebtoken": "^9.0.3",
-        "mongodb": "^6.3.0",
-        "mongoose": "^8.2.0",
         "nodemailer": "^8.0.1",
         "pg": "^8.18.0",
         "xlsx": "^0.18.5"

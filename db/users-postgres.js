@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { getPostgresPool } = require('./postgres');
 
-const MONGODB_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
+const LEGACY_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
 const POSTGRES_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isUniqueViolation(error) {
@@ -20,7 +20,7 @@ function normalizeManagedDoctorIds(value = []) {
     const seen = new Set();
     for (const entry of value) {
         const id = String(entry || '').trim();
-        if (!MONGODB_OBJECT_ID_REGEX.test(id)) continue;
+        if (!LEGACY_OBJECT_ID_REGEX.test(id)) continue;
         if (seen.has(id)) continue;
         seen.add(id);
         out.push(id);
@@ -28,7 +28,7 @@ function normalizeManagedDoctorIds(value = []) {
     return out;
 }
 
-function generateLegacyMongoId() {
+function generateLegacyPublicId() {
     return crypto.randomBytes(12).toString('hex');
 }
 
@@ -37,7 +37,7 @@ function mapUserRow(row, managedDoctorIds = []) {
     return {
         _id: publicId,
         pgId: row.id,
-        legacyMongoId: row.legacy_mongo_id || null,
+        legacyPublicId: row.legacy_mongo_id || null,
         email: row.email || null,
         phone: row.phone || null,
         password: row.password_hash,
@@ -122,7 +122,7 @@ async function queryManagedDoctorMapByUserPgIds(userPgIds = [], client = null) {
 async function findUserRowByPublicId(publicId, client = null) {
     const id = String(publicId || '').trim();
     if (!id) return null;
-    if (MONGODB_OBJECT_ID_REGEX.test(id)) {
+    if (LEGACY_OBJECT_ID_REGEX.test(id)) {
         return queryOneRow(
             `SELECT id, legacy_mongo_id, email, phone, password_hash, google_id, display_name, role, created_at
              FROM users
@@ -212,7 +212,7 @@ async function listUsers(client = null) {
     return rows.map((row) => mapUserRow(row, managedDoctorMap.get(String(row.id)) || []));
 }
 
-async function replaceUserDoctorAssignmentsByPgId(userPgId, legacyUserMongoId, managedDoctorIds = [], client = null) {
+async function replaceUserDoctorAssignmentsByPgId(userPgId, legacyUserPublicId, managedDoctorIds = [], client = null) {
     const normalizedDoctorIds = normalizeManagedDoctorIds(managedDoctorIds);
     const executor = client || getPostgresPool();
 
@@ -230,7 +230,7 @@ async function replaceUserDoctorAssignmentsByPgId(userPgId, legacyUserMongoId, m
         await executor.query(
             `INSERT INTO doctor_admin_assignments (doctor_id, user_id, legacy_doctor_mongo_id, legacy_user_mongo_id)
              VALUES (NULL, $1, $2, $3)`,
-            [userPgId, doctorLegacyId, legacyUserMongoId || null]
+            [userPgId, doctorLegacyId, legacyUserPublicId || null]
         );
     }
     return normalizedDoctorIds;
@@ -244,7 +244,7 @@ async function createUser({
     displayName,
     role,
     managedDoctorIds = [],
-    legacyMongoId = null,
+    legacyPublicId = null,
     createdAt = null
 } = {}, client = null) {
     if (!passwordHash) {
@@ -259,7 +259,7 @@ async function createUser({
 
     const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
     const normalizedPhone = phone ? String(phone).trim() : null;
-    const normalizedLegacyId = String(legacyMongoId || '').trim() || generateLegacyMongoId();
+    const normalizedLegacyId = String(legacyPublicId || '').trim() || generateLegacyPublicId();
     const normalizedCreatedAt = createdAt ? new Date(createdAt) : null;
     const normalizedDoctorIds = normalizeManagedDoctorIds(managedDoctorIds);
 
@@ -377,91 +377,6 @@ async function deleteUserByPublicId(publicId, client = null) {
     return withTransaction(task);
 }
 
-async function upsertUserFromMongo(mongoUser = {}, client = null) {
-    const legacyMongoId = String(mongoUser.legacyMongoId || mongoUser._id || '').trim();
-    if (!MONGODB_OBJECT_ID_REGEX.test(legacyMongoId)) {
-        throw new Error('upsertUserFromMongo requires a valid legacy Mongo ObjectId.');
-    }
-
-    const normalizedPayload = {
-        email: mongoUser.email ? String(mongoUser.email).trim().toLowerCase() : null,
-        phone: mongoUser.phone ? String(mongoUser.phone).trim() : null,
-        passwordHash: String(mongoUser.password || ''),
-        googleId: mongoUser.googleId ? String(mongoUser.googleId).trim() : null,
-        displayName: String(mongoUser.displayName || '').trim() || 'Unknown User',
-        role: String(mongoUser.role || 'viewer').trim(),
-        managedDoctorIds: normalizeManagedDoctorIds(mongoUser.managedDoctorIds || []),
-        createdAt: mongoUser.createdAt ? new Date(mongoUser.createdAt) : null
-    };
-
-    const task = async (txClient) => {
-        let existing = await findUserRowByPublicId(legacyMongoId, txClient);
-        if (!existing && normalizedPayload.email) {
-            existing = await queryOneRow(
-                `SELECT id, legacy_mongo_id, email, phone, password_hash, google_id, display_name, role, created_at
-                 FROM users
-                 WHERE lower(email) = $1
-                 LIMIT 1`,
-                [normalizedPayload.email],
-                txClient
-            );
-        }
-        if (!existing && normalizedPayload.phone) {
-            existing = await queryOneRow(
-                `SELECT id, legacy_mongo_id, email, phone, password_hash, google_id, display_name, role, created_at
-                 FROM users
-                 WHERE phone = $1
-                 LIMIT 1`,
-                [normalizedPayload.phone],
-                txClient
-            );
-        }
-
-        if (!existing) {
-            return createUser({
-                legacyMongoId,
-                email: normalizedPayload.email,
-                phone: normalizedPayload.phone,
-                passwordHash: normalizedPayload.passwordHash,
-                googleId: normalizedPayload.googleId,
-                displayName: normalizedPayload.displayName,
-                role: normalizedPayload.role,
-                managedDoctorIds: normalizedPayload.managedDoctorIds,
-                createdAt: normalizedPayload.createdAt
-            }, txClient);
-        }
-
-        if (!existing.legacy_mongo_id) {
-            await txClient.query(
-                `UPDATE users
-                 SET legacy_mongo_id = $1,
-                     updated_at = now()
-                 WHERE id = $2`,
-                [legacyMongoId, existing.id]
-            );
-        }
-
-        return updateUserByPublicId(
-            legacyMongoId,
-            {
-                email: normalizedPayload.email,
-                phone: normalizedPayload.phone,
-                passwordHash: normalizedPayload.passwordHash,
-                googleId: normalizedPayload.googleId,
-                displayName: normalizedPayload.displayName,
-                role: normalizedPayload.role,
-                managedDoctorIds: normalizedPayload.managedDoctorIds
-            },
-            txClient
-        );
-    };
-
-    if (client) {
-        return task(client);
-    }
-    return withTransaction(task);
-}
-
 async function assignAdminToDoctor(userPublicId, doctorLegacyId, client = null) {
     const task = async (txClient) => {
         const userRow = await findUserRowByPublicId(userPublicId, txClient);
@@ -469,7 +384,7 @@ async function assignAdminToDoctor(userPublicId, doctorLegacyId, client = null) 
             return false;
         }
         const normalizedDoctorId = String(doctorLegacyId || '').trim();
-        if (!MONGODB_OBJECT_ID_REGEX.test(normalizedDoctorId)) {
+        if (!LEGACY_OBJECT_ID_REGEX.test(normalizedDoctorId)) {
             return false;
         }
 
@@ -506,7 +421,7 @@ async function listDoctorsForAdmin(userPublicId, client = null) {
 }
 
 module.exports = {
-    MONGODB_OBJECT_ID_REGEX,
+    LEGACY_OBJECT_ID_REGEX,
     isUniqueViolation,
     normalizeManagedDoctorIds,
     withTransaction,
@@ -518,7 +433,6 @@ module.exports = {
     createUser,
     updateUserByPublicId,
     deleteUserByPublicId,
-    upsertUserFromMongo,
     assignAdminToDoctor,
     canUserManageDoctor,
     listDoctorsForAdmin

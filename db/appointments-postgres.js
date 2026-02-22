@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { getPostgresPool } = require('./postgres');
 
-const MONGODB_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
+const LEGACY_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
 const POSTGRES_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TIME_HHMM_REGEX = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -40,7 +40,7 @@ function isAppointmentSlotUniqueViolation(error) {
     return /\(doctor_id,\s*appointment_date,\s*appointment_time\)=/i.test(detail);
 }
 
-function generateLegacyMongoId() {
+function generateLegacyPublicId() {
     return crypto.randomBytes(12).toString('hex');
 }
 
@@ -51,7 +51,7 @@ function normalizePublicId(value) {
 
 function normalizeLegacyObjectId(value) {
     const normalized = String(value || '').trim();
-    if (!MONGODB_OBJECT_ID_REGEX.test(normalized)) {
+    if (!LEGACY_OBJECT_ID_REGEX.test(normalized)) {
         return null;
     }
     return normalized;
@@ -135,7 +135,7 @@ function mapAppointmentRow(row) {
     return {
         _id: row.legacy_mongo_id || row.id,
         pgId: row.id,
-        legacyMongoId: row.legacy_mongo_id || null,
+        legacyPublicId: row.legacy_mongo_id || null,
         doctorId: row.doctor_legacy_mongo_id || row.doctor_id,
         doctorSnapshotName: row.doctor_snapshot_name || '',
         name: row.name,
@@ -437,7 +437,7 @@ async function createAuditLog({
                 $10::jsonb
             )`,
             [
-                generateLegacyMongoId(),
+                generateLegacyPublicId(),
                 actorUserPgId,
                 String(actorRole || 'anonymous'),
                 String(action || 'unknown_action'),
@@ -569,7 +569,7 @@ async function createAppointmentTransactional({
                 )
                 RETURNING id::text AS id`,
                 [
-                    generateLegacyMongoId(),
+                    generateLegacyPublicId(),
                     normalizedName,
                     normalizedPhone,
                     normalizedType,
@@ -894,147 +894,9 @@ async function getAppointmentStorageStats(client = null) {
     };
 }
 
-async function upsertAppointmentFromMongo(mongoAppointment = {}, client = null) {
-    const legacyAppointmentId = normalizeLegacyObjectId(mongoAppointment._id || mongoAppointment.legacyMongoId) || generateLegacyMongoId();
-    const doctorLegacyId = normalizeLegacyObjectId(mongoAppointment.doctorId);
-    if (!doctorLegacyId) {
-        return null;
-    }
-
-    const normalizedDate = normalizeISODate(mongoAppointment.date);
-    const normalizedTime = normalizeTimeHHMM(mongoAppointment.time);
-    if (!normalizedDate || !normalizedTime) {
-        return null;
-    }
-
-    const task = async (txClient) => {
-        const doctor = await queryDoctorRowByIdentifier(doctorLegacyId, { requireActive: false }, txClient);
-        if (!doctor) {
-            return null;
-        }
-
-        const userPublicId = normalizeLegacyObjectId(mongoAppointment.userId) || normalizePublicId(mongoAppointment.userId);
-        const userPgId = await queryUserPgIdByPublicId(userPublicId, txClient);
-
-        const diagnosticMeta = (mongoAppointment.diagnosticFileMeta && typeof mongoAppointment.diagnosticFileMeta === 'object')
-            ? mongoAppointment.diagnosticFileMeta
-            : null;
-        const createdAt = mongoAppointment.createdAt ? new Date(mongoAppointment.createdAt) : null;
-
-        try {
-            const row = await queryOneRow(
-                `INSERT INTO appointments (
-                    legacy_mongo_id,
-                    name,
-                    phone,
-                    type,
-                    appointment_date,
-                    appointment_time,
-                    notes,
-                    email,
-                    email_sent,
-                    has_diagnosis,
-                    diagnostic_file_key,
-                    diagnostic_file_mime,
-                    diagnostic_file_size,
-                    diagnostic_uploaded_at,
-                    doctor_id,
-                    doctor_snapshot_name,
-                    user_id,
-                    created_at
-                )
-                VALUES (
-                    $1,
-                    $2,
-                    $3,
-                    $4,
-                    $5::date,
-                    $6::time,
-                    $7,
-                    $8,
-                    $9,
-                    $10,
-                    $11,
-                    $12,
-                    $13,
-                    $14::timestamptz,
-                    $15::uuid,
-                    $16,
-                    $17::uuid,
-                    COALESCE($18::timestamptz, now())
-                )
-                ON CONFLICT (legacy_mongo_id)
-                DO UPDATE SET
-                    name = EXCLUDED.name,
-                    phone = EXCLUDED.phone,
-                    type = EXCLUDED.type,
-                    appointment_date = EXCLUDED.appointment_date,
-                    appointment_time = EXCLUDED.appointment_time,
-                    notes = EXCLUDED.notes,
-                    email = EXCLUDED.email,
-                    email_sent = EXCLUDED.email_sent,
-                    has_diagnosis = EXCLUDED.has_diagnosis,
-                    diagnostic_file_key = EXCLUDED.diagnostic_file_key,
-                    diagnostic_file_mime = EXCLUDED.diagnostic_file_mime,
-                    diagnostic_file_size = EXCLUDED.diagnostic_file_size,
-                    diagnostic_uploaded_at = EXCLUDED.diagnostic_uploaded_at,
-                    doctor_id = EXCLUDED.doctor_id,
-                    doctor_snapshot_name = EXCLUDED.doctor_snapshot_name,
-                    user_id = EXCLUDED.user_id
-                RETURNING id::text AS id`,
-                [
-                    legacyAppointmentId,
-                    String(mongoAppointment.name || '').trim(),
-                    String(mongoAppointment.phone || '').trim(),
-                    String(mongoAppointment.type || '').trim(),
-                    normalizedDate,
-                    normalizedTime,
-                    String(mongoAppointment.notes || ''),
-                    String(mongoAppointment.email || '').trim().toLowerCase(),
-                    !!mongoAppointment.emailSent,
-                    !!mongoAppointment.hasDiagnosis,
-                    diagnosticMeta?.key || null,
-                    diagnosticMeta?.mime || null,
-                    diagnosticMeta?.size ?? null,
-                    diagnosticMeta?.uploadedAt || null,
-                    doctor.id,
-                    String(mongoAppointment.doctorSnapshotName || doctor.display_name || ''),
-                    userPgId,
-                    createdAt ? createdAt.toISOString() : null
-                ],
-                txClient
-            );
-            return queryMappedAppointmentByPgId(row.id, txClient);
-        } catch (error) {
-            if (!isAppointmentSlotUniqueViolation(error)) {
-                throw error;
-            }
-            const existing = await queryOneRow(
-                `SELECT id::text AS id
-                 FROM appointments
-                 WHERE doctor_id = $1::uuid
-                   AND appointment_date = $2::date
-                   AND appointment_time = $3::time
-                 LIMIT 1`,
-                [doctor.id, normalizedDate, normalizedTime],
-                txClient
-            );
-            if (!existing) {
-                return null;
-            }
-            return queryMappedAppointmentByPgId(existing.id, txClient);
-        }
-    };
-
-    if (client) {
-        return task(client);
-    }
-    return withTransaction(task);
-}
-
 module.exports = {
     BookingValidationError,
-    MONGODB_OBJECT_ID_REGEX,
+    LEGACY_OBJECT_ID_REGEX,
     isUniqueViolation,
     withTransaction,
     createAuditLog,
@@ -1048,6 +910,5 @@ module.exports = {
     deleteAppointmentByPublicId,
     deleteAppointmentsByDate,
     deleteAllAppointments,
-    getAppointmentStorageStats,
-    upsertAppointmentFromMongo
+    getAppointmentStorageStats
 };

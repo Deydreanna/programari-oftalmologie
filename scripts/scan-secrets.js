@@ -8,11 +8,6 @@ const EXCLUDED_FILES = new Set(['package-lock.json', '.env']);
 
 const patterns = [
     {
-        id: 'mongo-uri',
-        regex: /mongodb(?:\+srv)?:\/\/(?!localhost)(?!127\.0\.0\.1)[^\s'"`]+/gi,
-        description: 'Potential non-local MongoDB URI'
-    },
-    {
         id: 'jwt-secret-value',
         regex: /JWT_(?:ACCESS|REFRESH|STEPUP)_SECRET\s*=\s*(?!process\.env\.)(?!<)(?!\$\{)[^\s#]{16,}/g,
         description: 'Potential hardcoded JWT secret value'
