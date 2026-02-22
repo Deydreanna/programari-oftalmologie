@@ -52,6 +52,14 @@ document.addEventListener('DOMContentLoaded', () => {
         adminCalendarMonthLabel: byId('adminCalendarMonthLabel'),
         adminCalendarPrevMonth: byId('adminCalendarPrevMonth'),
         adminCalendarNextMonth: byId('adminCalendarNextMonth'),
+        adminModalOverlay: byId('adminModalOverlay'),
+        adminModalDialog: byId('adminModalDialog'),
+        adminModalTitle: byId('adminModalTitle'),
+        adminModalDescription: byId('adminModalDescription'),
+        adminModalBody: byId('adminModalBody'),
+        adminModalError: byId('adminModalError'),
+        adminModalActions: byId('adminModalActions'),
+        adminModalClose: byId('adminModalClose'),
         toast: byId('toast'),
         toastTitle: byId('toastTitle'),
         toastMessage: byId('toastMessage')
@@ -71,6 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let usersCache = [];
     let searchTerm = '';
     let eventsBound = false;
+    let activeModalCleanup = null;
 
     const WEEKDAY_LABELS = ['Duminica', 'Luni', 'Marti', 'Miercuri', 'Joi', 'Vineri', 'Sambata'];
     const WEEKDAY_SHORT = ['Du', 'Lu', 'Ma', 'Mi', 'Jo', 'Vi', 'Sa'];
@@ -128,8 +137,233 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 12000);
     }
 
+    function closeActiveModal() {
+        if (typeof activeModalCleanup === 'function') {
+            const cleanup = activeModalCleanup;
+            activeModalCleanup = null;
+            cleanup();
+        }
+    }
+
+    function openModalFrame({ title, description = '', wide = false, onDismiss = null } = {}) {
+        if (!el.adminModalOverlay || !el.adminModalDialog || !el.adminModalTitle || !el.adminModalBody || !el.adminModalActions) {
+            return null;
+        }
+
+        closeActiveModal();
+
+        el.adminModalTitle.textContent = title || '';
+        if (description) {
+            el.adminModalDescription.textContent = description;
+            el.adminModalDescription.classList.remove('hidden');
+        } else {
+            el.adminModalDescription.textContent = '';
+            el.adminModalDescription.classList.add('hidden');
+        }
+
+        clearNode(el.adminModalBody);
+        clearNode(el.adminModalActions);
+        if (el.adminModalError) {
+            el.adminModalError.textContent = '';
+            el.adminModalError.classList.add('hidden');
+        }
+
+        el.adminModalDialog.classList.toggle('admin-modal-wide', !!wide);
+        el.adminModalOverlay.classList.remove('hidden');
+        el.adminModalOverlay.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('modal-open');
+
+        let closed = false;
+        const doClose = () => {
+            if (closed) return;
+            closed = true;
+            el.adminModalOverlay.classList.add('hidden');
+            el.adminModalOverlay.setAttribute('aria-hidden', 'true');
+            document.body.classList.remove('modal-open');
+            el.adminModalDialog.classList.remove('admin-modal-wide');
+            if (activeModalCleanup === cleanup) {
+                activeModalCleanup = null;
+            }
+        };
+
+        const dismiss = () => {
+            if (typeof onDismiss === 'function') {
+                onDismiss();
+                return;
+            }
+            doClose();
+        };
+
+        const onOverlayClick = (event) => {
+            if (event.target === el.adminModalOverlay) {
+                dismiss();
+            }
+        };
+        const onEsc = (event) => {
+            if (event.key === 'Escape') {
+                dismiss();
+            }
+        };
+        const onCloseClick = () => dismiss();
+
+        const cleanup = () => {
+            el.adminModalOverlay.removeEventListener('click', onOverlayClick);
+            document.removeEventListener('keydown', onEsc);
+            el.adminModalClose?.removeEventListener('click', onCloseClick);
+            doClose();
+        };
+
+        el.adminModalOverlay.addEventListener('click', onOverlayClick);
+        document.addEventListener('keydown', onEsc);
+        el.adminModalClose?.addEventListener('click', onCloseClick);
+        activeModalCleanup = cleanup;
+
+        return {
+            body: el.adminModalBody,
+            actions: el.adminModalActions,
+            setError: (message) => {
+                if (!el.adminModalError) return;
+                if (!message) {
+                    el.adminModalError.textContent = '';
+                    el.adminModalError.classList.add('hidden');
+                    return;
+                }
+                el.adminModalError.textContent = message;
+                el.adminModalError.classList.remove('hidden');
+            },
+            close: cleanup
+        };
+    }
+
+    function createModalField(labelText, inputEl) {
+        const wrap = document.createElement('div');
+        const label = document.createElement('label');
+        label.className = 'form-label';
+        label.textContent = labelText;
+        wrap.appendChild(label);
+        wrap.appendChild(inputEl);
+        return wrap;
+    }
+
+    function showConfirmModal({
+        title,
+        message,
+        description = '',
+        confirmLabel = 'Confirma',
+        cancelLabel = 'Anuleaza',
+        danger = false
+    } = {}) {
+        return new Promise((resolve) => {
+            const modal = openModalFrame({
+                title,
+                description,
+                onDismiss: () => {
+                    resolve(false);
+                    closeActiveModal();
+                }
+            });
+            if (!modal) {
+                resolve(false);
+                return;
+            }
+
+            const text = document.createElement('p');
+            text.className = danger ? 'admin-modal-danger-text' : 'text-sm text-brand-200';
+            text.textContent = message || '';
+            modal.body.appendChild(text);
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'admin-action-btn bg-brand-800 text-brand-300 border-brand-600/30 hover:bg-brand-700';
+            cancelBtn.textContent = cancelLabel;
+            cancelBtn.addEventListener('click', () => {
+                resolve(false);
+                modal.close();
+            });
+
+            const confirmBtn = document.createElement('button');
+            confirmBtn.type = 'button';
+            confirmBtn.className = danger
+                ? 'admin-action-btn bg-red-900/30 text-red-300 border-red-800/40 hover:bg-red-900/50'
+                : 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            confirmBtn.textContent = confirmLabel;
+            confirmBtn.addEventListener('click', () => {
+                resolve(true);
+                modal.close();
+            });
+
+            modal.actions.appendChild(cancelBtn);
+            modal.actions.appendChild(confirmBtn);
+            confirmBtn.focus();
+        });
+    }
+
+    function askStepUpPassword(actionLabel) {
+        return new Promise((resolve) => {
+            const modal = openModalFrame({
+                title: 'Confirmare suplimentara',
+                description: `Introdu parola pentru ${actionLabel}.`,
+                onDismiss: () => {
+                    resolve(null);
+                    closeActiveModal();
+                }
+            });
+            if (!modal) {
+                resolve(null);
+                return;
+            }
+
+            const passwordInput = document.createElement('input');
+            passwordInput.type = 'password';
+            passwordInput.className = 'form-input';
+            passwordInput.autocomplete = 'current-password';
+            passwordInput.placeholder = 'Parola contului curent';
+            modal.body.appendChild(createModalField('Parola', passwordInput));
+
+            const helper = document.createElement('p');
+            helper.className = 'admin-modal-helper';
+            helper.textContent = 'Tokenul de step-up este valid doar pentru actiunea curenta.';
+            modal.body.appendChild(helper);
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'admin-action-btn bg-brand-800 text-brand-300 border-brand-600/30 hover:bg-brand-700';
+            cancelBtn.textContent = 'Anuleaza';
+            cancelBtn.addEventListener('click', () => {
+                resolve(null);
+                modal.close();
+            });
+
+            const confirmBtn = document.createElement('button');
+            confirmBtn.type = 'button';
+            confirmBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            confirmBtn.textContent = 'Confirma';
+            confirmBtn.addEventListener('click', () => {
+                const password = String(passwordInput.value || '').trim();
+                if (!password) {
+                    modal.setError('Parola este obligatorie.');
+                    passwordInput.focus();
+                    return;
+                }
+                resolve(password);
+                modal.close();
+            });
+
+            passwordInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    confirmBtn.click();
+                }
+            });
+
+            modal.actions.appendChild(cancelBtn);
+            modal.actions.appendChild(confirmBtn);
+            passwordInput.focus();
+        });
+    }
+
     async function requestStepUp(action, actionLabel) {
-        const password = window.prompt(`Confirmati parola pentru ${actionLabel}:`);
+        const password = await askStepUpPassword(actionLabel);
         if (!password) return null;
 
         try {
@@ -377,10 +611,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function renderDoctorDayConfigList(initialConfigs = null) {
-        if (!el.doctorDayConfigList) return;
+    function updateDayConfigRowState(row) {
+        const enabled = !!row.querySelector('.day-enabled')?.checked;
+        row.querySelectorAll('.day-start, .day-end, .day-duration').forEach((input) => {
+            input.disabled = !enabled;
+            input.classList.toggle('opacity-60', !enabled);
+        });
+    }
 
-        clearNode(el.doctorDayConfigList);
+    function renderDayConfigRows(container, initialConfigs = null) {
+        if (!container) return;
+
+        clearNode(container);
         const configMap = new Map();
         (Array.isArray(initialConfigs) ? initialConfigs : []).forEach((config) => {
             configMap.set(Number(config.weekday), {
@@ -431,13 +673,20 @@ document.addEventListener('DOMContentLoaded', () => {
             row.appendChild(startInput);
             row.appendChild(endInput);
             row.appendChild(durationInput);
-            el.doctorDayConfigList.appendChild(row);
+            container.appendChild(row);
+
+            checkbox.addEventListener('change', () => updateDayConfigRowState(row));
+            updateDayConfigRowState(row);
         });
     }
 
-    function collectDoctorDayConfigsFromForm() {
-        if (!el.doctorDayConfigList) return [];
-        const rows = Array.from(el.doctorDayConfigList.querySelectorAll('.admin-day-config-row'));
+    function renderDoctorDayConfigList(initialConfigs = null) {
+        renderDayConfigRows(el.doctorDayConfigList, initialConfigs);
+    }
+
+    function collectDayConfigsFromContainer(container) {
+        if (!container) return [];
+        const rows = Array.from(container.querySelectorAll('.admin-day-config-row'));
         const dayConfigs = [];
 
         for (const row of rows) {
@@ -469,6 +718,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         return dayConfigs.sort((a, b) => a.weekday - b.weekday);
+    }
+
+    function collectDoctorDayConfigsFromForm() {
+        return collectDayConfigsFromContainer(el.doctorDayConfigList);
     }
 
     function setupAdminSearch() {
@@ -702,7 +955,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 cancelBtn.onclick = async (event) => {
                     event.stopPropagation();
-                    const confirmDelete = window.confirm(`Esti sigur ca vrei sa anulezi programarea pacientului ${app.name || ''}?`);
+                    const confirmDelete = await showConfirmModal({
+                        title: 'Anulare programare',
+                        message: `Esti sigur ca vrei sa anulezi programarea pacientului ${app.name || ''}?`,
+                        confirmLabel: 'Anuleaza programarea',
+                        danger: true
+                    });
                     if (!confirmDelete) return;
 
                     const stepUpToken = await requestStepUp('appointment_delete', 'stergerea programarii');
@@ -787,38 +1045,142 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function openEditUserDialog(user) {
-        const displayName = window.prompt('Nume afisat:', user.displayName || '');
-        if (displayName === null) return;
-        const email = window.prompt('Email:', user.email || '');
-        if (email === null) return;
-        const phone = window.prompt('Telefon:', user.phone || '');
-        if (phone === null) return;
-        const role = window.prompt('Rol (viewer/scheduler/superadmin):', user.role || 'viewer');
-        if (role === null) return;
+        const payload = await new Promise((resolve) => {
+            const modal = openModalFrame({
+                title: 'Editeaza utilizator',
+                description: 'Actualizeaza datele utilizatorului si rolul de acces.',
+                wide: true,
+                onDismiss: () => {
+                    resolve(null);
+                    closeActiveModal();
+                }
+            });
+            if (!modal) {
+                resolve(null);
+                return;
+            }
 
-        const currentManaged = Array.isArray(user.managedDoctorIds) ? user.managedDoctorIds.join(',') : '';
-        const doctorOptions = doctorsCache.map((doctor) => `${doctor._id} => ${doctor.displayName}`).join('\\n');
-        const doctorIdsInput = window.prompt(`Doctor IDs asignati (separate prin virgula):\\n${doctorOptions}`, currentManaged);
-        if (doctorIdsInput === null) return;
+            const grid = document.createElement('div');
+            grid.className = 'admin-modal-grid';
 
-        const newPassword = window.prompt('Parola noua (lasati gol pentru neschimbat):', '');
-        if (newPassword === null) return;
+            const displayNameInput = document.createElement('input');
+            displayNameInput.type = 'text';
+            displayNameInput.className = 'form-input';
+            displayNameInput.value = String(user.displayName || '');
+            grid.appendChild(createModalField('Nume afisat', displayNameInput));
 
-        const managedDoctorIds = doctorIdsInput
-            .split(',')
-            .map((v) => v.trim())
-            .filter(Boolean);
+            const roleSelect = document.createElement('select');
+            roleSelect.className = 'form-input';
+            ['viewer', 'scheduler', 'superadmin'].forEach((value) => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                option.selected = String(user.role || '') === value;
+                roleSelect.appendChild(option);
+            });
+            grid.appendChild(createModalField('Rol', roleSelect));
 
-        const payload = {
-            displayName: displayName.trim(),
-            email: email.trim(),
-            phone: phone.trim(),
-            role: role.trim(),
-            managedDoctorIds
-        };
-        if (newPassword.trim()) {
-            payload.password = newPassword;
-        }
+            const emailInput = document.createElement('input');
+            emailInput.type = 'email';
+            emailInput.className = 'form-input';
+            emailInput.value = String(user.email || '');
+            grid.appendChild(createModalField('Email', emailInput));
+
+            const phoneInput = document.createElement('input');
+            phoneInput.type = 'text';
+            phoneInput.className = 'form-input';
+            phoneInput.value = String(user.phone || '');
+            grid.appendChild(createModalField('Telefon', phoneInput));
+
+            const passwordInput = document.createElement('input');
+            passwordInput.type = 'password';
+            passwordInput.className = 'form-input';
+            passwordInput.placeholder = 'Gol daca nu schimbi parola';
+            passwordInput.autocomplete = 'new-password';
+            grid.appendChild(createModalField('Parola noua (optional)', passwordInput));
+
+            const managedSelect = document.createElement('select');
+            managedSelect.className = 'form-input min-h-[140px]';
+            managedSelect.multiple = true;
+            const selectedSet = new Set(Array.isArray(user.managedDoctorIds) ? user.managedDoctorIds : []);
+            doctorsCache.forEach((doctor) => {
+                const option = document.createElement('option');
+                option.value = String(doctor._id);
+                option.textContent = `${doctor.displayName} (${doctor.slug})${doctor.isActive ? '' : ' [inactiv]'}`;
+                option.selected = selectedSet.has(option.value);
+                managedSelect.appendChild(option);
+                selectedSet.delete(option.value);
+            });
+            selectedSet.forEach((legacyId) => {
+                const option = document.createElement('option');
+                option.value = String(legacyId);
+                option.textContent = `${legacyId} [medic indisponibil]`;
+                option.selected = true;
+                managedSelect.appendChild(option);
+            });
+            const managedWrap = document.createElement('div');
+            managedWrap.className = 'admin-modal-grid admin-modal-grid-1';
+            const managedField = createModalField('Doctori asignati', managedSelect);
+            const managedHint = document.createElement('p');
+            managedHint.className = 'admin-modal-helper';
+            managedHint.textContent = 'Selectie multipla: Ctrl/Cmd + click.';
+            managedField.appendChild(managedHint);
+            managedWrap.appendChild(managedField);
+
+            modal.body.appendChild(grid);
+            modal.body.appendChild(managedWrap);
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'admin-action-btn bg-brand-800 text-brand-300 border-brand-600/30 hover:bg-brand-700';
+            cancelBtn.textContent = 'Anuleaza';
+            cancelBtn.addEventListener('click', () => {
+                resolve(null);
+                modal.close();
+            });
+
+            const saveBtn = document.createElement('button');
+            saveBtn.type = 'button';
+            saveBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            saveBtn.textContent = 'Salveaza';
+            saveBtn.addEventListener('click', () => {
+                const displayName = String(displayNameInput.value || '').trim();
+                const email = String(emailInput.value || '').trim();
+                const phone = String(phoneInput.value || '').trim();
+                const role = String(roleSelect.value || '').trim();
+                const password = String(passwordInput.value || '');
+                const managedDoctorIds = Array.from(managedSelect.selectedOptions).map((option) => String(option.value || '').trim()).filter(Boolean);
+
+                if (!displayName || !email || !phone) {
+                    modal.setError('Nume, email si telefon sunt obligatorii.');
+                    return;
+                }
+                if (!['viewer', 'scheduler', 'superadmin'].includes(role)) {
+                    modal.setError('Rol invalid.');
+                    return;
+                }
+
+                const nextPayload = {
+                    displayName,
+                    email,
+                    phone,
+                    role,
+                    managedDoctorIds
+                };
+                if (password.trim()) {
+                    nextPayload.password = password;
+                }
+
+                resolve(nextPayload);
+                modal.close();
+            });
+
+            modal.actions.appendChild(cancelBtn);
+            modal.actions.appendChild(saveBtn);
+            displayNameInput.focus();
+        });
+
+        if (!payload) return;
 
         const stepUpToken = await requestStepUp('user_update', 'modificarea utilizatorului');
         if (!stepUpToken) return;
@@ -842,7 +1204,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function deleteUser(user) {
-        const confirmed = window.confirm(`Esti sigur ca vrei sa stergi utilizatorul ${user.displayName || user.email}?`);
+        const confirmed = await showConfirmModal({
+            title: 'Sterge utilizator',
+            message: `Esti sigur ca vrei sa stergi utilizatorul ${user.displayName || user.email}?`,
+            confirmLabel: 'Sterge utilizator',
+            danger: true
+        });
         if (!confirmed) return;
 
         const stepUpToken = await requestStepUp('user_delete', 'stergerea utilizatorului');
@@ -977,14 +1344,6 @@ document.addEventListener('DOMContentLoaded', () => {
             el.createUserSubmit.disabled = false;
         }
     }
-    function parseWeekdaysInput(input) {
-        const raw = String(input || '')
-            .split(',')
-            .map((item) => Number(item.trim()))
-            .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
-        return Array.from(new Set(raw)).sort((a, b) => a - b);
-    }
-
     async function createDoctor() {
         let dayConfigs;
         try {
@@ -1068,117 +1427,218 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function promptWeeklyDayConfigsForDoctor(doctor) {
-        const currentDayConfigs = getDoctorDayConfigs(doctor);
-        const defaultsMap = new Map(currentDayConfigs.map((config) => [config.weekday, config]));
-        const weekdaysPrompt = window.prompt(
-            'Zile disponibile (0-6, separate prin virgula):',
-            String(currentDayConfigs.map((config) => config.weekday).join(','))
-        );
-        if (weekdaysPrompt === null) return null;
-
-        const weekdays = parseWeekdaysInput(weekdaysPrompt);
-        if (!weekdays.length) {
-            throw new Error('Lista de zile este invalida.');
-        }
-
-        const fallbackConfig = currentDayConfigs[0] || {
-            startTime: doctor.bookingSettings?.workdayStart || '09:00',
-            endTime: doctor.bookingSettings?.workdayEnd || '14:00',
-            consultationDurationMinutes: Number(doctor.bookingSettings?.consultationDurationMinutes || 20)
-        };
-
-        const dayConfigs = [];
-        for (const weekday of weekdays) {
-            const base = defaultsMap.get(weekday) || fallbackConfig;
-            const startTime = window.prompt(`Ora inceput pentru ${WEEKDAY_LABELS[weekday]} (HH:mm):`, base.startTime || '09:00');
-            if (startTime === null) return null;
-            const endTime = window.prompt(`Ora sfarsit pentru ${WEEKDAY_LABELS[weekday]} (HH:mm):`, base.endTime || '14:00');
-            if (endTime === null) return null;
-            const durationRaw = window.prompt(
-                `Durata consultatie pentru ${WEEKDAY_LABELS[weekday]} (minute):`,
-                String(base.consultationDurationMinutes || 20)
-            );
-            if (durationRaw === null) return null;
-
-            const consultationDurationMinutes = Number(durationRaw);
-            if (!isValidScheduleWindow(startTime.trim(), endTime.trim(), consultationDurationMinutes, { requireDivisible: true })) {
-                throw new Error(`Configuratie invalida pentru ${WEEKDAY_LABELS[weekday]}.`);
-            }
-            dayConfigs.push({
-                weekday,
-                startTime: startTime.trim(),
-                endTime: endTime.trim(),
-                consultationDurationMinutes
-            });
-        }
-        return dayConfigs.sort((a, b) => a.weekday - b.weekday);
-    }
-
     async function openEditDoctorDialog(doctor) {
-        const displayName = window.prompt('Nume afisat:', doctor.displayName || '');
-        if (displayName === null) return;
-        const specialty = window.prompt('Specialitate:', doctor.specialty || 'Oftalmologie');
-        if (specialty === null) return;
-        const monthsToShowRaw = window.prompt('Luni vizibile:', String(doctor.bookingSettings?.monthsToShow || 3));
-        if (monthsToShowRaw === null) return;
-        const isActiveRaw = window.prompt('Activ? (true/false):', String(!!doctor.isActive));
-        if (isActiveRaw === null) return;
-
-        const monthsToShow = Number(monthsToShowRaw);
-        if (!Number.isInteger(monthsToShow) || monthsToShow < 1 || monthsToShow > 12) {
-            showToast('Eroare', 'Luni vizibile trebuie sa fie intre 1 si 12.', 'error');
-            return;
-        }
-
-        const shouldUpdateSchedule = window.confirm('Doriti sa actualizati si programul saptamanal al medicului?');
-        let dayConfigs = null;
-        if (shouldUpdateSchedule) {
-            try {
-                dayConfigs = promptWeeklyDayConfigsForDoctor(doctor);
-            } catch (error) {
-                showToast('Eroare', String(error?.message || 'Configuratie invalida pentru program.'), 'error');
+        const payload = await new Promise((resolve) => {
+            const modal = openModalFrame({
+                title: `Editeaza medic: ${doctor.displayName || ''}`,
+                description: `Slug: ${doctor.slug || '-'}`,
+                wide: true,
+                onDismiss: () => {
+                    resolve(null);
+                    closeActiveModal();
+                }
+            });
+            if (!modal) {
+                resolve(null);
                 return;
             }
-            if (dayConfigs === null) {
-                return;
-            }
-        }
 
-        const payload = {
-            displayName: displayName.trim(),
-            specialty: specialty.trim(),
-            isActive: isActiveRaw.trim().toLowerCase() === 'true'
-        };
+            const grid = document.createElement('div');
+            grid.className = 'admin-modal-grid';
 
-        if (shouldUpdateSchedule && dayConfigs) {
-            const firstConfig = dayConfigs[0];
-            payload.bookingSettings = {
-                consultationDurationMinutes: firstConfig.consultationDurationMinutes,
-                workdayStart: firstConfig.startTime,
-                workdayEnd: firstConfig.endTime,
-                monthsToShow,
-                timezone: doctor.bookingSettings?.timezone || 'Europe/Bucharest'
-            };
-            payload.availabilityRules = {
-                weekdays: dayConfigs.map((config) => config.weekday),
-                dayConfigs
-            };
-        } else {
-            payload.bookingSettings = {
-                consultationDurationMinutes: Number(doctor.bookingSettings?.consultationDurationMinutes || 20),
-                workdayStart: doctor.bookingSettings?.workdayStart || '09:00',
-                workdayEnd: doctor.bookingSettings?.workdayEnd || '14:00',
-                monthsToShow,
-                timezone: doctor.bookingSettings?.timezone || 'Europe/Bucharest'
-            };
-        }
+            const displayNameInput = document.createElement('input');
+            displayNameInput.type = 'text';
+            displayNameInput.className = 'form-input';
+            displayNameInput.value = String(doctor.displayName || '');
+            grid.appendChild(createModalField('Nume afisat', displayNameInput));
 
+            const specialtyInput = document.createElement('input');
+            specialtyInput.type = 'text';
+            specialtyInput.className = 'form-input';
+            specialtyInput.value = String(doctor.specialty || 'Oftalmologie');
+            grid.appendChild(createModalField('Specialitate', specialtyInput));
+
+            const monthsInput = document.createElement('input');
+            monthsInput.type = 'number';
+            monthsInput.min = '1';
+            monthsInput.max = '12';
+            monthsInput.className = 'form-input';
+            monthsInput.value = String(doctor.bookingSettings?.monthsToShow || 3);
+            grid.appendChild(createModalField('Luni vizibile', monthsInput));
+
+            const activeSelect = document.createElement('select');
+            activeSelect.className = 'form-input';
+            [
+                { value: 'true', label: 'Da' },
+                { value: 'false', label: 'Nu' }
+            ].forEach((entry) => {
+                const option = document.createElement('option');
+                option.value = entry.value;
+                option.textContent = entry.label;
+                activeSelect.appendChild(option);
+            });
+            activeSelect.value = doctor.isActive ? 'true' : 'false';
+            grid.appendChild(createModalField('Activ', activeSelect));
+
+            modal.body.appendChild(grid);
+
+            const scheduleToggleWrap = document.createElement('label');
+            scheduleToggleWrap.className = 'flex items-center gap-2 text-sm text-brand-300 font-semibold';
+            const scheduleToggle = document.createElement('input');
+            scheduleToggle.type = 'checkbox';
+            scheduleToggle.className = 'w-4 h-4 rounded border-brand-600 accent-brand-400';
+            scheduleToggle.checked = false;
+            scheduleToggleWrap.appendChild(scheduleToggle);
+            scheduleToggleWrap.appendChild(document.createTextNode('Actualizeaza programul saptamanal'));
+            modal.body.appendChild(scheduleToggleWrap);
+
+            const dayConfigContainer = document.createElement('div');
+            dayConfigContainer.className = 'space-y-2 hidden';
+            renderDayConfigRows(dayConfigContainer, getDoctorDayConfigs(doctor));
+            modal.body.appendChild(dayConfigContainer);
+
+            const hint = document.createElement('p');
+            hint.className = 'admin-modal-helper hidden';
+            hint.textContent = 'Intervalele trebuie sa fie divizibile perfect la durata consultatiei.';
+            modal.body.appendChild(hint);
+
+            const syncScheduleVisibility = () => {
+                const visible = !!scheduleToggle.checked;
+                dayConfigContainer.classList.toggle('hidden', !visible);
+                hint.classList.toggle('hidden', !visible);
+            };
+            scheduleToggle.addEventListener('change', syncScheduleVisibility);
+            syncScheduleVisibility();
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'admin-action-btn bg-brand-800 text-brand-300 border-brand-600/30 hover:bg-brand-700';
+            cancelBtn.textContent = 'Anuleaza';
+            cancelBtn.addEventListener('click', () => {
+                resolve(null);
+                modal.close();
+            });
+
+            const saveBtn = document.createElement('button');
+            saveBtn.type = 'button';
+            saveBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            saveBtn.textContent = 'Salveaza';
+            saveBtn.addEventListener('click', () => {
+                const displayName = String(displayNameInput.value || '').trim();
+                const specialty = String(specialtyInput.value || '').trim() || 'Oftalmologie';
+                const monthsToShow = Number(monthsInput.value);
+                const isActive = activeSelect.value === 'true';
+                if (!displayName) {
+                    modal.setError('Numele afisat este obligatoriu.');
+                    return;
+                }
+                if (!Number.isInteger(monthsToShow) || monthsToShow < 1 || monthsToShow > 12) {
+                    modal.setError('Luni vizibile trebuie sa fie intre 1 si 12.');
+                    return;
+                }
+
+                const nextPayload = { displayName, specialty, isActive };
+                if (scheduleToggle.checked) {
+                    let dayConfigs;
+                    try {
+                        dayConfigs = collectDayConfigsFromContainer(dayConfigContainer);
+                    } catch (error) {
+                        modal.setError(String(error?.message || 'Configuratie invalida pentru program.'));
+                        return;
+                    }
+                    const firstConfig = dayConfigs[0];
+                    nextPayload.bookingSettings = {
+                        consultationDurationMinutes: firstConfig.consultationDurationMinutes,
+                        workdayStart: firstConfig.startTime,
+                        workdayEnd: firstConfig.endTime,
+                        monthsToShow,
+                        timezone: doctor.bookingSettings?.timezone || 'Europe/Bucharest'
+                    };
+                    nextPayload.availabilityRules = {
+                        weekdays: dayConfigs.map((config) => config.weekday),
+                        dayConfigs
+                    };
+                } else {
+                    nextPayload.bookingSettings = {
+                        consultationDurationMinutes: Number(doctor.bookingSettings?.consultationDurationMinutes || 20),
+                        workdayStart: doctor.bookingSettings?.workdayStart || '09:00',
+                        workdayEnd: doctor.bookingSettings?.workdayEnd || '14:00',
+                        monthsToShow,
+                        timezone: doctor.bookingSettings?.timezone || 'Europe/Bucharest'
+                    };
+                }
+
+                resolve(nextPayload);
+                modal.close();
+            });
+
+            modal.actions.appendChild(cancelBtn);
+            modal.actions.appendChild(saveBtn);
+            displayNameInput.focus();
+        });
+
+        if (!payload) return;
         await patchDoctor(doctor._id, payload, 'Medic actualizat.');
     }
 
+    function openDateModal({ title, description, label, confirmLabel, initialDate = '' }) {
+        return new Promise((resolve) => {
+            const modal = openModalFrame({
+                title,
+                description,
+                onDismiss: () => {
+                    resolve(null);
+                    closeActiveModal();
+                }
+            });
+            if (!modal) {
+                resolve(null);
+                return;
+            }
+
+            const dateInput = document.createElement('input');
+            dateInput.type = 'date';
+            dateInput.className = 'form-input';
+            dateInput.value = initialDate;
+            modal.body.appendChild(createModalField(label, dateInput));
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'admin-action-btn bg-brand-800 text-brand-300 border-brand-600/30 hover:bg-brand-700';
+            cancelBtn.textContent = 'Anuleaza';
+            cancelBtn.addEventListener('click', () => {
+                resolve(null);
+                modal.close();
+            });
+
+            const confirmBtn = document.createElement('button');
+            confirmBtn.type = 'button';
+            confirmBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            confirmBtn.textContent = confirmLabel;
+            confirmBtn.addEventListener('click', () => {
+                const value = String(dateInput.value || '').trim();
+                if (!value) {
+                    modal.setError('Data este obligatorie.');
+                    return;
+                }
+                resolve(value);
+                modal.close();
+            });
+
+            modal.actions.appendChild(cancelBtn);
+            modal.actions.appendChild(confirmBtn);
+            dateInput.focus();
+        });
+    }
+
     async function blockDoctorDate(doctor) {
-        const date = window.prompt('Data de blocat (YYYY-MM-DD):');
+        const date = await openDateModal({
+            title: 'Blocheaza o zi pentru medic',
+            description: doctor.displayName || '',
+            label: 'Data de blocat',
+            confirmLabel: 'Blocheaza',
+            initialDate: getAdminActiveDateISO()
+        });
         if (!date) return;
 
         try {
@@ -1199,7 +1659,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function unblockDoctorDate(doctor) {
-        const date = window.prompt('Data de reactivat (YYYY-MM-DD):');
+        const date = await openDateModal({
+            title: 'Reactiveaza o zi pentru medic',
+            description: doctor.displayName || '',
+            label: 'Data de reactivat',
+            confirmLabel: 'Reactiveaza',
+            initialDate: getAdminActiveDateISO()
+        });
         if (!date) return;
 
         try {
@@ -1224,9 +1690,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const confirmed = window.confirm(
-            `Esti sigur ca vrei sa stergi definitiv medicul ${doctor.displayName}? Aceasta actiune va sterge si programarile asociate.`
-        );
+        const confirmed = await showConfirmModal({
+            title: 'Stergere definitiva medic',
+            message: `Stergi definitiv medicul ${doctor.displayName}? Actiunea sterge si programarile asociate.`,
+            confirmLabel: 'Sterge definitiv',
+            danger: true
+        });
         if (!confirmed) return;
 
         const stepUpToken = await requestStepUp('doctor_delete', 'stergerea medicului');
@@ -1248,6 +1717,146 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_) {
             showToast('Eroare', 'Eroare de conexiune.', 'error');
         }
+    }
+
+    function openDayScheduleModal(current, selectedDate) {
+        return new Promise((resolve) => {
+            const currentRule = current?.daySchedule?.overrideRule || current?.daySchedule?.defaultRule;
+            const defaultRule = current?.daySchedule?.defaultRule || null;
+            const hasOverride = !!current?.daySchedule?.overrideRule;
+
+            const modal = openModalFrame({
+                title: 'Editeaza program zi',
+                description: `Data selectata: ${selectedDate}`,
+                onDismiss: () => {
+                    resolve(null);
+                    closeActiveModal();
+                }
+            });
+            if (!modal) {
+                resolve(null);
+                return;
+            }
+
+            const statusSelect = document.createElement('select');
+            statusSelect.className = 'form-input';
+            [
+                { value: 'active', label: 'Activa' },
+                { value: 'blocked', label: 'Blocata' }
+            ].forEach((item) => {
+                const option = document.createElement('option');
+                option.value = item.value;
+                option.textContent = item.label;
+                statusSelect.appendChild(option);
+            });
+            statusSelect.value = current?.daySchedule?.blocked ? 'blocked' : 'active';
+            modal.body.appendChild(createModalField('Status zi', statusSelect));
+
+            const modeSelect = document.createElement('select');
+            modeSelect.className = 'form-input';
+            const modeDefault = document.createElement('option');
+            modeDefault.value = 'default';
+            modeDefault.textContent = 'Program standard';
+            if (!defaultRule) {
+                modeDefault.disabled = true;
+                modeDefault.textContent = 'Program standard indisponibil';
+            }
+            const modeCustom = document.createElement('option');
+            modeCustom.value = 'custom';
+            modeCustom.textContent = 'Override personalizat';
+            modeSelect.appendChild(modeDefault);
+            modeSelect.appendChild(modeCustom);
+            modeSelect.value = hasOverride ? 'custom' : 'default';
+            if (!defaultRule && modeSelect.value === 'default') {
+                modeSelect.value = 'custom';
+            }
+            modal.body.appendChild(createModalField('Mod program', modeSelect));
+
+            const customGrid = document.createElement('div');
+            customGrid.className = 'admin-modal-grid';
+            const startInput = document.createElement('input');
+            startInput.type = 'time';
+            startInput.className = 'form-input';
+            startInput.value = currentRule?.startTime || '09:00';
+            customGrid.appendChild(createModalField('Ora inceput', startInput));
+
+            const endInput = document.createElement('input');
+            endInput.type = 'time';
+            endInput.className = 'form-input';
+            endInput.value = currentRule?.endTime || '14:00';
+            customGrid.appendChild(createModalField('Ora sfarsit', endInput));
+
+            const durationInput = document.createElement('input');
+            durationInput.type = 'number';
+            durationInput.min = '5';
+            durationInput.max = '120';
+            durationInput.className = 'form-input';
+            durationInput.value = String(Number(currentRule?.consultationDurationMinutes || 20));
+            customGrid.appendChild(createModalField('Durata consultatie (minute)', durationInput));
+            modal.body.appendChild(customGrid);
+
+            const helper = document.createElement('p');
+            helper.className = 'admin-modal-helper';
+            helper.textContent = 'Modificarile care invalideaza programari existente vor fi blocate de server.';
+            modal.body.appendChild(helper);
+
+            const syncVisibility = () => {
+                const active = statusSelect.value === 'active';
+                modeSelect.parentElement.classList.toggle('hidden', !active);
+                customGrid.classList.toggle('hidden', !active || modeSelect.value !== 'custom');
+            };
+            statusSelect.addEventListener('change', syncVisibility);
+            modeSelect.addEventListener('change', syncVisibility);
+            syncVisibility();
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'admin-action-btn bg-brand-800 text-brand-300 border-brand-600/30 hover:bg-brand-700';
+            cancelBtn.textContent = 'Anuleaza';
+            cancelBtn.addEventListener('click', () => {
+                resolve(null);
+                modal.close();
+            });
+
+            const saveBtn = document.createElement('button');
+            saveBtn.type = 'button';
+            saveBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            saveBtn.textContent = 'Salveaza';
+            saveBtn.addEventListener('click', () => {
+                if (statusSelect.value === 'blocked') {
+                    resolve({ status: 'blocked', clearOverride: true });
+                    modal.close();
+                    return;
+                }
+
+                if (modeSelect.value === 'default') {
+                    resolve({ status: 'active', clearOverride: true });
+                    modal.close();
+                    return;
+                }
+
+                const startTime = String(startInput.value || '').trim();
+                const endTime = String(endInput.value || '').trim();
+                const consultationDurationMinutes = Number(durationInput.value);
+                if (!isValidScheduleWindow(startTime, endTime, consultationDurationMinutes, { requireDivisible: true })) {
+                    modal.setError('Interval invalid sau intervalul nu se imparte perfect la durata.');
+                    return;
+                }
+
+                resolve({
+                    status: 'active',
+                    clearOverride: false,
+                    startTime,
+                    endTime,
+                    consultationDurationMinutes
+                });
+                modal.close();
+            });
+
+            modal.actions.appendChild(cancelBtn);
+            modal.actions.appendChild(saveBtn);
+            statusSelect.focus();
+        });
     }
 
     async function editSelectedDaySchedule() {
@@ -1278,51 +1887,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const currentRule = current?.daySchedule?.overrideRule || current?.daySchedule?.defaultRule;
-        const currentStatus = current?.daySchedule?.blocked ? 'blocked' : 'active';
-        const statusInput = window.prompt('Status zi (active/blocked):', currentStatus);
-        if (statusInput === null) return;
-
-        const status = String(statusInput || '').trim().toLowerCase();
-        if (!['active', 'blocked'].includes(status)) {
-            showToast('Eroare', 'Status invalid. Folositi active sau blocked.', 'error');
-            return;
-        }
-
-        let payload;
-        if (status === 'blocked') {
-            payload = { status: 'blocked', clearOverride: true };
-        } else {
-            const clearOverride = window.confirm('OK = revino la programul standard pentru ziua selectata. Cancel = seteaza override personalizat.');
-            if (clearOverride) {
-                payload = { status: 'active', clearOverride: true };
-            } else {
-                const defaultStart = currentRule?.startTime || '09:00';
-                const defaultEnd = currentRule?.endTime || '14:00';
-                const defaultDuration = Number(currentRule?.consultationDurationMinutes || 20);
-
-                const startTime = window.prompt('Ora inceput (HH:mm):', defaultStart);
-                if (startTime === null) return;
-                const endTime = window.prompt('Ora sfarsit (HH:mm):', defaultEnd);
-                if (endTime === null) return;
-                const durationRaw = window.prompt('Durata consultatie (minute):', String(defaultDuration));
-                if (durationRaw === null) return;
-
-                const consultationDurationMinutes = Number(durationRaw);
-                if (!isValidScheduleWindow(startTime.trim(), endTime.trim(), consultationDurationMinutes, { requireDivisible: true })) {
-                    showToast('Eroare', 'Interval invalid sau intervalul nu se imparte perfect la durata.', 'error');
-                    return;
-                }
-
-                payload = {
-                    status: 'active',
-                    clearOverride: false,
-                    startTime: startTime.trim(),
-                    endTime: endTime.trim(),
-                    consultationDurationMinutes
-                };
-            }
-        }
+        const payload = await openDayScheduleModal(current, selectedDate);
+        if (!payload) return;
 
         try {
             const res = await AUTH.apiFetch(`/api/admin/doctors/${doctorId}/day-schedule/${selectedDate}`, {
@@ -1549,7 +2115,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            const confirmReset = window.confirm('Esti sigur ca vrei sa stergi TOATE programarile?');
+            const confirmReset = await showConfirmModal({
+                title: 'Reset programari',
+                message: 'Esti sigur ca vrei sa stergi TOATE programarile?',
+                confirmLabel: 'Reseteaza',
+                danger: true
+            });
             if (!confirmReset) return;
 
             const stepUpToken = await requestStepUp('appointments_reset', 'resetarea bazei de date');
@@ -1586,7 +2157,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const selectedDate = getAdminActiveDateISO();
-            const confirmed = window.confirm(`Blocam ziua ${selectedDate} pentru medicul selectat?`);
+            const confirmed = await showConfirmModal({
+                title: 'Anuleaza ziua',
+                message: `Blocam ziua ${selectedDate} pentru medicul selectat?`,
+                confirmLabel: 'Blocheaza ziua',
+                danger: true
+            });
             if (!confirmed) return;
 
             try {

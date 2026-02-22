@@ -284,6 +284,25 @@
         <p id="toastMessage" class="text-sm text-brand-300 mt-1"></p>
     </div>
 
+    <div id="adminModalOverlay" class="admin-modal-overlay hidden" aria-hidden="true">
+        <div id="adminModalDialog" class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="adminModalTitle">
+            <div class="admin-modal-header">
+                <div>
+                    <h3 id="adminModalTitle" class="admin-modal-title"></h3>
+                    <p id="adminModalDescription" class="admin-modal-description hidden"></p>
+                </div>
+                <button id="adminModalClose" type="button" class="admin-modal-close-btn" aria-label="Inchide dialogul">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div id="adminModalBody" class="admin-modal-body"></div>
+            <p id="adminModalError" class="admin-modal-error hidden"></p>
+            <div id="adminModalActions" class="admin-modal-actions"></div>
+        </div>
+    </div>
+
     <script src="auth.js"></script>
     <script src="adminpanel.js"></script>
 </body>
