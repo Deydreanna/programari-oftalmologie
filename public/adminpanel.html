@@ -39,7 +39,7 @@
     </script>
 </head>
 
-<body class="bg-brand-900 text-brand-100 font-sans antialiased min-h-screen" style="font-size: 17px;">
+<body class="admin-panel-page bg-brand-900 text-brand-100 font-sans antialiased min-h-screen" style="font-size: 17px;">
     <header class="bg-brand-800 border-b border-brand-600/20 shadow-lg">
         <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
@@ -71,10 +71,10 @@
             <a href="/" class="inline-flex items-center justify-center px-5 py-3 rounded-xl bg-brand-400 text-brand-900 font-bold hover:bg-brand-300 transition-colors">Inapoi la pagina principala</a>
         </section>
 
-        <section id="adminApp" class="hidden">
-            <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-8">
+        <section id="adminApp" class="hidden admin-panel-root">
+            <div class="admin-toolbar flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-8">
                 <div>
-                    <h2 class="text-2xl md:text-3xl font-black text-brand-100">Panou Administrare</h2>
+                    <h2 class="admin-main-title text-2xl md:text-3xl font-black text-brand-100">Panou Administrare</h2>
                     <div id="storage-indicator" class="hidden mt-2">
                         <div class="flex items-center gap-3">
                             <div class="w-32 bg-brand-700 rounded-full h-1.5 overflow-hidden">
@@ -85,13 +85,13 @@
                     </div>
                 </div>
 
-                <div class="flex items-center gap-2">
+                <div class="admin-date-controls flex items-center gap-2">
                     <button id="prevAdminDate" class="nav-btn" aria-label="Data anterioara">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
                         </svg>
                     </button>
-                    <div class="px-5 py-2.5 bg-brand-800 border border-brand-600/30 rounded-xl font-bold text-brand-100 text-sm">
+                    <div class="admin-date-pill px-5 py-2.5 bg-brand-800 border border-brand-600/30 rounded-xl font-bold text-brand-100 text-sm">
                         <span id="currentAdminDateDisplay">Azi</span>
                     </div>
                     <button id="nextAdminDate" class="nav-btn" aria-label="Data urmatoare">
@@ -101,19 +101,19 @@
                     </button>
                 </div>
 
-                <div id="adminActionButtons" class="flex flex-wrap gap-2">
-                    <button id="manageUsersBtn" class="hidden admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Gestionare Utilizatori</button>
-                    <button id="manageDoctorsBtn" class="hidden admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Gestionare Medici</button>
-                    <button id="editDayScheduleBtn" class="admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Editeaza Zi</button>
-                    <button id="exportExcelBtn" class="admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Export Excel</button>
-                    <button id="resetDatabaseBtn" class="admin-action-btn bg-red-900/30 text-red-300 border-red-800/40 hover:bg-red-900/50">Reseteaza</button>
-                    <button id="cancelDayAppointmentsBtn" class="admin-action-btn bg-orange-900/30 text-orange-300 border-orange-800/40 hover:bg-orange-900/50">Anuleaza Ziua</button>
-                    <button id="closeDashboard" class="admin-action-btn bg-brand-800 text-brand-400 border-brand-600/30 hover:bg-brand-700">Inapoi</button>
+                <div id="adminActionButtons" class="admin-actions-row flex flex-wrap gap-2">
+                    <button id="manageUsersBtn" class="hidden admin-action-btn btn-secondary">Gestionare Utilizatori</button>
+                    <button id="manageDoctorsBtn" class="hidden admin-action-btn btn-secondary">Gestionare Medici</button>
+                    <button id="editDayScheduleBtn" class="admin-action-btn btn-secondary">Editeaza Zi</button>
+                    <button id="exportExcelBtn" class="admin-action-btn btn-secondary">Export Excel</button>
+                    <button id="resetDatabaseBtn" class="admin-action-btn btn-danger">Reseteaza</button>
+                    <button id="cancelDayAppointmentsBtn" class="admin-action-btn btn-warning">Anuleaza Ziua</button>
+                    <button id="closeDashboard" class="admin-action-btn btn-ghost">Inapoi</button>
                 </div>
             </div>
 
-            <div id="adminCalendarPanel" class="mb-6 bg-brand-800 rounded-2xl border border-brand-600/20 p-4">
-                <div class="flex items-center justify-between gap-3 mb-3">
+            <div id="adminCalendarPanel" class="admin-surface admin-calendar-surface mb-6 bg-brand-800 rounded-2xl border border-brand-600/20 p-4">
+                <div class="admin-surface-header flex items-center justify-between gap-3 mb-3">
                     <button id="adminCalendarPrevMonth" class="nav-btn" aria-label="Luna anterioara">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
@@ -136,17 +136,17 @@
                     <span class="text-xs font-bold text-brand-400/50 uppercase py-1">Sa</span>
                 </div>
                 <div id="adminCalendarGrid" class="grid grid-cols-7 gap-1"></div>
-                <p class="text-xs text-brand-400/70 mt-3">Zilele verzi au program activ in contextul curent. Click pe o zi pentru detalii.</p>
+                <p class="admin-helper-text text-xs text-brand-400/70 mt-3">Zilele verzi au program activ in contextul curent. Click pe o zi pentru detalii.</p>
             </div>
 
-            <div id="timelineContainer" class="bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 h-[calc(100vh-260px)] overflow-hidden flex flex-col">
-                <div class="bg-brand-700 px-6 py-3 border-b border-brand-600/20 flex justify-between items-center shrink-0">
-                    <span class="text-sm font-bold text-brand-100">Programari Zilnice</span>
-                    <div class="flex items-center gap-2">
-                        <select id="appointmentDoctorFilter" class="form-input text-xs py-2 px-3 min-w-[200px]">
+            <div id="timelineContainer" class="admin-surface admin-section-panel bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 h-[calc(100vh-260px)] overflow-hidden flex flex-col">
+                <div class="admin-panel-header bg-brand-700 px-6 py-3 border-b border-brand-600/20 flex justify-between items-center shrink-0">
+                    <span class="admin-panel-title text-sm font-bold text-brand-100">Programari Zilnice</span>
+                    <div class="admin-panel-header-actions flex items-center gap-2">
+                        <select id="appointmentDoctorFilter" class="form-input admin-compact-input text-xs py-2 px-3 min-w-[200px]">
                             <option value="">Toți medicii</option>
                         </select>
-                        <span id="timelineHeaderCount" class="text-xs font-semibold text-brand-300 bg-brand-600/20 px-3 py-1 rounded-full">(0) Programari</span>
+                        <span id="timelineHeaderCount" class="admin-header-pill text-xs font-semibold text-brand-300 bg-brand-600/20 px-3 py-1 rounded-full">(0) Programari</span>
                     </div>
                 </div>
                 <div class="flex-1 overflow-y-auto relative custom-scrollbar">
@@ -154,29 +154,33 @@
                 </div>
             </div>
 
-            <div id="userManagerContainer" class="hidden mt-6 bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 overflow-hidden flex flex-col">
-                <div class="bg-brand-700 px-6 py-3 border-b border-brand-600/20 flex justify-between items-center shrink-0">
-                    <span class="text-sm font-bold text-brand-100">Gestionare Utilizatori</span>
-                    <button id="backToTimeline" class="text-xs text-brand-400 font-bold hover:text-brand-100 transition-colors">Inapoi la programari</button>
+            <div id="userManagerContainer" class="hidden mt-6 admin-surface admin-section-panel bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 overflow-hidden flex flex-col">
+                <div class="admin-panel-header bg-brand-700 px-6 py-3 border-b border-brand-600/20 flex justify-between items-center shrink-0">
+                    <div>
+                        <span class="admin-panel-title text-sm font-bold text-brand-100">Gestionare Utilizatori</span>
+                        <p class="admin-panel-subtitle text-xs text-brand-300/70">Administrare conturi, roluri si asignari medici.</p>
+                    </div>
+                    <button id="backToTimeline" class="admin-link-btn text-xs text-brand-400 font-bold hover:text-brand-100 transition-colors">Inapoi la programari</button>
                 </div>
 
-                <div id="createUserCard" class="hidden p-6 border-b border-brand-600/20 bg-brand-800/80">
-                    <h3 class="text-lg font-bold text-brand-100 mb-3">Creeaza utilizator nou</h3>
+                <div id="createUserCard" class="hidden admin-form-card p-6 border-b border-brand-600/20 bg-brand-800/80">
+                    <h3 class="admin-form-title text-lg font-bold text-brand-100 mb-3">Creeaza utilizator nou</h3>
+                    <p class="admin-helper-text text-xs text-brand-300/70 mb-3">Campurile marcate cu * sunt obligatorii.</p>
                     <form id="createUserForm" class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
                         <div class="md:col-span-2">
-                            <label for="newUserDisplayName" class="form-label">Nume</label>
+                            <label for="newUserDisplayName" class="form-label">Nume *</label>
                             <input id="newUserDisplayName" type="text" class="form-input" required>
                         </div>
                         <div>
-                            <label for="newUserEmail" class="form-label">Email</label>
+                            <label for="newUserEmail" class="form-label">Email *</label>
                             <input id="newUserEmail" type="email" class="form-input" required>
                         </div>
                         <div>
-                            <label for="newUserPhone" class="form-label">Telefon</label>
+                            <label for="newUserPhone" class="form-label">Telefon *</label>
                             <input id="newUserPhone" type="text" class="form-input" required>
                         </div>
                         <div>
-                            <label for="newUserPassword" class="form-label">Parola</label>
+                            <label for="newUserPassword" class="form-label">Parola *</label>
                             <input id="newUserPassword" type="password" minlength="10" class="form-input" required>
                         </div>
                         <div>
@@ -191,14 +195,14 @@
                             <select id="newUserManagedDoctors" class="form-input min-h-[120px]" multiple></select>
                         </div>
                         <div class="md:col-span-5">
-                            <button id="createUserSubmit" type="submit" class="admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Creeaza utilizator</button>
+                            <button id="createUserSubmit" type="submit" class="admin-action-btn btn-primary">Creeaza utilizator</button>
                         </div>
                     </form>
                 </div>
 
-                <div class="flex-1 overflow-y-auto custom-scrollbar p-6">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left text-sm">
+                <div class="admin-section-body flex-1 overflow-y-auto custom-scrollbar p-6">
+                    <div class="admin-table-wrap overflow-x-auto">
+                        <table class="admin-table w-full text-left text-sm">
                             <thead>
                                 <tr class="text-brand-400 border-b border-brand-600/20">
                                     <th class="pb-3 font-semibold">Nume</th>
@@ -215,21 +219,25 @@
                 </div>
             </div>
 
-            <div id="doctorManagerContainer" class="hidden mt-6 bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 overflow-hidden flex flex-col">
-                <div class="bg-brand-700 px-6 py-3 border-b border-brand-600/20 flex justify-between items-center shrink-0">
-                    <span class="text-sm font-bold text-brand-100">Gestionare Medici</span>
-                    <button id="backToTimelineFromDoctors" class="text-xs text-brand-400 font-bold hover:text-brand-100 transition-colors">Inapoi la programari</button>
+            <div id="doctorManagerContainer" class="hidden mt-6 admin-surface admin-section-panel bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 overflow-hidden flex flex-col">
+                <div class="admin-panel-header bg-brand-700 px-6 py-3 border-b border-brand-600/20 flex justify-between items-center shrink-0">
+                    <div>
+                        <span class="admin-panel-title text-sm font-bold text-brand-100">Gestionare Medici</span>
+                        <p class="admin-panel-subtitle text-xs text-brand-300/70">Configurare program, disponibilitate si status medici.</p>
+                    </div>
+                    <button id="backToTimelineFromDoctors" class="admin-link-btn text-xs text-brand-400 font-bold hover:text-brand-100 transition-colors">Inapoi la programari</button>
                 </div>
 
-                <div id="createDoctorCard" class="p-6 border-b border-brand-600/20 bg-brand-800/80">
-                    <h3 class="text-lg font-bold text-brand-100 mb-3">Creeaza medic nou</h3>
+                <div id="createDoctorCard" class="admin-form-card p-6 border-b border-brand-600/20 bg-brand-800/80">
+                    <h3 class="admin-form-title text-lg font-bold text-brand-100 mb-3">Creeaza medic nou</h3>
+                    <p class="admin-helper-text text-xs text-brand-300/70 mb-3">Campurile marcate cu * sunt obligatorii.</p>
                     <form id="createDoctorForm" class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
                         <div>
-                            <label for="doctorSlug" class="form-label">Slug</label>
+                            <label for="doctorSlug" class="form-label">Slug *</label>
                             <input id="doctorSlug" type="text" class="form-input" placeholder="ex: dr-ion-popescu" required>
                         </div>
                         <div>
-                            <label for="doctorDisplayName" class="form-label">Nume afisat</label>
+                            <label for="doctorDisplayName" class="form-label">Nume afisat *</label>
                             <input id="doctorDisplayName" type="text" class="form-input" required>
                         </div>
                         <div>
@@ -253,14 +261,14 @@
                             <p class="text-xs text-brand-400/70 mt-2">Regula: intervalul trebuie sa fie divizibil perfect la durata consultatiei.</p>
                         </div>
                         <div class="md:col-span-4">
-                            <button id="createDoctorSubmit" type="submit" class="admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30">Creeaza medic</button>
+                            <button id="createDoctorSubmit" type="submit" class="admin-action-btn btn-primary">Creeaza medic</button>
                         </div>
                     </form>
                 </div>
 
-                <div class="flex-1 overflow-y-auto custom-scrollbar p-6">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left text-sm">
+                <div class="admin-section-body flex-1 overflow-y-auto custom-scrollbar p-6">
+                    <div class="admin-table-wrap overflow-x-auto">
+                        <table class="admin-table w-full text-left text-sm">
                             <thead>
                                 <tr class="text-brand-400 border-b border-brand-600/20">
                                     <th class="pb-3 font-semibold">Medic</th>
@@ -280,8 +288,15 @@
     </main>
 
     <div id="toast" class="fixed bottom-5 right-5 bg-brand-800 shadow-xl rounded-xl p-5 transform translate-y-20 opacity-0 transition-all duration-300 max-w-sm z-50 border-l-4 border border-brand-600/20">
-        <h4 id="toastTitle" class="font-bold text-brand-100"></h4>
-        <p id="toastMessage" class="text-sm text-brand-300 mt-1"></p>
+        <div class="pr-8">
+            <h4 id="toastTitle" class="font-bold text-brand-100"></h4>
+            <p id="toastMessage" class="text-sm text-brand-300 mt-1"></p>
+        </div>
+        <button id="toastClose" type="button" class="toast-close-btn" aria-label="Inchide notificarea">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+        </button>
     </div>
 
     <div id="adminModalOverlay" class="admin-modal-overlay hidden" aria-hidden="true">

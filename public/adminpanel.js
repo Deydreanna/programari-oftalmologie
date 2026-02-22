@@ -61,6 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
         adminModalActions: byId('adminModalActions'),
         adminModalClose: byId('adminModalClose'),
         toast: byId('toast'),
+        toastClose: byId('toastClose'),
         toastTitle: byId('toastTitle'),
         toastMessage: byId('toastMessage')
     };
@@ -80,9 +81,17 @@ document.addEventListener('DOMContentLoaded', () => {
     let searchTerm = '';
     let eventsBound = false;
     let activeModalCleanup = null;
+    let toastTimer = null;
 
     const WEEKDAY_LABELS = ['Duminica', 'Luni', 'Marti', 'Miercuri', 'Joi', 'Vineri', 'Sambata'];
     const WEEKDAY_SHORT = ['Du', 'Lu', 'Ma', 'Mi', 'Jo', 'Vi', 'Sa'];
+    const BTN_CLASS = Object.freeze({
+        primary: 'admin-action-btn btn-primary',
+        secondary: 'admin-action-btn btn-secondary',
+        warning: 'admin-action-btn btn-warning',
+        danger: 'admin-action-btn btn-danger',
+        ghost: 'admin-action-btn btn-ghost'
+    });
 
     const isStaffRole = (role) => role === 'viewer' || role === 'scheduler' || role === 'superadmin';
     const isSuperadmin = () => (AUTH.getUser()?.role || '') === 'superadmin';
@@ -99,6 +108,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (el.logoutBtn) {
         el.logoutBtn.addEventListener('click', safeLogoutAndRedirect);
+    }
+    if (el.toastClose) {
+        el.toastClose.addEventListener('click', hideToast);
     }
 
     function toISODate(date) {
@@ -122,19 +134,47 @@ document.addEventListener('DOMContentLoaded', () => {
         container.appendChild(div);
     }
 
+    function hideToast() {
+        if (toastTimer) {
+            clearTimeout(toastTimer);
+            toastTimer = null;
+        }
+        el.toast.classList.add('translate-y-20', 'opacity-0');
+    }
+
     function showToast(title, message, type = 'success') {
         el.toastTitle.textContent = title;
         el.toastMessage.textContent = message;
-        el.toast.className = `fixed bottom-5 right-5 bg-brand-800 shadow-xl rounded-xl p-5 transform transition-all duration-300 max-w-sm z-50 border-l-4 border border-brand-600/30 ${type === 'success' ? 'border-l-brand-400' : 'border-l-red-400'}`;
+        el.toast.className = `fixed bottom-5 right-5 bg-brand-800 shadow-xl rounded-xl p-5 transform transition-all duration-300 max-w-sm z-50 border-l-4 border border-brand-600/30 ${type === 'success' ? 'toast-success' : 'toast-error'}`;
         el.toastTitle.className = `font-bold ${type === 'success' ? 'text-brand-100' : 'text-red-300'}`;
         el.toastMessage.className = `text-sm mt-1 ${type === 'success' ? 'text-brand-300' : 'text-red-200'}`;
 
         setTimeout(() => {
             el.toast.classList.remove('translate-y-20', 'opacity-0');
         }, 10);
-        setTimeout(() => {
-            el.toast.classList.add('translate-y-20', 'opacity-0');
-        }, 12000);
+        if (toastTimer) {
+            clearTimeout(toastTimer);
+        }
+        toastTimer = setTimeout(() => {
+            hideToast();
+        }, 9000);
+    }
+
+    function setButtonLoading(button, isLoading, loadingLabel = 'Se salveaza...') {
+        if (!button) return;
+        if (isLoading) {
+            if (!button.dataset.originalLabel) {
+                button.dataset.originalLabel = button.textContent;
+            }
+            button.disabled = true;
+            button.textContent = loadingLabel;
+            return;
+        }
+        button.disabled = false;
+        if (button.dataset.originalLabel) {
+            button.textContent = button.dataset.originalLabel;
+            delete button.dataset.originalLabel;
+        }
     }
 
     function closeActiveModal() {
@@ -274,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const cancelBtn = document.createElement('button');
             cancelBtn.type = 'button';
-            cancelBtn.className = 'admin-action-btn bg-brand-800 text-brand-300 border-brand-600/30 hover:bg-brand-700';
+            cancelBtn.className = BTN_CLASS.ghost;
             cancelBtn.textContent = cancelLabel;
             cancelBtn.addEventListener('click', () => {
                 resolve(false);
@@ -283,9 +323,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const confirmBtn = document.createElement('button');
             confirmBtn.type = 'button';
-            confirmBtn.className = danger
-                ? 'admin-action-btn bg-red-900/30 text-red-300 border-red-800/40 hover:bg-red-900/50'
-                : 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            confirmBtn.className = danger ? BTN_CLASS.danger : BTN_CLASS.primary;
             confirmBtn.textContent = confirmLabel;
             confirmBtn.addEventListener('click', () => {
                 resolve(true);
@@ -327,7 +365,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const cancelBtn = document.createElement('button');
             cancelBtn.type = 'button';
-            cancelBtn.className = 'admin-action-btn bg-brand-800 text-brand-300 border-brand-600/30 hover:bg-brand-700';
+            cancelBtn.className = BTN_CLASS.ghost;
             cancelBtn.textContent = 'Anuleaza';
             cancelBtn.addEventListener('click', () => {
                 resolve(null);
@@ -336,7 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const confirmBtn = document.createElement('button');
             confirmBtn.type = 'button';
-            confirmBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            confirmBtn.className = BTN_CLASS.primary;
             confirmBtn.textContent = 'Confirma';
             confirmBtn.addEventListener('click', () => {
                 const password = String(passwordInput.value || '').trim();
@@ -733,7 +771,7 @@ document.addEventListener('DOMContentLoaded', () => {
         searchInput.id = 'adminSearchInput';
         searchInput.type = 'text';
         searchInput.placeholder = 'Cauta nume, telefon sau email...';
-        searchInput.className = 'px-4 py-2 rounded-xl bg-brand-800 border border-brand-600/30 text-brand-100 placeholder-brand-400/50 text-sm focus:outline-none focus:border-brand-400 transition-all w-full md:w-64 order-first md:order-none';
+        searchInput.className = 'admin-search-input';
 
         searchInput.addEventListener('input', () => {
             searchTerm = searchInput.value.toLowerCase();
@@ -914,20 +952,18 @@ document.addEventListener('DOMContentLoaded', () => {
             content.appendChild(labeled('Tip', app.type || '-'));
 
             const status = document.createElement('span');
-            status.className = `px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase ${app.emailSent ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`;
+            status.className = `status-badge ${app.emailSent ? 'sent' : 'unsent'}`;
             status.textContent = app.emailSent ? 'Trimis' : 'Netrimis';
             content.appendChild(status);
 
             if (allowResend) {
                 const resendBtn = document.createElement('button');
-                resendBtn.className = 'resend-email-btn bg-brand-400/10 hover:bg-brand-400/20 text-brand-400 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all';
+                resendBtn.className = 'admin-mini-btn secondary';
                 resendBtn.textContent = 'Trimite Manual';
 
                 resendBtn.onclick = async (event) => {
                     event.stopPropagation();
-                    resendBtn.disabled = true;
-                    const originalText = resendBtn.textContent;
-                    resendBtn.textContent = 'Se trimite...';
+                    setButtonLoading(resendBtn, true, 'Se trimite...');
                     try {
                         const res = await AUTH.apiFetch(`/api/admin/resend-email/${app._id}`, { method: 'POST' });
                         const data = await res.json().catch(() => ({}));
@@ -940,8 +976,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     } catch (_) {
                         showToast('Eroare', 'Eroare de conexiune.', 'error');
                     } finally {
-                        resendBtn.disabled = false;
-                        resendBtn.textContent = originalText;
+                        setButtonLoading(resendBtn, false);
                     }
                 };
 
@@ -950,7 +985,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (allowDelete) {
                 const cancelBtn = document.createElement('button');
-                cancelBtn.className = 'cancel-appointment-btn bg-red-500/10 hover:bg-red-500/20 text-red-300 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all';
+                cancelBtn.className = 'admin-mini-btn danger';
                 cancelBtn.textContent = 'Anuleaza';
 
                 cancelBtn.onclick = async (event) => {
@@ -1025,8 +1060,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const loadingRow = document.createElement('tr');
         const loadingCell = document.createElement('td');
         loadingCell.colSpan = 6;
-        loadingCell.className = 'p-10 text-center text-brand-400';
-        loadingCell.textContent = 'Se incarca lista de utilizatori...';
+        const loadingWrap = document.createElement('div');
+        loadingWrap.className = 'admin-empty-state is-loading';
+        loadingWrap.textContent = 'Se incarca lista de utilizatori...';
+        loadingCell.appendChild(loadingWrap);
         loadingRow.appendChild(loadingCell);
         el.userTableBody.appendChild(loadingRow);
 
@@ -1132,7 +1169,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const cancelBtn = document.createElement('button');
             cancelBtn.type = 'button';
-            cancelBtn.className = 'admin-action-btn bg-brand-800 text-brand-300 border-brand-600/30 hover:bg-brand-700';
+            cancelBtn.className = BTN_CLASS.ghost;
             cancelBtn.textContent = 'Anuleaza';
             cancelBtn.addEventListener('click', () => {
                 resolve(null);
@@ -1141,7 +1178,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const saveBtn = document.createElement('button');
             saveBtn.type = 'button';
-            saveBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            saveBtn.className = BTN_CLASS.primary;
             saveBtn.textContent = 'Salveaza';
             saveBtn.addEventListener('click', () => {
                 const displayName = String(displayNameInput.value || '').trim();
@@ -1234,6 +1271,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderUsers(users) {
         clearNode(el.userTableBody);
+        if (!Array.isArray(users) || users.length === 0) {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 6;
+            const empty = document.createElement('div');
+            empty.className = 'admin-empty-state';
+            empty.textContent = 'Nu exista utilizatori inregistrati.';
+            cell.appendChild(empty);
+            row.appendChild(cell);
+            el.userTableBody.appendChild(row);
+            return;
+        }
 
         const currentUser = AUTH.getUser() || {};
         users.forEach((user) => {
@@ -1241,35 +1290,48 @@ document.addEventListener('DOMContentLoaded', () => {
             row.className = 'border-b border-brand-600/10 hover:bg-brand-600/5 transition-colors';
 
             const nameCell = document.createElement('td');
-            nameCell.className = 'py-4 font-medium';
+            nameCell.className = 'py-4 font-medium cell-truncate';
+            nameCell.title = user.displayName || '';
             nameCell.textContent = user.displayName || '';
 
             const emailCell = document.createElement('td');
-            emailCell.className = 'py-4 text-brand-400';
+            emailCell.className = 'py-4 cell-secondary cell-truncate';
+            emailCell.title = user.email || '';
             emailCell.textContent = user.email || '';
 
             const phoneCell = document.createElement('td');
-            phoneCell.className = 'py-4 text-brand-400';
+            phoneCell.className = 'py-4 cell-secondary';
             phoneCell.textContent = user.phone || '';
 
             const roleCell = document.createElement('td');
             roleCell.className = 'py-4 text-center';
-            roleCell.textContent = user.role || 'viewer';
+            const roleBadge = document.createElement('span');
+            const role = String(user.role || 'viewer').toLowerCase();
+            const roleLabelByKey = {
+                viewer: 'Regular',
+                scheduler: 'Admin',
+                superadmin: 'Superadmin'
+            };
+            roleBadge.className = `role-badge ${role}`;
+            roleBadge.textContent = roleLabelByKey[role] || role;
+            roleCell.appendChild(roleBadge);
 
             const doctorsCell = document.createElement('td');
-            doctorsCell.className = 'py-4 text-brand-300';
+            doctorsCell.className = 'py-4 cell-secondary cell-truncate';
             const managedDoctors = Array.isArray(user.managedDoctors) ? user.managedDoctors : [];
-            doctorsCell.textContent = managedDoctors.length
+            const managedText = managedDoctors.length
                 ? managedDoctors.map((doctor) => doctor.displayName).join(', ')
                 : '-';
+            doctorsCell.textContent = managedText;
+            doctorsCell.title = managedText;
 
             const actionsCell = document.createElement('td');
             actionsCell.className = 'py-4 text-right';
             const actionWrap = document.createElement('div');
-            actionWrap.className = 'flex items-center gap-2 justify-end';
+            actionWrap.className = 'admin-action-group';
 
             const editBtn = document.createElement('button');
-            editBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            editBtn.className = BTN_CLASS.secondary;
             editBtn.textContent = 'Editeaza';
             editBtn.onclick = () => openEditUserDialog(user);
 
@@ -1278,9 +1340,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const isSelf = String(user.email || '') === String(currentUser.email || '');
             if (!isSelf) {
                 const deleteBtn = document.createElement('button');
-                deleteBtn.className = 'admin-action-btn bg-red-900/30 text-red-300 border-red-800/40 hover:bg-red-900/50';
+                deleteBtn.className = BTN_CLASS.danger;
                 deleteBtn.textContent = 'Sterge';
-                deleteBtn.onclick = () => deleteUser(user);
+                deleteBtn.onclick = async () => {
+                    setButtonLoading(deleteBtn, true, 'Se sterge...');
+                    try {
+                        await deleteUser(user);
+                    } finally {
+                        setButtonLoading(deleteBtn, false);
+                    }
+                };
                 actionWrap.appendChild(deleteBtn);
             }
 
@@ -1323,7 +1392,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        el.createUserSubmit.disabled = true;
+        setButtonLoading(el.createUserSubmit, true, 'Se salveaza...');
         try {
             const res = await AUTH.apiFetch('/api/admin/users', {
                 method: 'POST',
@@ -1341,7 +1410,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_) {
             showToast('Eroare', 'Eroare de conexiune.', 'error');
         } finally {
-            el.createUserSubmit.disabled = false;
+            setButtonLoading(el.createUserSubmit, false);
         }
     }
     async function createDoctor() {
@@ -1384,7 +1453,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        el.createDoctorSubmit.disabled = true;
+        setButtonLoading(el.createDoctorSubmit, true, 'Se salveaza...');
         try {
             const res = await AUTH.apiFetch('/api/admin/doctors', {
                 method: 'POST',
@@ -1402,7 +1471,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_) {
             showToast('Eroare', 'Eroare de conexiune.', 'error');
         } finally {
-            el.createDoctorSubmit.disabled = false;
+            setButtonLoading(el.createDoctorSubmit, false);
         }
     }
 
@@ -1512,7 +1581,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const cancelBtn = document.createElement('button');
             cancelBtn.type = 'button';
-            cancelBtn.className = 'admin-action-btn bg-brand-800 text-brand-300 border-brand-600/30 hover:bg-brand-700';
+            cancelBtn.className = BTN_CLASS.ghost;
             cancelBtn.textContent = 'Anuleaza';
             cancelBtn.addEventListener('click', () => {
                 resolve(null);
@@ -1521,7 +1590,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const saveBtn = document.createElement('button');
             saveBtn.type = 'button';
-            saveBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            saveBtn.className = BTN_CLASS.primary;
             saveBtn.textContent = 'Salveaza';
             saveBtn.addEventListener('click', () => {
                 const displayName = String(displayNameInput.value || '').trim();
@@ -1604,7 +1673,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const cancelBtn = document.createElement('button');
             cancelBtn.type = 'button';
-            cancelBtn.className = 'admin-action-btn bg-brand-800 text-brand-300 border-brand-600/30 hover:bg-brand-700';
+            cancelBtn.className = BTN_CLASS.ghost;
             cancelBtn.textContent = 'Anuleaza';
             cancelBtn.addEventListener('click', () => {
                 resolve(null);
@@ -1613,7 +1682,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const confirmBtn = document.createElement('button');
             confirmBtn.type = 'button';
-            confirmBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            confirmBtn.className = BTN_CLASS.primary;
             confirmBtn.textContent = confirmLabel;
             confirmBtn.addEventListener('click', () => {
                 const value = String(dateInput.value || '').trim();
@@ -1811,7 +1880,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const cancelBtn = document.createElement('button');
             cancelBtn.type = 'button';
-            cancelBtn.className = 'admin-action-btn bg-brand-800 text-brand-300 border-brand-600/30 hover:bg-brand-700';
+            cancelBtn.className = BTN_CLASS.ghost;
             cancelBtn.textContent = 'Anuleaza';
             cancelBtn.addEventListener('click', () => {
                 resolve(null);
@@ -1820,7 +1889,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const saveBtn = document.createElement('button');
             saveBtn.type = 'button';
-            saveBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            saveBtn.className = BTN_CLASS.primary;
             saveBtn.textContent = 'Salveaza';
             saveBtn.addEventListener('click', () => {
                 if (statusSelect.value === 'blocked') {
@@ -1921,8 +1990,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const row = document.createElement('tr');
             const cell = document.createElement('td');
             cell.colSpan = 6;
-            cell.className = 'p-10 text-center text-brand-400';
-            cell.textContent = 'Nu exista medici disponibili.';
+            const empty = document.createElement('div');
+            empty.className = 'admin-empty-state';
+            empty.textContent = 'Nu exista medici disponibili.';
+            cell.appendChild(empty);
             row.appendChild(cell);
             el.doctorTableBody.appendChild(row);
             return;
@@ -1933,33 +2004,42 @@ document.addEventListener('DOMContentLoaded', () => {
             row.className = 'border-b border-brand-600/10 hover:bg-brand-600/5 transition-colors';
 
             const nameCell = document.createElement('td');
-            nameCell.className = 'py-4 font-medium';
+            nameCell.className = 'py-4 font-medium cell-truncate';
+            nameCell.title = doctor.displayName || '';
             nameCell.textContent = doctor.displayName || '';
 
             const slugCell = document.createElement('td');
-            slugCell.className = 'py-4 text-brand-400';
+            slugCell.className = 'py-4 cell-secondary cell-truncate';
+            slugCell.title = doctor.slug || '';
             slugCell.textContent = doctor.slug || '';
 
             const scheduleCell = document.createElement('td');
-            scheduleCell.className = 'py-4 text-brand-300';
+            scheduleCell.className = 'py-4 cell-secondary cell-truncate';
             const dayConfigs = getDoctorDayConfigs(doctor);
             if (dayConfigs.length) {
-                scheduleCell.textContent = dayConfigs
+                const scheduleText = dayConfigs
                     .map((config) => `${WEEKDAY_SHORT[config.weekday]} ${config.startTime}-${config.endTime} / ${config.consultationDurationMinutes}m`)
                     .join('; ');
+                scheduleCell.textContent = scheduleText;
+                scheduleCell.title = scheduleText;
             } else {
                 scheduleCell.textContent = '-';
             }
 
             const weekdaysCell = document.createElement('td');
-            weekdaysCell.className = 'py-4 text-brand-300';
-            weekdaysCell.textContent = dayConfigs.length
+            weekdaysCell.className = 'py-4 cell-secondary cell-truncate';
+            const weekdaysText = dayConfigs.length
                 ? dayConfigs.map((config) => WEEKDAY_SHORT[config.weekday]).join(', ')
                 : '-';
+            weekdaysCell.textContent = weekdaysText;
+            weekdaysCell.title = weekdaysText;
 
             const activeCell = document.createElement('td');
             activeCell.className = 'py-4 text-brand-300';
-            activeCell.textContent = doctor.isActive ? 'Da' : 'Nu';
+            const statusBadge = document.createElement('span');
+            statusBadge.className = `status-badge ${doctor.isActive ? 'active' : 'inactive'}`;
+            statusBadge.textContent = doctor.isActive ? 'Activ' : 'Inactiv';
+            activeCell.appendChild(statusBadge);
             if (!doctor.isActive) {
                 row.classList.add('opacity-70');
             }
@@ -1967,37 +2047,72 @@ document.addEventListener('DOMContentLoaded', () => {
             const actionsCell = document.createElement('td');
             actionsCell.className = 'py-4 text-right';
             const actionWrap = document.createElement('div');
-            actionWrap.className = 'flex items-center gap-2 justify-end';
+            actionWrap.className = 'admin-action-group';
 
             const editBtn = document.createElement('button');
-            editBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            editBtn.className = BTN_CLASS.secondary;
             editBtn.textContent = 'Editeaza';
-            editBtn.onclick = () => openEditDoctorDialog(doctor);
+            editBtn.onclick = async () => {
+                setButtonLoading(editBtn, true, 'Se deschide...');
+                try {
+                    await openEditDoctorDialog(doctor);
+                } finally {
+                    setButtonLoading(editBtn, false);
+                }
+            };
             actionWrap.appendChild(editBtn);
 
             const blockBtn = document.createElement('button');
-            blockBtn.className = 'admin-action-btn bg-orange-900/30 text-orange-300 border-orange-800/40 hover:bg-orange-900/50';
+            blockBtn.className = BTN_CLASS.warning;
             blockBtn.textContent = 'Blocheaza zi';
-            blockBtn.onclick = () => blockDoctorDate(doctor);
+            blockBtn.onclick = async () => {
+                setButtonLoading(blockBtn, true, 'Se aplica...');
+                try {
+                    await blockDoctorDate(doctor);
+                } finally {
+                    setButtonLoading(blockBtn, false);
+                }
+            };
             actionWrap.appendChild(blockBtn);
 
             const unblockBtn = document.createElement('button');
-            unblockBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            unblockBtn.className = BTN_CLASS.secondary;
             unblockBtn.textContent = 'Reactiveaza zi';
-            unblockBtn.onclick = () => unblockDoctorDate(doctor);
+            unblockBtn.onclick = async () => {
+                setButtonLoading(unblockBtn, true, 'Se aplica...');
+                try {
+                    await unblockDoctorDate(doctor);
+                } finally {
+                    setButtonLoading(unblockBtn, false);
+                }
+            };
             actionWrap.appendChild(unblockBtn);
 
             const toggleBtn = document.createElement('button');
-            toggleBtn.className = 'admin-action-btn bg-brand-600/20 text-brand-300 border-brand-600/30 hover:bg-brand-600/30';
+            toggleBtn.className = BTN_CLASS.secondary;
             toggleBtn.textContent = doctor.isActive ? 'Dezactiveaza' : 'Activeaza';
-            toggleBtn.onclick = () => patchDoctor(doctor._id, { isActive: !doctor.isActive }, 'Status medic actualizat.');
+            toggleBtn.onclick = async () => {
+                setButtonLoading(toggleBtn, true, 'Se actualizeaza...');
+                try {
+                    await patchDoctor(doctor._id, { isActive: !doctor.isActive }, 'Status medic actualizat.');
+                } finally {
+                    setButtonLoading(toggleBtn, false);
+                }
+            };
             actionWrap.appendChild(toggleBtn);
 
             if (isSuperadmin()) {
                 const deleteBtn = document.createElement('button');
-                deleteBtn.className = 'admin-action-btn bg-red-900/30 text-red-300 border-red-800/40 hover:bg-red-900/50';
+                deleteBtn.className = BTN_CLASS.danger;
                 deleteBtn.textContent = 'Sterge medic';
-                deleteBtn.onclick = () => deleteDoctor(doctor);
+                deleteBtn.onclick = async () => {
+                    setButtonLoading(deleteBtn, true, 'Se sterge...');
+                    try {
+                        await deleteDoctor(doctor);
+                    } finally {
+                        setButtonLoading(deleteBtn, false);
+                    }
+                };
                 actionWrap.appendChild(deleteBtn);
             }
 
@@ -2074,8 +2189,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('Acces interzis', 'Doar superadmin poate gestiona utilizatorii.', 'error');
                 return;
             }
-            showUserSection();
-            await fetchUsers();
+            setButtonLoading(el.manageUsersBtn, true, 'Se incarca...');
+            try {
+                showUserSection();
+                await fetchUsers();
+            } finally {
+                setButtonLoading(el.manageUsersBtn, false);
+            }
         });
 
         el.manageDoctorsBtn?.addEventListener('click', async () => {
@@ -2083,8 +2203,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('Acces interzis', 'Doar superadmin poate gestiona medicii.', 'error');
                 return;
             }
-            showDoctorSection();
-            await fetchDoctors();
+            setButtonLoading(el.manageDoctorsBtn, true, 'Se incarca...');
+            try {
+                showDoctorSection();
+                await fetchDoctors();
+            } finally {
+                setButtonLoading(el.manageDoctorsBtn, false);
+            }
         });
 
         el.backToTimeline?.addEventListener('click', () => {
@@ -2106,7 +2231,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         el.editDayScheduleBtn?.addEventListener('click', async () => {
-            await editSelectedDaySchedule();
+            setButtonLoading(el.editDayScheduleBtn, true, 'Se incarca...');
+            try {
+                await editSelectedDaySchedule();
+            } finally {
+                setButtonLoading(el.editDayScheduleBtn, false);
+            }
         });
 
         el.resetDatabaseBtn.addEventListener('click', async () => {
@@ -2126,6 +2256,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const stepUpToken = await requestStepUp('appointments_reset', 'resetarea bazei de date');
             if (!stepUpToken) return;
 
+            setButtonLoading(el.resetDatabaseBtn, true, 'Se reseteaza...');
             try {
                 const res = await AUTH.apiFetch('/api/admin/reset', {
                     method: 'POST',
@@ -2141,6 +2272,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } catch (_) {
                 showToast('Eroare', 'Eroare de conexiune.', 'error');
+            } finally {
+                setButtonLoading(el.resetDatabaseBtn, false);
             }
         });
 
@@ -2165,6 +2298,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (!confirmed) return;
 
+            setButtonLoading(el.cancelDayAppointmentsBtn, true, 'Se blocheaza...');
             try {
                 const res = await AUTH.apiFetch(`/api/admin/doctors/${doctorId}/block-date`, {
                     method: 'POST',
@@ -2179,6 +2313,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } catch (_) {
                 showToast('Eroare', 'Eroare de conexiune.', 'error');
+            } finally {
+                setButtonLoading(el.cancelDayAppointmentsBtn, false);
             }
         });
 
@@ -2191,6 +2327,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const stepUpToken = await requestStepUp('appointments_export', 'exportul datelor');
             if (!stepUpToken) return;
 
+            setButtonLoading(el.exportExcelBtn, true, 'Se exporta...');
             try {
                 const res = await AUTH.apiFetch('/api/admin/export', {
                     headers: { 'X-Step-Up-Token': stepUpToken }
@@ -2213,6 +2350,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.URL.revokeObjectURL(url);
             } catch (_) {
                 showToast('Eroare', 'Eroare de conexiune.', 'error');
+            } finally {
+                setButtonLoading(el.exportExcelBtn, false);
             }
         });
 
