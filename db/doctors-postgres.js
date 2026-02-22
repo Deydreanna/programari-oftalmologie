@@ -1132,7 +1132,7 @@ async function updateDoctorByLegacyId(legacyDoctorId, updates = {}, client = nul
     return withTransaction(task);
 }
 
-async function deactivateDoctorByLegacyId(legacyDoctorId, { actorUserPublicId = null } = {}, client = null) {
+async function deleteDoctorByLegacyId(legacyDoctorId, { actorUserPublicId = null } = {}, client = null) {
     const normalizedLegacyDoctorId = normalizeLegacyDoctorId(legacyDoctorId);
     if (!normalizedLegacyDoctorId) {
         return null;
@@ -1145,18 +1145,41 @@ async function deactivateDoctorByLegacyId(legacyDoctorId, { actorUserPublicId = 
         }
 
         const actorUserPgId = await queryUserPgIdByPublicId(actorUserPublicId, txClient);
+        const appointmentCountResult = await txClient.query(
+            `SELECT COUNT(*)::int AS count
+             FROM appointments
+             WHERE doctor_id = $1`,
+            [existingRow.id]
+        );
+        const deletedAppointments = Number(appointmentCountResult.rows?.[0]?.count || 0);
+
         await txClient.query(
-            `UPDATE doctors
-             SET is_active = FALSE,
-                 updated_by_user_id = $1::uuid,
-                 updated_at = now()
-             WHERE id = $2`,
-            [actorUserPgId, existingRow.id]
+            `DELETE FROM appointments
+             WHERE doctor_id = $1`,
+            [existingRow.id]
         );
 
-        const refreshedRow = await queryDoctorRowByPgId(existingRow.id, txClient);
-        const mapped = await mapDoctorRows([refreshedRow], txClient);
-        return mapped[0] || null;
+        await txClient.query(
+            `DELETE FROM doctor_admin_assignments
+             WHERE doctor_id = $1
+                OR legacy_doctor_mongo_id = $2::char(24)`,
+            [existingRow.id, normalizedLegacyDoctorId]
+        );
+
+        await txClient.query(
+            `DELETE FROM doctors
+             WHERE id = $1`,
+            [existingRow.id]
+        );
+
+        return {
+            _id: normalizedLegacyDoctorId,
+            pgId: String(existingRow.id),
+            slug: String(existingRow.slug || ''),
+            displayName: String(existingRow.display_name || ''),
+            deletedAppointments,
+            deletedByUserId: actorUserPgId
+        };
     };
 
     if (client) {
@@ -1286,7 +1309,7 @@ module.exports = {
     countDoctorsByLegacyIds,
     createDoctor,
     updateDoctorByLegacyId,
-    deactivateDoctorByLegacyId,
+    deleteDoctorByLegacyId,
     getDoctorDayScheduleByLegacyId,
     upsertDoctorDayOverrideByLegacyId,
     removeDoctorDayOverrideByLegacyId,

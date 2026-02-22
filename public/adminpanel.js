@@ -1224,7 +1224,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const confirmed = window.confirm(`Esti sigur ca vrei sa stergi medicul ${doctor.displayName}? Medicul va fi dezactivat.`);
+        const confirmed = window.confirm(
+            `Esti sigur ca vrei sa stergi definitiv medicul ${doctor.displayName}? Aceasta actiune va sterge si programarile asociate.`
+        );
         if (!confirmed) return;
 
         const stepUpToken = await requestStepUp('doctor_delete', 'stergerea medicului');
@@ -1240,7 +1242,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast('Eroare', data.error || 'Nu s-a putut sterge medicul.', 'error');
                 return;
             }
-            showToast('Succes', data.message || 'Medic dezactivat.');
+            showToast('Succes', data.message || 'Medic sters definitiv.');
             await fetchDoctors();
             await fetchAdminAppointments();
         } catch (_) {

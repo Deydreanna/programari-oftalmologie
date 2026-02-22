@@ -2709,30 +2709,38 @@ app.delete('/api/admin/doctors/:id', requireSuperadminOnly, requireStepUp('docto
     }
 
     try {
-        const doctor = await pgDoctors.deactivateDoctorByLegacyId(
+        const deletedDoctor = await pgDoctors.deleteDoctorByLegacyId(
             doctorId,
             { actorUserPublicId: getUserPublicId(req.user) || req.user?._id || null }
         );
-        if (!doctor) {
+        if (!deletedDoctor) {
             return res.status(404).json({ error: 'Medic negasit.' });
         }
 
         await writeAuditLog(req, {
-            action: 'doctor_delete_soft',
+            action: 'doctor_delete_hard',
             result: 'success',
             targetType: 'doctor',
             targetId: doctorId,
-            actorUser: req.user
+            actorUser: req.user,
+            metadata: {
+                deletedAppointments: Number(deletedDoctor.deletedAppointments || 0)
+            }
         });
 
         return res.json({
             success: true,
-            message: 'Medicul a fost dezactivat.',
-            doctor: sanitizeDoctorForAdmin(doctor, { includeAudit: true })
+            message: 'Medicul a fost sters definitiv.',
+            deletedDoctor: {
+                _id: deletedDoctor._id,
+                slug: deletedDoctor.slug,
+                displayName: deletedDoctor.displayName
+            },
+            deletedAppointments: Number(deletedDoctor.deletedAppointments || 0)
         });
     } catch (_) {
         await writeAuditLog(req, {
-            action: 'doctor_delete_soft',
+            action: 'doctor_delete_hard',
             result: 'failure',
             targetType: 'doctor',
             targetId: doctorId,
