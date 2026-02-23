@@ -433,6 +433,7 @@
             const timelineMinutes = timelineEndMinutes - timelineStartMinutes;
             const timelineHeight = Math.max(360, timelineMinutes * pxPerMinute);
             const singleDoctorMode = !!latestState.selectedDoctorId;
+            const readableBlockHeight = singleDoctorMode ? 58 : 54;
             const doctorsForView = normalizeDoctorsForView({
                 doctors: latestState.doctors,
                 appointments: latestState.appointments,
@@ -586,7 +587,11 @@
                     const blockEnd = entry.endMinutes;
 
                     const top = (blockStart - timelineStartMinutes) * pxPerMinute;
-                    const height = Math.max((blockEnd - blockStart) * pxPerMinute, minBlockHeight);
+                    const height = Math.max(
+                        (blockEnd - blockStart) * pxPerMinute,
+                        minBlockHeight,
+                        readableBlockHeight
+                    );
 
                     const block = createNode('article', 'admin-scheduler-block');
                     block.style.top = `${top}px`;
