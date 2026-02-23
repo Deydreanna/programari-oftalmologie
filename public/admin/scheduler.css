@@ -312,14 +312,21 @@ body.admin-panel-page .admin-scheduler-block.is-control {
 body.admin-panel-page .admin-scheduler-patient {
     display: block;
     flex: 0 0 auto;
-    font-size: 12px;
+    font-size: clamp(10px, 0.25vw + 9px, 12px);
     font-weight: 700;
-    line-height: 1.2;
+    line-height: 1.15;
     color: #d9fff5;
     text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
-    white-space: nowrap;
+    white-space: normal;
     overflow: hidden;
     text-overflow: ellipsis;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    max-height: calc(2 * 1.15em);
 }
 
 body.admin-panel-page .admin-scheduler-meta {
@@ -408,7 +415,7 @@ body.admin-panel-page .admin-scheduler-grid.is-single .admin-scheduler-block {
 }
 
 body.admin-panel-page .admin-scheduler-grid.is-single .admin-scheduler-patient {
-    font-size: 13px;
+    font-size: clamp(11px, 0.3vw + 10px, 13px);
 }
 
 body.admin-panel-page .admin-appointment-drawer {

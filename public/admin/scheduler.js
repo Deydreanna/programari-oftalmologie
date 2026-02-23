@@ -69,37 +69,21 @@
     }
 
     function maskPatientName(rawName) {
-        const letterOrDigitPattern = /[A-Za-z0-9ĂÂÎȘȚăâîșț]/;
-        const sanitizePattern = /[^A-Za-z0-9ĂÂÎȘȚăâîșț]/g;
-        const normalized = String(rawName || '').trim();
-        const parts = normalized.split(/\s+/).filter(Boolean);
+        const normalized = String(rawName || '')
+            .replace(/,+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!normalized) return 'Pacient';
+        if (normalized.includes('@')) return 'Pacient';
+
+        const parts = normalized.split(' ').filter(Boolean);
         if (!parts.length) return 'Pacient';
+        if (parts.length === 1) return parts[0];
 
-        if (parts.length === 1) {
-            const singleValue = parts[0];
-            if (singleValue.includes('@')) {
-                const localPart = singleValue.split('@')[0] || '';
-                const initials = localPart
-                    .replace(sanitizePattern, '')
-                    .slice(0, 2)
-                    .toUpperCase();
-                return initials ? `${initials}.` : 'Pacient';
-            }
-
-            const hasLetterOrDigit = letterOrDigitPattern.test(singleValue);
-            if (!hasLetterOrDigit) return 'Pacient';
-            if (singleValue.length > 24) {
-                const first = singleValue.replace(sanitizePattern, '').charAt(0).toUpperCase();
-                return first ? `${first}.` : 'Pacient';
-            }
-            return singleValue;
-        }
-
+        // Persisted values are usually "Prenume Nume"; display in requested "Nume Prenume".
         const surname = parts[parts.length - 1];
-        const firstInitial = String(parts[0] || '').charAt(0).toUpperCase();
-        const hasSurnameText = letterOrDigitPattern.test(surname);
-        if (!firstInitial || !hasSurnameText) return 'Pacient';
-        return `${surname} ${firstInitial}.`;
+        const givenNames = parts.slice(0, -1).join(' ');
+        return `${surname} ${givenNames}`.trim();
     }
 
     function createNode(tag, className = '', text = '') {
@@ -433,7 +417,7 @@
             const timelineMinutes = timelineEndMinutes - timelineStartMinutes;
             const timelineHeight = Math.max(360, timelineMinutes * pxPerMinute);
             const singleDoctorMode = !!latestState.selectedDoctorId;
-            const readableBlockHeight = singleDoctorMode ? 58 : 54;
+            const readableBlockHeight = singleDoctorMode ? 64 : 60;
             const doctorsForView = normalizeDoctorsForView({
                 doctors: latestState.doctors,
                 appointments: latestState.appointments,
