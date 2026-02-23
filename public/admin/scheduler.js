@@ -64,12 +64,41 @@
         return `${type.slice(0, 10)}.`;
     }
 
+    function getAppointmentPatientRawName(appointment) {
+        return String(appointment?.patientName || appointment?.name || '').trim();
+    }
+
     function maskPatientName(rawName) {
-        const parts = String(rawName || '').trim().split(/\s+/).filter(Boolean);
+        const letterOrDigitPattern = /[A-Za-z0-9ĂÂÎȘȚăâîșț]/;
+        const sanitizePattern = /[^A-Za-z0-9ĂÂÎȘȚăâîșț]/g;
+        const normalized = String(rawName || '').trim();
+        const parts = normalized.split(/\s+/).filter(Boolean);
         if (!parts.length) return 'Pacient';
+
+        if (parts.length === 1) {
+            const singleValue = parts[0];
+            if (singleValue.includes('@')) {
+                const localPart = singleValue.split('@')[0] || '';
+                const initials = localPart
+                    .replace(sanitizePattern, '')
+                    .slice(0, 2)
+                    .toUpperCase();
+                return initials ? `${initials}.` : 'Pacient';
+            }
+
+            const hasLetterOrDigit = letterOrDigitPattern.test(singleValue);
+            if (!hasLetterOrDigit) return 'Pacient';
+            if (singleValue.length > 24) {
+                const first = singleValue.replace(sanitizePattern, '').charAt(0).toUpperCase();
+                return first ? `${first}.` : 'Pacient';
+            }
+            return singleValue;
+        }
+
         const surname = parts[parts.length - 1];
         const firstInitial = String(parts[0] || '').charAt(0).toUpperCase();
-        if (!firstInitial) return surname;
+        const hasSurnameText = letterOrDigitPattern.test(surname);
+        if (!firstInitial || !hasSurnameText) return 'Pacient';
         return `${surname} ${firstInitial}.`;
     }
 
@@ -331,7 +360,7 @@
     }
 
     function buildBlockAriaLabel(appointment, startMinutes, endMinutes, statusInfo) {
-        const patientMask = maskPatientName(appointment?.patientName);
+        const patientMask = maskPatientName(getAppointmentPatientRawName(appointment));
         const timeRange = `${toMinuteLabel(startMinutes)} - ${toMinuteLabel(endMinutes)}`;
         const typeLabel = getTypeShortLabel(appointment?.type);
         const statusLabel = statusInfo?.label || 'In asteptare';
@@ -576,14 +605,15 @@
                     }
 
                     const statusInfo = normalizeStatus(appointment?.status);
+                    const patientLabel = maskPatientName(getAppointmentPatientRawName(appointment));
                     const timeRange = `${toMinuteLabel(blockStart)} - ${toMinuteLabel(blockEnd)}`;
-                    block.title = `${maskPatientName(appointment?.patientName)} | ${timeRange}`;
+                    block.title = `${patientLabel} | ${timeRange}`;
                     block.setAttribute('role', 'button');
                     block.setAttribute('tabindex', '0');
                     block.setAttribute('aria-haspopup', 'dialog');
                     block.setAttribute('aria-label', buildBlockAriaLabel(appointment, blockStart, blockEnd, statusInfo));
 
-                    const patient = createNode('div', 'admin-scheduler-patient', maskPatientName(appointment?.patientName));
+                    const patient = createNode('div', 'admin-scheduler-patient', patientLabel);
                     const meta = createNode('div', 'admin-scheduler-meta');
                     const typeChip = createNode('span', 'admin-scheduler-type', getTypeShortLabel(appointment?.type));
                     const timeChip = createNode('span', 'admin-scheduler-time-chip', toMinuteLabel(blockStart));
