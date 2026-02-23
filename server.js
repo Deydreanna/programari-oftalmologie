@@ -1413,6 +1413,36 @@ function sanitizeAppointmentForAdminList(appointment) {
     };
 }
 
+function normalizeAppointmentDurationMinutes(value) {
+    const parsed = Number(value);
+    if (Number.isInteger(parsed) && parsed >= 5 && parsed <= 120) {
+        return parsed;
+    }
+    return DEFAULT_BOOKING_SETTINGS.consultationDurationMinutes;
+}
+
+function sanitizeAppointmentForScheduler({
+    appointment,
+    doctor = null,
+    durationMinutes = DEFAULT_BOOKING_SETTINGS.consultationDurationMinutes
+} = {}) {
+    const normalizedDuration = normalizeAppointmentDurationMinutes(durationMinutes);
+    const parsedStartMinutes = parseHHMMToMinutes(String(appointment?.time || ''));
+    return {
+        id: appointment?._id || null,
+        doctorId: appointment?.doctorId || null,
+        doctorName: appointment?.doctorSnapshotName || doctor?.displayName || '',
+        startMinutes: Number.isFinite(parsedStartMinutes) ? parsedStartMinutes : 0,
+        durationMinutes: normalizedDuration,
+        patientName: appointment?.name || '',
+        patientPhone: appointment?.phone || null,
+        patientEmail: appointment?.email || null,
+        patientAge: null,
+        type: appointment?.type || '',
+        status: appointment?.emailSent ? 'sent' : 'unsent'
+    };
+}
+
 function getUserAgent(req) {
     return String(req.headers['user-agent'] || '').slice(0, 512);
 }
@@ -2233,6 +2263,104 @@ app.get('/api/admin/appointments', requireViewerSchedulerOrSuperadmin, async (re
     setAuthNoStore(res);
 
     try {
+        const rawDateQuery = req.query?.date;
+        const rawDoctorIdQuery = req.query?.doctorId;
+        const schedulerQueryMode = rawDateQuery !== undefined || rawDoctorIdQuery !== undefined;
+
+        if (schedulerQueryMode) {
+            const requesterRole = normalizeRoleValue(req.user?.role);
+            if (![ROLE.SCHEDULER, ROLE.SUPERADMIN].includes(requesterRole)) {
+                await writeAuditLog(req, {
+                    action: 'appointments_scheduler_list_view',
+                    result: 'denied',
+                    targetType: 'appointment_collection',
+                    actorUser: req.user
+                });
+                return res.status(403).json({ error: 'Acces interzis.' });
+            }
+
+            if (Array.isArray(rawDateQuery)) {
+                return res.status(400).json({ error: 'Parametrul date este invalid.' });
+            }
+            const selectedDate = String(rawDateQuery || '').trim();
+            if (!isValidISODateString(selectedDate)) {
+                return res.status(400).json({ error: 'Parametrul date trebuie sa fie in format YYYY-MM-DD.' });
+            }
+
+            let doctorIdFilter = null;
+            if (rawDoctorIdQuery !== undefined) {
+                if (Array.isArray(rawDoctorIdQuery)) {
+                    return res.status(400).json({ error: 'Parametrul doctorId este invalid.' });
+                }
+                const parsedDoctorId = String(rawDoctorIdQuery || '').trim();
+                if (!LEGACY_OBJECT_ID_REGEX.test(parsedDoctorId)) {
+                    return res.status(400).json({ error: 'Parametrul doctorId este invalid.' });
+                }
+                doctorIdFilter = parsedDoctorId;
+            }
+
+            let scopedDoctorIds = null;
+            if (isSuperadminUser(req.user)) {
+                scopedDoctorIds = doctorIdFilter ? [doctorIdFilter] : null;
+            } else {
+                const managedDoctorIds = getUserManagedDoctorIds(req.user);
+                if (managedDoctorIds.length === 0) {
+                    return res.status(403).json({ error: 'Nu aveti niciun medic asignat.' });
+                }
+                if (doctorIdFilter && !managedDoctorIds.includes(doctorIdFilter)) {
+                    return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
+                }
+                scopedDoctorIds = doctorIdFilter ? [doctorIdFilter] : managedDoctorIds;
+            }
+
+            const appointments = await pgAppointments.listAppointments({
+                date: selectedDate,
+                doctorLegacyIds: scopedDoctorIds
+            });
+
+            const appointmentDoctorIds = Array.from(new Set(appointments
+                .map((item) => String(item.doctorId || '').trim())
+                .filter((doctorId) => LEGACY_OBJECT_ID_REGEX.test(doctorId))));
+
+            const doctors = appointmentDoctorIds.length
+                ? await pgDoctors.listDoctors({ legacyIds: appointmentDoctorIds, isActive: null })
+                : [];
+            const doctorsById = new Map(doctors.map((doctor) => [String(doctor._id), doctor]));
+
+            const durationByDoctorId = new Map();
+            for (const doctorId of appointmentDoctorIds) {
+                const doctor = doctorsById.get(doctorId);
+                let duration = normalizeAppointmentDurationMinutes(
+                    doctor?.bookingSettings?.consultationDurationMinutes
+                );
+                const daySchedule = await pgDoctors.getDoctorDayScheduleByLegacyId(doctorId, selectedDate);
+                duration = normalizeAppointmentDurationMinutes(daySchedule?.rule?.consultationDurationMinutes || duration);
+                durationByDoctorId.set(doctorId, duration);
+            }
+
+            await writeAuditLog(req, {
+                action: 'appointments_scheduler_list_view',
+                result: 'success',
+                targetType: 'appointment_collection',
+                actorUser: req.user,
+                metadata: {
+                    count: appointments.length,
+                    date: selectedDate,
+                    doctorId: doctorIdFilter
+                }
+            });
+
+            return res.json(appointments.map((appointment) => {
+                const appointmentDoctorId = String(appointment.doctorId || '').trim();
+                const doctor = doctorsById.get(appointmentDoctorId) || null;
+                return sanitizeAppointmentForScheduler({
+                    appointment,
+                    doctor,
+                    durationMinutes: durationByDoctorId.get(appointmentDoctorId)
+                });
+            }));
+        }
+
         let appointments;
         if (isSuperadminUser(req.user)) {
             appointments = await pgAppointments.listAppointments();

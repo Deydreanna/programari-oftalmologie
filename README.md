@@ -59,3 +59,18 @@ Aplicatia mentine:
 - rate limiting + lockout/backoff login
 - audit logging in Postgres
 - `Cache-Control: no-store` pe endpointuri sensibile
+
+## Admin scheduler timeline view
+Panoul admin foloseste un scheduler tip timeline in sectiunea `Programari Zilnice`:
+- axa timp sticky (08:00 - 14:00)
+- coloane pe medic (sau un singur medic cand filtrul este selectat)
+- blocuri focusabile din tastatura (Enter/Space deschide drawer-ul)
+- legenda statusuri (colapsabila pe mobil)
+
+Cum testezi rapid:
+1. Deschide `/adminpanel.html` cu un cont `scheduler` sau `superadmin`.
+2. Schimba data (prev/next sau calendar) si verifica reincarcarea blocurilor.
+3. Comuta filtrul `Toți medicii` / un medic si verifica schimbarea automata de layout.
+4. Foloseste cautarea (nume/telefon/email) si confirma filtrarea client-side.
+5. Navigheaza cu `Tab` pe blocuri si apasa `Enter` pentru detalii in drawer.
+6. Pe ecran mobil (sau DevTools responsive), verifica scroll orizontal + legenda colapsabila.

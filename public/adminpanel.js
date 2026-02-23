@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
         prevAdminDate: byId('prevAdminDate'),
         nextAdminDate: byId('nextAdminDate'),
         timelineHeaderCount: byId('timelineHeaderCount'),
+        appointmentSearchInput: byId('appointmentSearchInput'),
         appointmentDoctorFilter: byId('appointmentDoctorFilter'),
         manageUsersBtn: byId('manageUsersBtn'),
         manageDoctorsBtn: byId('manageDoctorsBtn'),
@@ -63,7 +64,23 @@ document.addEventListener('DOMContentLoaded', () => {
         toast: byId('toast'),
         toastClose: byId('toastClose'),
         toastTitle: byId('toastTitle'),
-        toastMessage: byId('toastMessage')
+        toastMessage: byId('toastMessage'),
+        appointmentDrawer: byId('appointmentDrawer'),
+        appointmentDrawerClose: byId('appointmentDrawerClose'),
+        drawerTimeInterval: byId('drawerTimeInterval'),
+        drawerPatientName: byId('drawerPatientName'),
+        drawerPatientPhone: byId('drawerPatientPhone'),
+        drawerPatientEmail: byId('drawerPatientEmail'),
+        drawerDoctorName: byId('drawerDoctorName'),
+        drawerType: byId('drawerType'),
+        drawerStatus: byId('drawerStatus'),
+        drawerInlineSuccess: byId('drawerInlineSuccess'),
+        drawerInlineError: byId('drawerInlineError'),
+        drawerActionGroup: byId('drawerActionGroup'),
+        drawerResendBtn: byId('drawerResendBtn'),
+        drawerCancelSection: byId('drawerCancelSection'),
+        drawerCancelPassword: byId('drawerCancelPassword'),
+        drawerCancelBtn: byId('drawerCancelBtn')
     };
 
     if (!el.adminApp || !el.toast || !el.timelineGrid) {
@@ -78,6 +95,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let doctorsCache = [];
     let appointmentsCache = [];
     let usersCache = [];
+    let scheduler = null;
+    let drawerAppointmentId = '';
     let searchTerm = '';
     let eventsBound = false;
     let activeModalCleanup = null;
@@ -633,7 +652,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 dayBtn.addEventListener('click', () => {
                     adminActiveDate = dateObj;
                     updateAdminDateDisplay();
-                    renderTimelineForCurrentFilters();
+                    fetchAdminAppointments();
                     renderAdminCalendar();
                 });
             }
@@ -763,22 +782,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function setupAdminSearch() {
-        if (!el.adminActionButtons || byId('adminSearchInput')) {
+        if (!el.appointmentSearchInput || el.appointmentSearchInput.dataset.bound === '1') {
             return;
         }
 
-        const searchInput = document.createElement('input');
-        searchInput.id = 'adminSearchInput';
-        searchInput.type = 'text';
-        searchInput.placeholder = 'Cauta nume, telefon sau email...';
-        searchInput.className = 'admin-search-input';
-
-        searchInput.addEventListener('input', () => {
-            searchTerm = searchInput.value.toLowerCase();
+        el.appointmentSearchInput.dataset.bound = '1';
+        el.appointmentSearchInput.addEventListener('input', () => {
+            searchTerm = String(el.appointmentSearchInput.value || '').toLowerCase().trim();
             renderTimelineForCurrentFilters();
         });
-
-        el.adminActionButtons.prepend(searchInput);
     }
 
     async function fetchAdminStats() {
@@ -872,176 +884,342 @@ document.addEventListener('DOMContentLoaded', () => {
             renderAdminCalendar();
         }
     }
-    function getFilteredAppointments() {
-        const activeDate = getAdminActiveDateISO();
-        const doctorFilter = String(el.appointmentDoctorFilter?.value || '');
 
-        return appointmentsCache
-            .filter((app) => app.date === activeDate)
-            .filter((app) => !doctorFilter || String(app.doctorId || '') === doctorFilter)
-            .filter((app) => {
-                if (!searchTerm) return true;
-                return String(app.name || '').toLowerCase().includes(searchTerm)
-                    || String(app.phone || '').toLowerCase().includes(searchTerm)
-                    || String(app.email || '').toLowerCase().includes(searchTerm)
-                    || String(app.doctorSnapshotName || '').toLowerCase().includes(searchTerm);
-            });
+    function getAppointmentId(entry) {
+        return String(entry?.id || entry?._id || '').trim();
     }
 
-    function renderTimeline(appointments) {
-        clearNode(el.timelineGrid);
+    function minutesToHHMM(totalMinutes) {
+        const safe = Math.max(0, Number(totalMinutes) || 0);
+        const hours = Math.floor(safe / 60);
+        const minutes = safe % 60;
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    }
 
-        if (!appointments.length) {
-            setSingleMessage(el.timelineGrid, 'Nu exista programari pentru filtrele selectate.', 'p-10 text-center text-brand-400 font-medium');
+    function getAppointmentTimeInterval(entry) {
+        const startMinutes = Number(entry?.startMinutes);
+        if (Number.isFinite(startMinutes)) {
+            const durationMinutes = Number(entry?.durationMinutes);
+            const endMinutes = startMinutes + (Number.isFinite(durationMinutes) ? durationMinutes : 20);
+            return `${minutesToHHMM(startMinutes)} - ${minutesToHHMM(endMinutes)}`;
+        }
+        return '-';
+    }
+
+    function getAppointmentStatusLabel(entry) {
+        const status = String(entry?.status || '').toLowerCase();
+        if (status === 'sent' || status === 'trimis') return 'Trimis';
+        if (status === 'confirmed' || status === 'confirmat') return 'Confirmat';
+        if (status === 'cancelled' || status === 'anulat') return 'Anulat';
+        if (status === 'unsent' || status === 'netrimis') return 'Netrimis';
+        return status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Netrimis';
+    }
+
+    function findAppointmentById(appointmentId) {
+        const targetId = String(appointmentId || '').trim();
+        if (!targetId) return null;
+        return appointmentsCache.find((entry) => getAppointmentId(entry) === targetId) || null;
+    }
+
+    function clearDrawerFeedback() {
+        if (el.drawerInlineError) {
+            el.drawerInlineError.textContent = '';
+            el.drawerInlineError.classList.add('hidden');
+        }
+        if (el.drawerInlineSuccess) {
+            el.drawerInlineSuccess.textContent = '';
+            el.drawerInlineSuccess.classList.add('hidden');
+        }
+    }
+
+    function setDrawerError(message) {
+        if (!el.drawerInlineError) return;
+        if (el.drawerInlineSuccess) {
+            el.drawerInlineSuccess.textContent = '';
+            el.drawerInlineSuccess.classList.add('hidden');
+        }
+        el.drawerInlineError.textContent = String(message || 'A aparut o eroare.');
+        el.drawerInlineError.classList.remove('hidden');
+    }
+
+    function setDrawerSuccess(message) {
+        if (!el.drawerInlineSuccess) return;
+        if (el.drawerInlineError) {
+            el.drawerInlineError.textContent = '';
+            el.drawerInlineError.classList.add('hidden');
+        }
+        el.drawerInlineSuccess.textContent = String(message || 'Operatiune finalizata.');
+        el.drawerInlineSuccess.classList.remove('hidden');
+    }
+
+    function closeAppointmentDrawer() {
+        drawerAppointmentId = '';
+        clearDrawerFeedback();
+        if (el.drawerCancelPassword) {
+            el.drawerCancelPassword.value = '';
+        }
+        if (el.appointmentDrawer) {
+            el.appointmentDrawer.classList.remove('is-open');
+            el.appointmentDrawer.setAttribute('aria-hidden', 'true');
+        }
+    }
+
+    function openAppointmentDrawer(entry) {
+        if (!el.appointmentDrawer) return;
+        const appointment = entry || findAppointmentById(drawerAppointmentId);
+        const appointmentId = getAppointmentId(appointment);
+        if (!appointment || !appointmentId) {
+            closeAppointmentDrawer();
             return;
         }
 
-        const allowResend = isSchedulerOrSuperadmin();
-        const allowDelete = isSuperadmin();
+        drawerAppointmentId = appointmentId;
+        clearDrawerFeedback();
 
-        const sorted = [...appointments].sort((a, b) => {
-            if (a.time === b.time) {
-                return String(a.name || '').localeCompare(String(b.name || ''));
+        const fullPatientName = String(appointment.patientName || appointment.name || '').trim();
+        if (el.drawerPatientName) {
+            el.drawerPatientName.textContent = fullPatientName || '-';
+        }
+
+        const patientPhone = String(appointment.patientPhone || appointment.phone || '').trim();
+        if (el.drawerPatientPhone) {
+            if (patientPhone) {
+                el.drawerPatientPhone.textContent = `Telefon: ${patientPhone}`;
+                el.drawerPatientPhone.classList.remove('hidden');
+            } else {
+                el.drawerPatientPhone.textContent = '';
+                el.drawerPatientPhone.classList.add('hidden');
             }
-            return String(a.time || '').localeCompare(String(b.time || ''));
+        }
+
+        const patientEmail = String(appointment.patientEmail || appointment.email || '').trim();
+        if (el.drawerPatientEmail) {
+            if (patientEmail) {
+                el.drawerPatientEmail.textContent = `Email: ${patientEmail}`;
+                el.drawerPatientEmail.classList.remove('hidden');
+            } else {
+                el.drawerPatientEmail.textContent = '';
+                el.drawerPatientEmail.classList.add('hidden');
+            }
+        }
+
+        if (el.drawerDoctorName) {
+            el.drawerDoctorName.textContent = String(appointment.doctorName || appointment.doctorSnapshotName || '-');
+        }
+        if (el.drawerType) {
+            el.drawerType.textContent = String(appointment.type || '-');
+        }
+        if (el.drawerStatus) {
+            el.drawerStatus.textContent = getAppointmentStatusLabel(appointment);
+        }
+        if (el.drawerTimeInterval) {
+            el.drawerTimeInterval.textContent = getAppointmentTimeInterval(appointment);
+        }
+
+        const allowResend = isSchedulerOrSuperadmin();
+        const allowCancel = isSuperadmin();
+
+        el.drawerResendBtn?.classList.toggle('hidden', !allowResend);
+        el.drawerCancelSection?.classList.toggle('hidden', !allowCancel);
+        el.drawerActionGroup?.classList.toggle('hidden', !allowResend && !allowCancel);
+
+        if (el.appointmentDrawer) {
+            el.appointmentDrawer.classList.add('is-open');
+            el.appointmentDrawer.setAttribute('aria-hidden', 'false');
+        }
+    }
+
+    function refreshDrawerFromCache() {
+        if (!drawerAppointmentId) return;
+        const nextEntry = findAppointmentById(drawerAppointmentId);
+        if (!nextEntry) {
+            closeAppointmentDrawer();
+            return;
+        }
+        openAppointmentDrawer(nextEntry);
+    }
+
+    async function requestStepUpTokenWithPassword(password, action) {
+        const res = await AUTH.apiFetch('/api/auth/step-up', {
+            method: 'POST',
+            body: JSON.stringify({ password, action })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.stepUpToken) {
+            return { stepUpToken: null, error: data.error || 'Confirmarea pasului suplimentar a esuat.' };
+        }
+        return { stepUpToken: data.stepUpToken, error: null };
+    }
+
+    async function handleDrawerResendAction() {
+        clearDrawerFeedback();
+        const appointment = findAppointmentById(drawerAppointmentId);
+        if (!appointment) {
+            setDrawerError('Programarea selectata nu mai este disponibila.');
+            return;
+        }
+        if (!isSchedulerOrSuperadmin()) {
+            setDrawerError('Nu aveti drept de trimitere manuala.');
+            return;
+        }
+
+        const appointmentId = getAppointmentId(appointment);
+        setButtonLoading(el.drawerResendBtn, true, 'Se trimite...');
+        try {
+            const res = await AUTH.apiFetch(`/api/admin/resend-email/${appointmentId}`, { method: 'POST' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                setDrawerError(data.error || 'Eroare la trimiterea manuala.');
+                return;
+            }
+            setDrawerSuccess(data.message || 'Email trimis.');
+            await fetchAdminAppointments();
+        } catch (_) {
+            setDrawerError('Eroare de conexiune.');
+        } finally {
+            setButtonLoading(el.drawerResendBtn, false);
+        }
+    }
+
+    async function handleDrawerCancelAction() {
+        clearDrawerFeedback();
+        const appointment = findAppointmentById(drawerAppointmentId);
+        if (!appointment) {
+            setDrawerError('Programarea selectata nu mai este disponibila.');
+            return;
+        }
+        if (!isSuperadmin()) {
+            setDrawerError('Nu aveti drept de anulare.');
+            return;
+        }
+
+        const password = String(el.drawerCancelPassword?.value || '');
+        if (!password.trim()) {
+            setDrawerError('Introdu parola pentru confirmare.');
+            return;
+        }
+
+        setButtonLoading(el.drawerCancelBtn, true, 'Se anuleaza...');
+        try {
+            const { stepUpToken, error } = await requestStepUpTokenWithPassword(password, 'appointment_delete');
+            if (!stepUpToken) {
+                setDrawerError(error || 'Nu s-a putut confirma actiunea.');
+                return;
+            }
+
+            const appointmentId = getAppointmentId(appointment);
+            const res = await AUTH.apiFetch(`/api/admin/appointment/${appointmentId}`, {
+                method: 'DELETE',
+                headers: { 'X-Step-Up-Token': stepUpToken }
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                setDrawerError(data.error || 'Nu s-a putut anula programarea.');
+                return;
+            }
+
+            closeAppointmentDrawer();
+            await fetchAdminAppointments();
+            fetchAdminStats();
+        } catch (_) {
+            setDrawerError('Eroare de conexiune.');
+        } finally {
+            setButtonLoading(el.drawerCancelBtn, false);
+        }
+    }
+
+    function ensureScheduler() {
+        if (scheduler) {
+            return scheduler;
+        }
+
+        if (!window.AdminScheduler || typeof window.AdminScheduler.createScheduler !== 'function') {
+            return null;
+        }
+
+        scheduler = window.AdminScheduler.createScheduler({
+            mount: el.timelineGrid,
+            config: {
+                startHour: '08:00',
+                endHour: '14:00',
+                pxPerMinute: 2.5,
+                onAppointmentClick: (appointment) => {
+                    openAppointmentDrawer(appointment);
+                }
+            }
         });
 
-        const labeled = (label, value) => {
-            const wrapper = document.createElement('span');
-            wrapper.className = 'text-brand-300';
-            const strong = document.createElement('strong');
-            strong.className = 'font-inter text-[11px] uppercase text-brand-400/50';
-            strong.textContent = `${label}:`;
-            wrapper.appendChild(strong);
-            wrapper.appendChild(document.createTextNode(` ${value}`));
-            return wrapper;
-        };
+        return scheduler;
+    }
 
-        sorted.forEach((app) => {
-            const row = document.createElement('div');
-            row.className = 'timeline-row';
-
-            const hourLabel = document.createElement('div');
-            hourLabel.className = 'timeline-hour';
-            hourLabel.textContent = app.time || '--:--';
-
-            const slotsArea = document.createElement('div');
-            slotsArea.className = 'timeline-slots';
-
-            const card = document.createElement('div');
-            card.className = `appointment-card ${(app.type === 'Control') ? 'app-type-control' : 'app-type-prima'}`;
-
-            const content = document.createElement('div');
-            content.className = 'flex items-center gap-3 flex-wrap';
-
-            const nameEl = document.createElement('span');
-            nameEl.className = 'font-bold text-brand-100';
-            nameEl.textContent = app.name || '';
-            content.appendChild(nameEl);
-
-            if (app.type === 'Prima Consultatie' || app.type === 'Prima Consultație') {
-                const badge = document.createElement('span');
-                badge.className = 'app-new-badge';
-                badge.textContent = 'NOU';
-                content.appendChild(badge);
+    function getSchedulerDoctorsForView() {
+        const selectedDoctorId = String(el.appointmentDoctorFilter?.value || '').trim();
+        if (selectedDoctorId) {
+            const selectedDoctor = doctorsCache.find((doctor) => String(doctor._id || '') === selectedDoctorId);
+            if (selectedDoctor) {
+                return [selectedDoctor];
             }
 
-            content.appendChild(labeled('Medic', app.doctorSnapshotName || '-'));
-            content.appendChild(labeled('Email', app.email || '-'));
-            content.appendChild(labeled('Tel', app.phone || '-'));
-            content.appendChild(labeled('Tip', app.type || '-'));
+            const fromAppointments = appointmentsCache.find((entry) => String(entry.doctorId || '') === selectedDoctorId);
+            return [{
+                _id: selectedDoctorId,
+                displayName: String(fromAppointments?.doctorName || 'Medic selectat')
+            }];
+        }
 
-            const status = document.createElement('span');
-            status.className = `status-badge ${app.emailSent ? 'sent' : 'unsent'}`;
-            status.textContent = app.emailSent ? 'Trimis' : 'Netrimis';
-            content.appendChild(status);
+        const activeDoctors = doctorsCache.filter((doctor) => !!doctor.isActive);
+        return activeDoctors.length ? activeDoctors : doctorsCache;
+    }
 
-            if (allowResend) {
-                const resendBtn = document.createElement('button');
-                resendBtn.className = 'admin-mini-btn secondary';
-                resendBtn.textContent = 'Trimite Manual';
+    function getFilteredAppointments() {
+        if (!searchTerm) {
+            return appointmentsCache;
+        }
 
-                resendBtn.onclick = async (event) => {
-                    event.stopPropagation();
-                    setButtonLoading(resendBtn, true, 'Se trimite...');
-                    try {
-                        const res = await AUTH.apiFetch(`/api/admin/resend-email/${app._id}`, { method: 'POST' });
-                        const data = await res.json().catch(() => ({}));
-                        if (res.ok) {
-                            showToast('Succes', data.message || 'Email trimis.');
-                            await fetchAdminAppointments();
-                        } else {
-                            showToast('Eroare', data.error || 'Eroare la trimitere.', 'error');
-                        }
-                    } catch (_) {
-                        showToast('Eroare', 'Eroare de conexiune.', 'error');
-                    } finally {
-                        setButtonLoading(resendBtn, false);
-                    }
-                };
-
-                content.appendChild(resendBtn);
-            }
-
-            if (allowDelete) {
-                const cancelBtn = document.createElement('button');
-                cancelBtn.className = 'admin-mini-btn danger';
-                cancelBtn.textContent = 'Anuleaza';
-
-                cancelBtn.onclick = async (event) => {
-                    event.stopPropagation();
-                    const confirmDelete = await showConfirmModal({
-                        title: 'Anulare programare',
-                        message: `Esti sigur ca vrei sa anulezi programarea pacientului ${app.name || ''}?`,
-                        confirmLabel: 'Anuleaza programarea',
-                        danger: true
-                    });
-                    if (!confirmDelete) return;
-
-                    const stepUpToken = await requestStepUp('appointment_delete', 'stergerea programarii');
-                    if (!stepUpToken) return;
-
-                    try {
-                        const res = await AUTH.apiFetch(`/api/admin/appointment/${app._id}`, {
-                            method: 'DELETE',
-                            headers: { 'X-Step-Up-Token': stepUpToken }
-                        });
-                        const data = await res.json().catch(() => ({}));
-                        if (res.ok) {
-                            showToast('Succes', data.message || 'Programare anulata.');
-                            await fetchAdminAppointments();
-                            fetchAdminStats();
-                        } else {
-                            showToast('Eroare', data.error || 'Nu s-a putut anula programarea.', 'error');
-                        }
-                    } catch (_) {
-                        showToast('Eroare', 'Eroare de conexiune.', 'error');
-                    }
-                };
-
-                content.appendChild(cancelBtn);
-            }
-
-            card.appendChild(content);
-            slotsArea.appendChild(card);
-
-            row.appendChild(hourLabel);
-            row.appendChild(slotsArea);
-            el.timelineGrid.appendChild(row);
+        return appointmentsCache.filter((app) => {
+            return String(app.patientName || app.name || '').toLowerCase().includes(searchTerm)
+                || String(app.patientPhone || app.phone || '').toLowerCase().includes(searchTerm)
+                || String(app.patientEmail || app.email || '').toLowerCase().includes(searchTerm);
         });
     }
 
-    function renderTimelineForCurrentFilters() {
+    function renderTimelineForCurrentFilters({ isLoading = false, errorMessage = '' } = {}) {
+        const schedulerInstance = ensureScheduler();
+        if (!schedulerInstance) {
+            setSingleMessage(el.timelineGrid, 'Modulul scheduler nu a putut fi incarcat.', 'p-10 text-center text-red-400 font-medium');
+            return;
+        }
+
         const filtered = getFilteredAppointments();
-        el.timelineHeaderCount.textContent = `(${filtered.length}) Programari`;
-        renderTimeline(filtered);
+        if (isLoading) {
+            el.timelineHeaderCount.textContent = '(...) Programari';
+        } else if (errorMessage) {
+            el.timelineHeaderCount.textContent = '(0) Programari';
+        } else {
+            el.timelineHeaderCount.textContent = `(${filtered.length}) Programari`;
+        }
+
+        schedulerInstance.render({
+            appointments: filtered,
+            doctors: getSchedulerDoctorsForView(),
+            selectedDoctorId: String(el.appointmentDoctorFilter?.value || '').trim(),
+            isLoading,
+            errorMessage
+        });
     }
 
     async function fetchAdminAppointments() {
-        setSingleMessage(el.timelineGrid, 'Se incarca programarile...', 'p-10 text-center text-gray-400 font-medium font-inter');
+        renderTimelineForCurrentFilters({ isLoading: true });
 
         try {
-            const res = await AUTH.apiFetch('/api/admin/appointments');
+            const selectedDate = getAdminActiveDateISO();
+            const selectedDoctorId = String(el.appointmentDoctorFilter?.value || '').trim();
+            const params = new URLSearchParams({ date: selectedDate });
+            if (selectedDoctorId) {
+                params.set('doctorId', selectedDoctorId);
+            }
+
+            const res = await AUTH.apiFetch(`/api/admin/appointments?${params.toString()}`);
             const data = await res.json().catch(() => []);
 
             if (!res.ok) {
@@ -1050,8 +1228,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
             appointmentsCache = Array.isArray(data) ? data : [];
             renderTimelineForCurrentFilters();
+            refreshDrawerFromCache();
         } catch (error) {
-            setSingleMessage(el.timelineGrid, String(error?.message || 'Eroare la incarcare.'), 'p-10 text-center text-red-400 font-medium');
+            appointmentsCache = [];
+            renderTimelineForCurrentFilters({
+                errorMessage: String(error?.message || 'Eroare la incarcare.')
+            });
         }
     }
 
@@ -2134,12 +2316,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showUserSection() {
+        closeAppointmentDrawer();
         el.timelineContainer.classList.add('hidden');
         el.doctorManagerContainer.classList.add('hidden');
         el.userManagerContainer.classList.remove('hidden');
     }
 
     function showDoctorSection() {
+        closeAppointmentDrawer();
         el.timelineContainer.classList.add('hidden');
         el.userManagerContainer.classList.add('hidden');
         el.doctorManagerContainer.classList.remove('hidden');
@@ -2155,7 +2339,7 @@ document.addEventListener('DOMContentLoaded', () => {
             adminActiveDate.setDate(adminActiveDate.getDate() - 1);
             clampAdminDateWithinBounds();
             updateAdminDateDisplay();
-            renderTimelineForCurrentFilters();
+            fetchAdminAppointments();
             renderAdminCalendar();
         };
 
@@ -2163,15 +2347,27 @@ document.addEventListener('DOMContentLoaded', () => {
             adminActiveDate.setDate(adminActiveDate.getDate() + 1);
             clampAdminDateWithinBounds();
             updateAdminDateDisplay();
-            renderTimelineForCurrentFilters();
+            fetchAdminAppointments();
             renderAdminCalendar();
         };
 
         el.appointmentDoctorFilter?.addEventListener('change', () => {
             clampAdminDateWithinBounds();
             updateAdminDateDisplay();
-            renderTimelineForCurrentFilters();
+            fetchAdminAppointments();
             renderAdminCalendar();
+        });
+
+        el.appointmentDrawerClose?.addEventListener('click', () => {
+            closeAppointmentDrawer();
+        });
+
+        el.drawerResendBtn?.addEventListener('click', async () => {
+            await handleDrawerResendAction();
+        });
+
+        el.drawerCancelBtn?.addEventListener('click', async () => {
+            await handleDrawerCancelAction();
         });
 
         el.adminCalendarPrevMonth?.addEventListener('click', () => {
