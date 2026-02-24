@@ -12,7 +12,7 @@ body.admin-panel-page .admin-scheduler-root {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    background: linear-gradient(180deg, rgba(29, 30, 24, 0.94), rgba(29, 30, 24, 0.86));
+    background: linear-gradient(180deg, rgb(var(--celadon-rgb) / 0.94), rgb(var(--celadon-rgb) / 0.86));
 }
 
 body.admin-panel-page .admin-scheduler-toolbar {
@@ -21,8 +21,8 @@ body.admin-panel-page .admin-scheduler-toolbar {
     justify-content: space-between;
     gap: 10px;
     padding: 8px 12px;
-    border-bottom: 1px solid rgba(107, 143, 113, 0.26);
-    background: rgba(29, 30, 24, 0.92);
+    border-bottom: 1px solid rgb(var(--charcoal-rgb) / 0.26);
+    background: rgb(var(--celadon-rgb) / 0.92);
 }
 
 body.admin-panel-page .admin-scheduler-toolbar-info {
@@ -30,7 +30,7 @@ body.admin-panel-page .admin-scheduler-toolbar-info {
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: rgba(185, 245, 216, 0.72);
+    color: rgb(var(--charcoal-rgb) / 0.72);
 }
 
 body.admin-panel-page .admin-scheduler-legend {
@@ -42,9 +42,9 @@ body.admin-panel-page .admin-scheduler-legend {
 body.admin-panel-page .admin-scheduler-legend-toggle {
     display: none;
     border-radius: 999px;
-    border: 1px solid rgba(107, 143, 113, 0.45);
-    background: rgba(42, 43, 35, 0.84);
-    color: rgba(217, 255, 245, 0.92);
+    border: 1px solid rgb(var(--charcoal-rgb) / 0.45);
+    background: rgb(var(--celadon-rgb) / 0.84);
+    color: rgb(var(--midnight-violet-rgb) / 0.92);
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.03em;
@@ -52,7 +52,7 @@ body.admin-panel-page .admin-scheduler-legend-toggle {
 }
 
 body.admin-panel-page .admin-scheduler-legend-toggle:focus-visible {
-    outline: 2px solid rgba(185, 245, 216, 0.62);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
 }
 
@@ -74,9 +74,9 @@ body.admin-panel-page .admin-scheduler-legend-item {
     align-items: center;
     gap: 5px;
     border-radius: 999px;
-    border: 1px solid rgba(107, 143, 113, 0.35);
-    background: rgba(42, 43, 35, 0.78);
-    color: rgba(217, 255, 245, 0.9);
+    border: 1px solid rgb(var(--charcoal-rgb) / 0.35);
+    background: rgb(var(--celadon-rgb) / 0.78);
+    color: rgb(var(--midnight-violet-rgb) / 0.9);
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.03em;
@@ -95,9 +95,9 @@ body.admin-panel-page .admin-scheduler-empty-banner {
     margin: 10px 12px 0;
     padding: 8px 10px;
     border-radius: 11px;
-    border: 1px dashed rgba(107, 143, 113, 0.46);
-    background: rgba(42, 43, 35, 0.56);
-    color: rgba(185, 245, 216, 0.8);
+    border: 1px dashed rgb(var(--charcoal-rgb) / 0.46);
+    background: rgb(var(--celadon-rgb) / 0.56);
+    color: rgb(var(--charcoal-rgb) / 0.8);
     font-size: 12px;
     font-weight: 600;
 }
@@ -105,9 +105,9 @@ body.admin-panel-page .admin-scheduler-empty-banner {
 body.admin-panel-page .admin-scheduler-state {
     margin: 18px;
     border-radius: 14px;
-    border: 1px solid rgba(107, 143, 113, 0.34);
-    background: rgba(42, 43, 35, 0.82);
-    color: rgba(217, 255, 245, 0.92);
+    border: 1px solid rgb(var(--charcoal-rgb) / 0.34);
+    background: rgb(var(--celadon-rgb) / 0.82);
+    color: rgb(var(--midnight-violet-rgb) / 0.92);
     font-size: 13px;
     font-weight: 700;
     padding: 14px 16px;
@@ -121,15 +121,15 @@ body.admin-panel-page .admin-scheduler-state.is-loading::before {
     width: 14px;
     height: 14px;
     border-radius: 999px;
-    border: 2px solid rgba(185, 245, 216, 0.4);
-    border-top-color: rgba(217, 255, 245, 0.95);
+    border: 2px solid rgb(var(--charcoal-rgb) / 0.4);
+    border-top-color: rgb(var(--midnight-violet-rgb) / 0.95);
     animation: scheduler-spin 0.85s linear infinite;
 }
 
 body.admin-panel-page .admin-scheduler-state.is-error {
-    border-color: rgba(248, 113, 113, 0.5);
-    color: #fecaca;
-    background: rgba(248, 113, 113, 0.1);
+    border-color: rgb(var(--status-error-rgb) / 0.5);
+    color: var(--status-error-text);
+    background: rgb(var(--status-error-rgb) / 0.1);
 }
 
 @keyframes scheduler-spin {
@@ -162,8 +162,8 @@ body.admin-panel-page .admin-scheduler-grid {
     grid-template-rows: var(--scheduler-header-height) var(--scheduler-content-height);
     min-width: 100%;
     width: max-content;
-    border-left: 1px solid rgba(107, 143, 113, 0.24);
-    border-bottom: 1px solid rgba(107, 143, 113, 0.24);
+    border-left: 1px solid rgb(var(--charcoal-rgb) / 0.24);
+    border-bottom: 1px solid rgb(var(--charcoal-rgb) / 0.24);
 }
 
 body.admin-panel-page .admin-scheduler-corner {
@@ -178,10 +178,10 @@ body.admin-panel-page .admin-scheduler-corner {
     font-weight: 800;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: rgba(185, 245, 216, 0.74);
-    background: rgba(29, 30, 24, 0.98);
-    border-right: 1px solid rgba(107, 143, 113, 0.28);
-    border-bottom: 1px solid rgba(107, 143, 113, 0.28);
+    color: rgb(var(--charcoal-rgb) / 0.74);
+    background: rgb(var(--celadon-rgb) / 0.98);
+    border-right: 1px solid rgb(var(--charcoal-rgb) / 0.28);
+    border-bottom: 1px solid rgb(var(--charcoal-rgb) / 0.28);
 }
 
 body.admin-panel-page .admin-scheduler-doctor-header {
@@ -192,9 +192,9 @@ body.admin-panel-page .admin-scheduler-doctor-header {
     flex-direction: column;
     justify-content: center;
     padding: 10px 12px 9px;
-    background: rgba(42, 43, 35, 0.96);
-    border-right: 1px solid rgba(107, 143, 113, 0.24);
-    border-bottom: 1px solid rgba(107, 143, 113, 0.28);
+    background: rgb(var(--celadon-rgb) / 0.96);
+    border-right: 1px solid rgb(var(--charcoal-rgb) / 0.24);
+    border-bottom: 1px solid rgb(var(--charcoal-rgb) / 0.28);
     backdrop-filter: blur(3px);
 }
 
@@ -202,7 +202,7 @@ body.admin-panel-page .admin-scheduler-doctor-name {
     font-size: 12px;
     line-height: 1.2;
     font-weight: 700;
-    color: #d9fff5;
+    color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -211,7 +211,7 @@ body.admin-panel-page .admin-scheduler-doctor-name {
 body.admin-panel-page .admin-scheduler-doctor-cabinet {
     margin-top: 2px;
     font-size: 11px;
-    color: rgba(185, 245, 216, 0.62);
+    color: rgb(var(--charcoal-rgb) / 0.62);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -221,8 +221,8 @@ body.admin-panel-page .admin-scheduler-time-axis {
     position: sticky;
     left: 0;
     z-index: 30;
-    border-right: 1px solid rgba(107, 143, 113, 0.28);
-    background: rgba(29, 30, 24, 0.98);
+    border-right: 1px solid rgb(var(--charcoal-rgb) / 0.28);
+    background: rgb(var(--celadon-rgb) / 0.98);
 }
 
 body.admin-panel-page .admin-scheduler-time-axis-inner {
@@ -235,7 +235,7 @@ body.admin-panel-page .admin-scheduler-time-mark {
     position: absolute;
     left: 0;
     right: 0;
-    border-top: 1px solid rgba(107, 143, 113, 0.24);
+    border-top: 1px solid rgb(var(--charcoal-rgb) / 0.24);
 }
 
 body.admin-panel-page .admin-scheduler-time-label {
@@ -246,18 +246,18 @@ body.admin-panel-page .admin-scheduler-time-label {
     text-align: center;
     font-size: 11px;
     font-weight: 700;
-    color: rgba(185, 245, 216, 0.75);
+    color: rgb(var(--charcoal-rgb) / 0.75);
     letter-spacing: 0.02em;
 }
 
 body.admin-panel-page .admin-scheduler-lane {
     position: relative;
-    border-right: 1px solid rgba(107, 143, 113, 0.2);
-    border-bottom: 1px solid rgba(107, 143, 113, 0.2);
+    border-right: 1px solid rgb(var(--charcoal-rgb) / 0.2);
+    border-bottom: 1px solid rgb(var(--charcoal-rgb) / 0.2);
     background: repeating-linear-gradient(
         to bottom,
-        rgba(107, 143, 113, 0.18) 0px,
-        rgba(107, 143, 113, 0.18) 1px,
+        rgb(var(--charcoal-rgb) / 0.18) 0px,
+        rgb(var(--charcoal-rgb) / 0.18) 1px,
         transparent 1px,
         transparent calc(var(--scheduler-hour-height) / 2)
     );
@@ -269,7 +269,7 @@ body.admin-panel-page .admin-scheduler-lane-empty {
     left: 12px;
     font-size: 11px;
     font-weight: 600;
-    color: rgba(185, 245, 216, 0.42);
+    color: rgb(var(--charcoal-rgb) / 0.42);
     letter-spacing: 0.04em;
     text-transform: uppercase;
 }
@@ -278,15 +278,15 @@ body.admin-panel-page .admin-scheduler-block {
     position: absolute;
     left: 7px;
     right: 7px;
-    border: 1px solid rgba(170, 210, 186, 0.36);
-    border-left: 3px solid #aad2ba;
-    background: rgba(42, 43, 35, 0.9);
+    border: 1px solid rgb(var(--dark-goldenrod-rgb) / 0.36);
+    border-left: 3px solid var(--accent-strong);
+    background: rgb(var(--celadon-rgb) / 0.9);
     border-radius: 12px;
     padding: 7px 9px;
     display: flex;
     flex-direction: column;
     gap: 4px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+    box-shadow: 0 4px 16px rgb(var(--midnight-violet-rgb) / 0.28);
     overflow: hidden;
     cursor: pointer;
     transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease;
@@ -295,18 +295,18 @@ body.admin-panel-page .admin-scheduler-block {
 body.admin-panel-page .admin-scheduler-block:hover,
 body.admin-panel-page .admin-scheduler-block:focus-visible {
     transform: translateY(-1px);
-    border-color: rgba(185, 245, 216, 0.64);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    border-color: rgb(var(--charcoal-rgb) / 0.64);
+    box-shadow: 0 6px 18px rgb(var(--midnight-violet-rgb) / 0.35);
     outline: none;
 }
 
 body.admin-panel-page .admin-scheduler-block.is-prima {
-    border-left-color: #b9f5d8;
-    background: linear-gradient(180deg, rgba(107, 143, 113, 0.46), rgba(42, 43, 35, 0.92));
+    border-left-color: var(--text-secondary);
+    background: linear-gradient(180deg, rgb(var(--charcoal-rgb) / 0.46), rgb(var(--celadon-rgb) / 0.92));
 }
 
 body.admin-panel-page .admin-scheduler-block.is-control {
-    border-left-color: #6b8f71;
+    border-left-color: var(--accent);
 }
 
 body.admin-panel-page .admin-scheduler-patient {
@@ -315,8 +315,8 @@ body.admin-panel-page .admin-scheduler-patient {
     font-size: clamp(10px, 0.25vw + 9px, 12px);
     font-weight: 700;
     line-height: 1.15;
-    color: #d9fff5;
-    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+    color: var(--text-primary);
+    text-shadow: 0 1px 0 rgb(var(--midnight-violet-rgb) / 0.45);
     white-space: normal;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -342,9 +342,9 @@ body.admin-panel-page .admin-scheduler-time-chip {
     display: inline-flex;
     align-items: center;
     border-radius: 999px;
-    border: 1px solid rgba(107, 143, 113, 0.5);
-    background: rgba(29, 30, 24, 0.72);
-    color: rgba(217, 255, 245, 0.9);
+    border: 1px solid rgb(var(--charcoal-rgb) / 0.5);
+    background: rgb(var(--celadon-rgb) / 0.72);
+    color: rgb(var(--midnight-violet-rgb) / 0.9);
     font-size: 10px;
     font-weight: 700;
     line-height: 1;
@@ -363,44 +363,44 @@ body.admin-panel-page .admin-scheduler-status {
     letter-spacing: 0.03em;
     text-transform: uppercase;
     padding: 2px 7px;
-    border: 1px solid rgba(170, 210, 186, 0.4);
+    border: 1px solid rgb(var(--dark-goldenrod-rgb) / 0.4);
 }
 
 body.admin-panel-page .admin-scheduler-status.status-sent,
 body.admin-panel-page .admin-scheduler-status.status-confirmed {
-    background: rgba(170, 210, 186, 0.2);
-    color: #d9fff5;
-    border-color: rgba(170, 210, 186, 0.52);
+    background: rgb(var(--dark-goldenrod-rgb) / 0.2);
+    color: var(--text-primary);
+    border-color: rgb(var(--dark-goldenrod-rgb) / 0.52);
 }
 
 body.admin-panel-page .admin-scheduler-status.status-unsent,
 body.admin-panel-page .admin-scheduler-status.status-pending {
-    background: rgba(107, 143, 113, 0.14);
-    color: rgba(185, 245, 216, 0.92);
-    border-color: rgba(107, 143, 113, 0.45);
+    background: rgb(var(--charcoal-rgb) / 0.14);
+    color: rgb(var(--charcoal-rgb) / 0.92);
+    border-color: rgb(var(--charcoal-rgb) / 0.45);
 }
 
 body.admin-panel-page .admin-scheduler-status.status-cancelled {
-    background: rgba(248, 113, 113, 0.18);
-    color: #fecaca;
-    border-color: rgba(248, 113, 113, 0.4);
+    background: rgb(var(--status-error-rgb) / 0.18);
+    color: var(--status-error-text);
+    border-color: rgb(var(--status-error-rgb) / 0.4);
 }
 
 body.admin-panel-page .admin-scheduler-legend-dot.status-sent,
 body.admin-panel-page .admin-scheduler-legend-dot.status-confirmed {
-    background: rgba(170, 210, 186, 0.95);
-    border-color: rgba(170, 210, 186, 0.75);
+    background: rgb(var(--dark-goldenrod-rgb) / 0.95);
+    border-color: rgb(var(--dark-goldenrod-rgb) / 0.75);
 }
 
 body.admin-panel-page .admin-scheduler-legend-dot.status-unsent,
 body.admin-panel-page .admin-scheduler-legend-dot.status-pending {
-    background: rgba(107, 143, 113, 0.95);
-    border-color: rgba(107, 143, 113, 0.75);
+    background: rgb(var(--charcoal-rgb) / 0.95);
+    border-color: rgb(var(--charcoal-rgb) / 0.75);
 }
 
 body.admin-panel-page .admin-scheduler-legend-dot.status-cancelled {
-    background: rgba(248, 113, 113, 0.88);
-    border-color: rgba(248, 113, 113, 0.8);
+    background: rgb(var(--status-error-rgb) / 0.88);
+    border-color: rgb(var(--status-error-rgb) / 0.8);
 }
 
 body.admin-panel-page .admin-scheduler-grid.is-single {
@@ -426,9 +426,9 @@ body.admin-panel-page .admin-appointment-drawer {
     width: min(380px, 100%);
     display: flex;
     flex-direction: column;
-    background: rgba(29, 30, 24, 0.98);
-    border-left: 1px solid rgba(107, 143, 113, 0.36);
-    box-shadow: -12px 0 28px rgba(0, 0, 0, 0.35);
+    background: rgb(var(--celadon-rgb) / 0.98);
+    border-left: 1px solid rgb(var(--charcoal-rgb) / 0.36);
+    box-shadow: -12px 0 28px rgb(var(--midnight-violet-rgb) / 0.35);
     transform: translateX(104%);
     transition: transform 0.24s ease;
     z-index: 60;
@@ -446,8 +446,8 @@ body.admin-panel-page .admin-appointment-drawer-head {
     justify-content: space-between;
     gap: 12px;
     padding: 16px;
-    border-bottom: 1px solid rgba(107, 143, 113, 0.26);
-    background: rgba(42, 43, 35, 0.95);
+    border-bottom: 1px solid rgb(var(--charcoal-rgb) / 0.26);
+    background: rgb(var(--celadon-rgb) / 0.95);
 }
 
 body.admin-panel-page .admin-appointment-drawer-title {
@@ -455,23 +455,23 @@ body.admin-panel-page .admin-appointment-drawer-title {
     font-weight: 800;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: rgba(185, 245, 216, 0.78);
+    color: rgb(var(--charcoal-rgb) / 0.78);
 }
 
 body.admin-panel-page .admin-appointment-drawer-subtitle {
     margin-top: 4px;
     font-size: 14px;
     font-weight: 700;
-    color: #d9fff5;
+    color: var(--text-primary);
 }
 
 body.admin-panel-page .admin-appointment-drawer-close {
     width: 34px;
     height: 34px;
     border-radius: 10px;
-    border: 1px solid rgba(107, 143, 113, 0.4);
-    color: rgba(185, 245, 216, 0.85);
-    background: rgba(29, 30, 24, 0.9);
+    border: 1px solid rgb(var(--charcoal-rgb) / 0.4);
+    color: rgb(var(--charcoal-rgb) / 0.85);
+    background: rgb(var(--celadon-rgb) / 0.9);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -479,12 +479,12 @@ body.admin-panel-page .admin-appointment-drawer-close {
 }
 
 body.admin-panel-page .admin-appointment-drawer-close:hover {
-    color: #d9fff5;
-    border-color: rgba(170, 210, 186, 0.55);
+    color: var(--text-primary);
+    border-color: rgb(var(--dark-goldenrod-rgb) / 0.55);
 }
 
 body.admin-panel-page .admin-appointment-drawer-close:focus-visible {
-    outline: 2px solid rgba(185, 245, 216, 0.62);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
 }
 
@@ -497,9 +497,9 @@ body.admin-panel-page .admin-appointment-drawer-body {
 body.admin-panel-page .admin-appointment-drawer-section {
     margin-bottom: 12px;
     padding: 11px 12px;
-    border: 1px solid rgba(107, 143, 113, 0.32);
+    border: 1px solid rgb(var(--charcoal-rgb) / 0.32);
     border-radius: 12px;
-    background: rgba(42, 43, 35, 0.78);
+    background: rgb(var(--celadon-rgb) / 0.78);
 }
 
 body.admin-panel-page .admin-appointment-drawer-label {
@@ -509,20 +509,20 @@ body.admin-panel-page .admin-appointment-drawer-label {
     font-weight: 800;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: rgba(185, 245, 216, 0.66);
+    color: rgb(var(--charcoal-rgb) / 0.66);
 }
 
 body.admin-panel-page .admin-appointment-drawer-value {
     font-size: 14px;
     font-weight: 700;
-    color: #d9fff5;
+    color: var(--text-primary);
     line-height: 1.4;
 }
 
 body.admin-panel-page .admin-appointment-drawer-meta {
     margin-top: 3px;
     font-size: 12px;
-    color: rgba(185, 245, 216, 0.78);
+    color: rgb(var(--charcoal-rgb) / 0.78);
 }
 
 body.admin-panel-page .admin-appointment-drawer-error,
@@ -536,15 +536,15 @@ body.admin-panel-page .admin-appointment-drawer-success {
 }
 
 body.admin-panel-page .admin-appointment-drawer-error {
-    border: 1px solid rgba(248, 113, 113, 0.48);
-    color: #fecaca;
-    background: rgba(248, 113, 113, 0.12);
+    border: 1px solid rgb(var(--status-error-rgb) / 0.48);
+    color: var(--status-error-text);
+    background: rgb(var(--status-error-rgb) / 0.12);
 }
 
 body.admin-panel-page .admin-appointment-drawer-success {
-    border: 1px solid rgba(170, 210, 186, 0.5);
-    color: #d9fff5;
-    background: rgba(170, 210, 186, 0.16);
+    border: 1px solid rgb(var(--dark-goldenrod-rgb) / 0.5);
+    color: var(--text-primary);
+    background: rgb(var(--dark-goldenrod-rgb) / 0.16);
 }
 
 body.admin-panel-page .admin-appointment-drawer-actions {

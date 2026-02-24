@@ -1,4 +1,3 @@
-﻿
 document.addEventListener('DOMContentLoaded', () => {
     const byId = (id) => document.getElementById(id);
 
@@ -170,8 +169,8 @@ document.addEventListener('DOMContentLoaded', () => {
         el.toastTitle.textContent = title;
         el.toastMessage.textContent = message;
         el.toast.className = `fixed bottom-5 right-5 bg-brand-800 shadow-xl rounded-xl p-5 transform transition-all duration-300 max-w-sm z-50 border-l-4 border border-brand-600/30 ${type === 'success' ? 'toast-success' : 'toast-error'}`;
-        el.toastTitle.className = `font-bold ${type === 'success' ? 'text-brand-100' : 'text-red-300'}`;
-        el.toastMessage.className = `text-sm mt-1 ${type === 'success' ? 'text-brand-300' : 'text-red-200'}`;
+        el.toastTitle.className = `font-bold ${type === 'success' ? 'toast-title-success' : 'toast-title-error'}`;
+        el.toastMessage.className = `text-sm mt-1 ${type === 'success' ? 'toast-message-success' : 'toast-message-error'}`;
 
         setTimeout(() => {
             el.toast.classList.remove('translate-y-20', 'opacity-0');
@@ -332,7 +331,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const text = document.createElement('p');
-            text.className = danger ? 'admin-modal-danger-text' : 'text-sm text-brand-200';
+            text.className = danger ? 'admin-modal-danger-text' : 'admin-modal-helper';
             text.textContent = message || '';
             modal.body.appendChild(text);
 
@@ -825,7 +824,7 @@ document.addEventListener('DOMContentLoaded', () => {
             storageBar.style.width = `${Math.min(Number(data.percentUsed) || 0, 100)}%`;
             storageText.textContent = `${data.usedSizeMB} MB / ${data.totalSizeMB} MB (${data.percentUsed}%)`;
 
-            storageBar.classList.toggle('bg-red-500', Number(data.percentUsed) > 80);
+            storageBar.classList.toggle('bg-brand-500', Number(data.percentUsed) > 80);
             storageBar.classList.toggle('bg-brand-400', Number(data.percentUsed) <= 80);
         } catch (_) {
             // no-op
@@ -841,7 +840,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (allowAllDoctorsOption) {
                 const allOption = document.createElement('option');
                 allOption.value = '';
-                allOption.textContent = 'Toți medicii';
+                allOption.textContent = 'Toti medicii';
                 el.appointmentDoctorFilter.appendChild(allOption);
             }
 
@@ -1200,7 +1199,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderTimelineForCurrentFilters({ isLoading = false, errorMessage = '' } = {}) {
         const schedulerInstance = ensureScheduler();
         if (!schedulerInstance) {
-            setSingleMessage(el.timelineGrid, 'Modulul scheduler nu a putut fi incarcat.', 'p-10 text-center text-red-400 font-medium');
+            setSingleMessage(el.timelineGrid, 'Modulul scheduler nu a putut fi incarcat.', 'p-10 text-center ui-message-error font-medium');
             return;
         }
 

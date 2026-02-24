@@ -1,4 +1,4 @@
-﻿document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', () => {
     const byId = (id) => document.getElementById(id);
 
     const stepCalendar = byId('step-calendar');
@@ -89,9 +89,9 @@
 
         toastTitle.textContent = title;
         toastMessage.textContent = message;
-        toast.className = `fixed bottom-5 right-5 bg-brand-800 shadow-xl rounded-xl p-5 transform transition-all duration-300 max-w-sm z-50 border-l-4 border border-brand-600/30 ${type === 'success' ? 'border-l-brand-400' : 'border-l-red-400'}`;
-        toastTitle.className = `font-bold ${type === 'success' ? 'text-brand-100' : 'text-red-300'}`;
-        toastMessage.className = `text-sm mt-1 ${type === 'success' ? 'text-brand-300' : 'text-red-200'}`;
+        toast.className = `fixed bottom-5 right-5 bg-brand-800 shadow-xl rounded-xl p-5 transform transition-all duration-300 max-w-sm z-50 border-l-4 border border-brand-600/30 ${type === 'success' ? 'toast-success' : 'toast-error'}`;
+        toastTitle.className = `font-bold ${type === 'success' ? 'toast-title-success' : 'toast-title-error'}`;
+        toastMessage.className = `text-sm mt-1 ${type === 'success' ? 'toast-message-success' : 'toast-message-error'}`;
 
         setTimeout(() => {
             toast.classList.remove('translate-y-20', 'opacity-0');
@@ -514,11 +514,11 @@
 
     async function fetchSlots(dateValue) {
         if (!selectedDoctor) {
-            setSingleMessage(slotsGrid, 'Selecteaza un medic.', 'col-span-full text-center py-8 text-gray-400 font-medium');
+            setSingleMessage(slotsGrid, 'Selecteaza un medic.', 'col-span-full text-center py-8 ui-message-muted font-medium');
             return;
         }
 
-        setSingleMessage(slotsGrid, 'Se incarca intervalele...', 'col-span-full text-center py-8 text-gray-400 font-medium');
+        setSingleMessage(slotsGrid, 'Se incarca intervalele...', 'col-span-full text-center py-8 ui-message-muted font-medium');
         noSlotsMessage.classList.add('hidden');
 
         try {
@@ -530,7 +530,7 @@
             const payload = await res.json().catch(() => ({}));
 
             if (!res.ok) {
-                setSingleMessage(slotsGrid, String(payload?.error || 'Eroare.'), 'col-span-full text-center text-red-500');
+                setSingleMessage(slotsGrid, String(payload?.error || 'Eroare.'), 'col-span-full text-center ui-message-error');
                 return;
             }
 
@@ -538,7 +538,7 @@
             renderSlots(slots, dateValue);
         } catch (error) {
             console.error(error);
-            setSingleMessage(slotsGrid, 'Eroare de conexiune.', 'col-span-full text-center text-red-500');
+            setSingleMessage(slotsGrid, 'Eroare de conexiune.', 'col-span-full text-center ui-message-error');
         }
     }
 
@@ -647,7 +647,7 @@
         btn.classList.add('selected');
         typeInput.value = btn.dataset.value;
 
-        if (btn.dataset.value === 'Prima Consultatie' || btn.dataset.value === 'Prima Consultație') {
+        if (btn.dataset.value === 'Prima Consultatie') {
             diagnosisSection.classList.remove('hidden');
             return;
         }
@@ -733,7 +733,7 @@
         }
 
         if (!gdprConsent.checked) {
-            setConsentError('Pentru a continua, trebuie să confirmați consimțământul pentru prelucrarea datelor.');
+            setConsentError('Pentru a continua, trebuie sa confirmati consimtamantul pentru prelucrarea datelor.');
             showToast('Atentie', 'Trebuie sa acceptati prelucrarea datelor personale (GDPR).', 'error');
             return;
         }
