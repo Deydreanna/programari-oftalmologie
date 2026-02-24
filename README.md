@@ -62,7 +62,7 @@ Aplicatia mentine:
 
 ## Admin scheduler timeline view
 Panoul admin foloseste un scheduler tip timeline in sectiunea `Programari Zilnice`:
-- axa timp sticky (08:00 - 14:00)
+- axa timp sticky (08:00 - 15:00)
 - coloane pe medic (sau un singur medic cand filtrul este selectat)
 - blocuri focusabile din tastatura (Enter/Space deschide drawer-ul)
 - legenda statusuri (colapsabila pe mobil)

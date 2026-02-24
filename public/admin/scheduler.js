@@ -3,7 +3,7 @@
 
     const DEFAULT_CONFIG = Object.freeze({
         startHour: '08:00',
-        endHour: '14:00',
+        endHour: '15:00',
         pxPerMinute: 2.5,
         minBlockHeight: 28,
         allDoctorsColumnWidth: 220,
@@ -404,7 +404,7 @@
             }
 
             const timelineStartMinutes = parseHourToMinutes(mergedConfig.startHour, 8 * 60);
-            const timelineEndMinutes = parseHourToMinutes(mergedConfig.endHour, 14 * 60);
+            const timelineEndMinutes = parseHourToMinutes(mergedConfig.endHour, 15 * 60);
             const pxPerMinute = Number(mergedConfig.pxPerMinute) > 0 ? Number(mergedConfig.pxPerMinute) : 2.5;
             const minBlockHeight = Number(mergedConfig.minBlockHeight) > 0 ? Number(mergedConfig.minBlockHeight) : 28;
 

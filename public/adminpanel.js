@@ -1141,7 +1141,7 @@ document.addEventListener('DOMContentLoaded', () => {
             mount: el.timelineGrid,
             config: {
                 startHour: '08:00',
-                endHour: '14:00',
+                endHour: '15:00',
                 pxPerMinute: 2.5,
                 onAppointmentClick: (appointment) => {
                     openAppointmentDrawer(appointment);
