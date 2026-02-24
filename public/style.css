@@ -1,51 +1,64 @@
 /* =========================================
    Medical Appointment System - Design Tokens
    Palette source of truth:
-   midnight-violet: #30011e
-   tea-green: #d7fcd4
-   celadon: #b6cca1
-   dark-goldenrod: #b68f40
-   charcoal: #545454
+   black: #000000
+   porcelain: #fffffc
+   khaki-beige: #beb7a4
+   vivid-tangerine: #ff7f11
+   red: #ff1b1c
    ========================================= */
 
 :root {
-    --midnight-violet: #30011e;
-    --tea-green: #d7fcd4;
-    --celadon: #b6cca1;
-    --dark-goldenrod: #b68f40;
-    --charcoal: #545454;
+    --black: #000000;
+    --porcelain: #fffffc;
+    --khaki-beige: #beb7a4;
+    --vivid-tangerine: #ff7f11;
+    --red: #ff1b1c;
 
-    --midnight-violet-rgb: 48 1 30;
-    --tea-green-rgb: 215 252 212;
-    --celadon-rgb: 182 204 161;
-    --dark-goldenrod-rgb: 182 143 64;
-    --charcoal-rgb: 84 84 84;
-    --status-error-rgb: 185 28 28;
+    --black-rgb: 0 0 0;
+    --porcelain-rgb: 255 255 252;
+    --khaki-beige-rgb: 190 183 164;
+    --vivid-tangerine-rgb: 255 127 17;
+    --red-rgb: 255 27 28;
 
-    --bg-primary: var(--tea-green);
-    --bg-secondary: var(--celadon);
-    --surface: var(--celadon);
-    --surface-alt: rgb(var(--celadon-rgb) / 0.82);
-    --surface-soft: rgb(var(--celadon-rgb) / 0.58);
+    /* Backward-compatible aliases used across existing selectors */
+    --midnight-violet: var(--black);
+    --tea-green: var(--porcelain);
+    --celadon: var(--khaki-beige);
+    --dark-goldenrod: var(--vivid-tangerine);
+    --charcoal: var(--black);
 
-    --text-primary: var(--midnight-violet);
-    --text-secondary: var(--charcoal);
-    --text-muted: rgb(var(--charcoal-rgb) / 0.66);
-    --text-subtle: rgb(var(--charcoal-rgb) / 0.5);
+    --midnight-violet-rgb: var(--black-rgb);
+    --tea-green-rgb: var(--porcelain-rgb);
+    --celadon-rgb: var(--khaki-beige-rgb);
+    --dark-goldenrod-rgb: var(--vivid-tangerine-rgb);
+    --charcoal-rgb: var(--black-rgb);
+    --status-error-rgb: var(--red-rgb);
 
-    --accent: var(--dark-goldenrod);
-    --accent-strong: var(--midnight-violet);
-    --accent-contrast: var(--tea-green);
+    --bg-primary: var(--porcelain);
+    --bg-secondary: var(--khaki-beige);
+    --surface: var(--khaki-beige);
+    --surface-alt: rgb(var(--khaki-beige-rgb) / 0.88);
+    --surface-soft: rgb(var(--khaki-beige-rgb) / 0.64);
+
+    --text-primary: var(--black);
+    --text-secondary: var(--black);
+    --text-muted: rgb(var(--black-rgb) / 0.68);
+    --text-subtle: rgb(var(--black-rgb) / 0.5);
+
+    --accent: var(--vivid-tangerine);
+    --accent-strong: var(--vivid-tangerine);
+    --accent-contrast: var(--black);
 
     --input-bg: var(--surface);
     --input-bg-hover: var(--surface-alt);
     --input-bg-focus: var(--bg-primary);
-    --input-border: rgb(var(--charcoal-rgb) / 0.4);
-    --input-border-hover: rgb(var(--dark-goldenrod-rgb) / 0.48);
+    --input-border: rgb(var(--black-rgb) / 0.34);
+    --input-border-hover: rgb(var(--vivid-tangerine-rgb) / 0.56);
     --input-border-focus: var(--accent-strong);
-    --input-placeholder: rgb(var(--charcoal-rgb) / 0.56);
-    --input-disabled-bg: rgb(var(--celadon-rgb) / 0.52);
-    --input-disabled-border: rgb(var(--charcoal-rgb) / 0.24);
+    --input-placeholder: rgb(var(--black-rgb) / 0.52);
+    --input-disabled-bg: rgb(var(--khaki-beige-rgb) / 0.46);
+    --input-disabled-border: rgb(var(--black-rgb) / 0.22);
 
     --button-primary-bg: var(--accent-strong);
     --button-primary-bg-hover: var(--accent);
@@ -53,14 +66,14 @@
     --button-primary-border-hover: var(--accent);
     --button-primary-text: var(--accent-contrast);
 
-    --button-secondary-bg: rgb(var(--celadon-rgb) / 0.86);
-    --button-secondary-bg-hover: rgb(var(--celadon-rgb) / 0.98);
-    --button-secondary-border: rgb(var(--charcoal-rgb) / 0.4);
-    --button-secondary-border-hover: rgb(var(--midnight-violet-rgb) / 0.42);
+    --button-secondary-bg: rgb(var(--porcelain-rgb) / 0.92);
+    --button-secondary-bg-hover: rgb(var(--porcelain-rgb) / 1);
+    --button-secondary-border: rgb(var(--black-rgb) / 0.34);
+    --button-secondary-border-hover: rgb(var(--vivid-tangerine-rgb) / 0.5);
     --button-secondary-text: var(--text-secondary);
 
-    --button-disabled-bg: rgb(var(--charcoal-rgb) / 0.14);
-    --button-disabled-border: rgb(var(--charcoal-rgb) / 0.24);
+    --button-disabled-bg: rgb(var(--black-rgb) / 0.12);
+    --button-disabled-border: rgb(var(--black-rgb) / 0.22);
     --button-disabled-text: var(--text-muted);
 
     --space-1: 4px;
@@ -97,13 +110,13 @@
     --font-size-body: 17px;
     --font-size-title: clamp(27px, 3.2vw, 44px);
 
-    --border-default: rgb(var(--charcoal-rgb) / 0.3);
-    --border-strong: rgb(var(--charcoal-rgb) / 0.42);
-    --focus-ring: rgb(var(--dark-goldenrod-rgb) / 0.45);
-    --overlay-backdrop: rgb(var(--midnight-violet-rgb) / 0.44);
+    --border-default: rgb(var(--black-rgb) / 0.26);
+    --border-strong: rgb(var(--black-rgb) / 0.4);
+    --focus-ring: rgb(var(--vivid-tangerine-rgb) / 0.58);
+    --overlay-backdrop: rgb(var(--black-rgb) / 0.42);
 
-    --status-error-text: #7f1d1d;
-    --status-error-border: #b91c1c;
+    --status-error-text: var(--black);
+    --status-error-border: var(--red);
 }
 
 /* --- Base Typography --- */
@@ -225,7 +238,7 @@ textarea:focus-visible {
 .step-dot.active {
     background: var(--accent-strong);
     border-color: var(--accent-strong);
-    color: var(--bg-primary);
+    color: var(--accent-contrast);
     box-shadow: 0 0 0 4px rgb(var(--dark-goldenrod-rgb) / 0.2);
 }
 
@@ -400,7 +413,7 @@ textarea:focus-visible {
 
 .calendar-day.selected {
     background: var(--accent-strong) !important;
-    color: var(--bg-primary) !important;
+    color: var(--accent-contrast) !important;
     border-color: var(--accent) !important;
     box-shadow:
         0 0 0 2px rgb(var(--dark-goldenrod-rgb) / 0.34),
@@ -500,7 +513,7 @@ textarea:focus-visible {
 .admin-calendar-day.selected {
     border-color: var(--accent) !important;
     background: var(--accent-strong) !important;
-    color: var(--bg-primary) !important;
+    color: var(--accent-contrast) !important;
     box-shadow: 0 0 0 2px rgb(var(--dark-goldenrod-rgb) / 0.3);
 }
 
@@ -1375,7 +1388,7 @@ body.consent-modal-open {
 .app-new-badge {
     display: inline-block;
     background: var(--accent-strong);
-    color: var(--bg-primary);
+    color: var(--accent-contrast);
     font-size: 10px;
     font-weight: 800;
     padding: 2px 6px;
