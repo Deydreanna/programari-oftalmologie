@@ -272,6 +272,30 @@
             }
         }
 
+        async function sendLoginRequest(payload) {
+            const requestOptions = {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            };
+
+            if (window.AUTH && typeof AUTH.apiFetch === 'function') {
+                try {
+                    return await AUTH.apiFetch('/api/auth/login', requestOptions);
+                } catch (authFetchError) {
+                    console.warn('AUTH.apiFetch failed, retrying with direct fetch:', authFetchError);
+                }
+            }
+
+            return fetch('/api/auth/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'include',
+                body: JSON.stringify(payload)
+            });
+        }
+
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             errorMessage.classList.add('hidden');
@@ -289,14 +313,7 @@
             loginSpinner.classList.remove('hidden');
 
             try {
-                if (!window.AUTH || typeof AUTH.apiFetch !== 'function') {
-                    throw new Error('Auth client is not initialized.');
-                }
-
-                const res = await AUTH.apiFetch('/api/auth/login', {
-                    method: 'POST',
-                    body: JSON.stringify({ identifier, password })
-                });
+                const res = await sendLoginRequest({ identifier, password });
 
                 const data = await readResponsePayload(res);
 
@@ -317,7 +334,8 @@
 
             } catch (err) {
                 console.error('Login error:', err);
-                showError('Nu se poate contacta serverul. Verificati daca backend-ul ruleaza si origin-ul este permis.');
+                const detail = String(err?.message || err || 'eroare necunoscuta');
+                showError(`Nu se poate contacta serverul (${detail}). Verificati conexiunea/reteaua si incercati din nou.`);
             } finally {
                 loginBtn.disabled = false;
                 loginSpinner.classList.add('hidden');
