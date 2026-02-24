@@ -835,10 +835,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const currentValue = el.appointmentDoctorFilter.value;
             clearNode(el.appointmentDoctorFilter);
 
-            const allOption = document.createElement('option');
-            allOption.value = '';
-            allOption.textContent = 'Toți medicii';
-            el.appointmentDoctorFilter.appendChild(allOption);
+            const allowAllDoctorsOption = isSuperadmin();
+            if (allowAllDoctorsOption) {
+                const allOption = document.createElement('option');
+                allOption.value = '';
+                allOption.textContent = 'Toți medicii';
+                el.appointmentDoctorFilter.appendChild(allOption);
+            }
 
             doctorsCache.forEach((doctor) => {
                 const option = document.createElement('option');
@@ -847,8 +850,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 el.appointmentDoctorFilter.appendChild(option);
             });
 
-            if ([...el.appointmentDoctorFilter.options].some((opt) => opt.value === currentValue)) {
+            const hasCurrentValue = [...el.appointmentDoctorFilter.options].some((opt) => opt.value === currentValue);
+            if (hasCurrentValue) {
                 el.appointmentDoctorFilter.value = currentValue;
+            } else if (allowAllDoctorsOption) {
+                el.appointmentDoctorFilter.value = '';
+            } else {
+                const firstDoctorOption = [...el.appointmentDoctorFilter.options].find((opt) => opt.value);
+                el.appointmentDoctorFilter.value = firstDoctorOption?.value || '';
             }
         }
 
