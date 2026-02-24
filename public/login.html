@@ -255,6 +255,23 @@
         const loginBtn = document.getElementById('loginBtn');
         const loginSpinner = document.getElementById('loginSpinner');
 
+        async function readResponsePayload(res) {
+            const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+            if (contentType.includes('application/json')) {
+                try {
+                    return await res.json();
+                } catch (_) {
+                    return null;
+                }
+            }
+            try {
+                const text = await res.text();
+                return text ? { error: text } : null;
+            } catch (_) {
+                return null;
+            }
+        }
+
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             errorMessage.classList.add('hidden');
@@ -272,19 +289,24 @@
             loginSpinner.classList.remove('hidden');
 
             try {
+                if (!window.AUTH || typeof AUTH.apiFetch !== 'function') {
+                    throw new Error('Auth client is not initialized.');
+                }
+
                 const res = await AUTH.apiFetch('/api/auth/login', {
                     method: 'POST',
                     body: JSON.stringify({ identifier, password })
                 });
 
-                const data = await res.json();
+                const data = await readResponsePayload(res);
 
                 if (!res.ok) {
-                    showError(data.error || 'Eroare la autentificare.');
+                    const fallback = `Eroare la autentificare (${res.status}).`;
+                    showError((data && data.error) ? data.error : fallback);
                     return;
                 }
 
-                AUTH.setUser(data.user || null);
+                AUTH.setUser(data?.user || null);
 
                 successMessage.textContent = 'Autentificare reusita! Redirectionare...';
                 successMessage.classList.remove('hidden');
@@ -295,7 +317,7 @@
 
             } catch (err) {
                 console.error('Login error:', err);
-                showError('Eroare de conexiune. Incercati din nou.');
+                showError('Nu se poate contacta serverul. Verificati daca backend-ul ruleaza si origin-ul este permis.');
             } finally {
                 loginBtn.disabled = false;
                 loginSpinner.classList.add('hidden');
