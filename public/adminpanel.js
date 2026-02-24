@@ -43,6 +43,8 @@ document.addEventListener('DOMContentLoaded', () => {
         createUserSubmit: byId('createUserSubmit'),
         createDoctorForm: byId('createDoctorForm'),
         createDoctorSubmit: byId('createDoctorSubmit'),
+        createDoctorCard: byId('createDoctorCard'),
+        toggleCreateDoctorBtn: byId('toggleCreateDoctorBtn'),
         doctorSlug: byId('doctorSlug'),
         doctorDisplayName: byId('doctorDisplayName'),
         doctorSpecialty: byId('doctorSpecialty'),
@@ -99,6 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let drawerAppointmentId = '';
     let searchTerm = '';
     let eventsBound = false;
+    let isCreateDoctorFormOpen = false;
     let activeModalCleanup = null;
     let toastTimer = null;
 
@@ -1649,11 +1652,32 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast('Succes', 'Medic creat.');
             el.createDoctorForm.reset();
             renderDoctorDayConfigList();
+            isCreateDoctorFormOpen = false;
+            updateCreateDoctorVisibility();
             await fetchDoctors();
         } catch (_) {
             showToast('Eroare', 'Eroare de conexiune.', 'error');
         } finally {
             setButtonLoading(el.createDoctorSubmit, false);
+        }
+    }
+
+    function updateCreateDoctorVisibility({ focusForm = false } = {}) {
+        const canCreateDoctor = isSuperadmin();
+        const showForm = canCreateDoctor && isCreateDoctorFormOpen;
+
+        if (el.createDoctorCard) {
+            el.createDoctorCard.classList.toggle('hidden', !showForm);
+        }
+
+        if (el.toggleCreateDoctorBtn) {
+            el.toggleCreateDoctorBtn.classList.toggle('hidden', !canCreateDoctor);
+            el.toggleCreateDoctorBtn.textContent = showForm ? 'Ascunde formularul' : 'Creeaza medic nou';
+            el.toggleCreateDoctorBtn.setAttribute('aria-expanded', showForm ? 'true' : 'false');
+        }
+
+        if (showForm && focusForm) {
+            el.doctorSlug?.focus();
         }
     }
 
@@ -2327,6 +2351,8 @@ document.addEventListener('DOMContentLoaded', () => {
         el.timelineContainer.classList.add('hidden');
         el.userManagerContainer.classList.add('hidden');
         el.doctorManagerContainer.classList.remove('hidden');
+        isCreateDoctorFormOpen = false;
+        updateCreateDoctorVisibility();
     }
 
     function registerEvents() {
@@ -2424,6 +2450,11 @@ document.addEventListener('DOMContentLoaded', () => {
         el.createDoctorForm?.addEventListener('submit', async (event) => {
             event.preventDefault();
             createDoctor();
+        });
+
+        el.toggleCreateDoctorBtn?.addEventListener('click', () => {
+            isCreateDoctorFormOpen = !isCreateDoctorFormOpen;
+            updateCreateDoctorVisibility({ focusForm: isCreateDoctorFormOpen });
         });
 
         el.editDayScheduleBtn?.addEventListener('click', async () => {
@@ -2579,9 +2610,8 @@ document.addEventListener('DOMContentLoaded', () => {
         el.cancelDayAppointmentsBtn.classList.toggle('hidden', !superadmin);
         el.exportExcelBtn.classList.toggle('hidden', !superadmin);
         el.createUserCard.classList.toggle('hidden', !superadmin);
-        if (el.createDoctorForm) {
-            el.createDoctorForm.parentElement.classList.toggle('hidden', !superadmin);
-        }
+        isCreateDoctorFormOpen = false;
+        updateCreateDoctorVisibility();
 
         clampAdminDateWithinBounds();
         updateAdminDateDisplay();

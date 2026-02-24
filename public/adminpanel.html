@@ -271,10 +271,13 @@
                         <span class="admin-panel-title text-sm font-bold text-brand-100">Gestionare Medici</span>
                         <p class="admin-panel-subtitle text-xs text-brand-300/70">Configurare program, disponibilitate si status medici.</p>
                     </div>
-                    <button id="backToTimelineFromDoctors" class="admin-link-btn text-xs text-brand-400 font-bold hover:text-brand-100 transition-colors">Inapoi la programari</button>
+                    <div class="flex items-center gap-2">
+                        <button id="toggleCreateDoctorBtn" type="button" class="hidden admin-action-btn btn-primary" aria-controls="createDoctorCard" aria-expanded="false">Creeaza medic nou</button>
+                        <button id="backToTimelineFromDoctors" class="admin-link-btn text-xs text-brand-400 font-bold hover:text-brand-100 transition-colors">Inapoi la programari</button>
+                    </div>
                 </div>
 
-                <div id="createDoctorCard" class="admin-form-card p-6 border-b border-brand-600/20 bg-brand-800/80">
+                <div id="createDoctorCard" class="hidden admin-form-card p-6 border-b border-brand-600/20 bg-brand-800/80">
                     <h3 class="admin-form-title text-lg font-bold text-brand-100 mb-3">Creeaza medic nou</h3>
                     <p class="admin-helper-text text-xs text-brand-300/70 mb-3">Campurile marcate cu * sunt obligatorii.</p>
                     <form id="createDoctorForm" class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
