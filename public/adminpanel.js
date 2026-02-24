@@ -81,7 +81,6 @@ document.addEventListener('DOMContentLoaded', () => {
         drawerActionGroup: byId('drawerActionGroup'),
         drawerResendBtn: byId('drawerResendBtn'),
         drawerCancelSection: byId('drawerCancelSection'),
-        drawerCancelPassword: byId('drawerCancelPassword'),
         drawerCancelBtn: byId('drawerCancelBtn')
     };
 
@@ -972,9 +971,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function closeAppointmentDrawer() {
         drawerAppointmentId = '';
         clearDrawerFeedback();
-        if (el.drawerCancelPassword) {
-            el.drawerCancelPassword.value = '';
-        }
         if (el.appointmentDrawer) {
             el.appointmentDrawer.classList.remove('is-open');
             el.appointmentDrawer.setAttribute('aria-hidden', 'true');
@@ -1034,7 +1030,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const allowResend = isSchedulerOrSuperadmin();
-        const allowCancel = isSuperadmin();
+        const allowCancel = isSchedulerOrSuperadmin();
 
         el.drawerResendBtn?.classList.toggle('hidden', !allowResend);
         el.drawerCancelSection?.classList.toggle('hidden', !allowCancel);
@@ -1054,18 +1050,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         openAppointmentDrawer(nextEntry);
-    }
-
-    async function requestStepUpTokenWithPassword(password, action) {
-        const res = await AUTH.apiFetch('/api/auth/step-up', {
-            method: 'POST',
-            body: JSON.stringify({ password, action })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.stepUpToken) {
-            return { stepUpToken: null, error: data.error || 'Confirmarea pasului suplimentar a esuat.' };
-        }
-        return { stepUpToken: data.stepUpToken, error: null };
     }
 
     async function handleDrawerResendAction() {
@@ -1105,29 +1089,27 @@ document.addEventListener('DOMContentLoaded', () => {
             setDrawerError('Programarea selectata nu mai este disponibila.');
             return;
         }
-        if (!isSuperadmin()) {
+        if (!isSchedulerOrSuperadmin()) {
             setDrawerError('Nu aveti drept de anulare.');
             return;
         }
 
-        const password = String(el.drawerCancelPassword?.value || '');
-        if (!password.trim()) {
-            setDrawerError('Introdu parola pentru confirmare.');
+        const confirmed = await showConfirmModal({
+            title: 'Esti sigur?',
+            message: 'Vrei sa anulezi aceasta programare?',
+            confirmLabel: 'Da',
+            cancelLabel: 'Nu',
+            danger: true
+        });
+        if (!confirmed) {
             return;
         }
 
         setButtonLoading(el.drawerCancelBtn, true, 'Se anuleaza...');
         try {
-            const { stepUpToken, error } = await requestStepUpTokenWithPassword(password, 'appointment_delete');
-            if (!stepUpToken) {
-                setDrawerError(error || 'Nu s-a putut confirma actiunea.');
-                return;
-            }
-
             const appointmentId = getAppointmentId(appointment);
             const res = await AUTH.apiFetch(`/api/admin/appointment/${appointmentId}`, {
-                method: 'DELETE',
-                headers: { 'X-Step-Up-Token': stepUpToken }
+                method: 'DELETE'
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {

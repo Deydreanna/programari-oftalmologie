@@ -2560,7 +2560,7 @@ app.post('/api/admin/reset', requireSuperadminOnly, requireStepUp('appointments_
     }
 });
 
-app.delete('/api/admin/appointment/:id', requireSuperadminOnly, requireStepUp('appointment_delete'), async (req, res) => {
+app.delete('/api/admin/appointment/:id', requireSchedulerOrSuperadmin, async (req, res) => {
     setAuthNoStore(res);
 
     const appointmentId = String(req.params.id || '').trim();
@@ -2569,6 +2569,14 @@ app.delete('/api/admin/appointment/:id', requireSuperadminOnly, requireStepUp('a
     }
 
     try {
+        const existing = await pgAppointments.findAppointmentByPublicId(appointmentId);
+        if (!existing) {
+            return res.status(404).json({ error: 'Programare negasita.' });
+        }
+        if (!canUserAccessDoctor(req.user, existing.doctorId)) {
+            return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
+        }
+
         const deleted = await pgAppointments.withTransaction(async (client) => {
             const removed = await pgAppointments.deleteAppointmentByPublicId(appointmentId, client);
             if (!removed) {
