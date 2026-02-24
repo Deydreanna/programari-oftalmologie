@@ -789,11 +789,16 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // Prevent browser autofill/restored values from silently filtering timeline results.
+        searchTerm = '';
+        el.appointmentSearchInput.value = '';
         el.appointmentSearchInput.dataset.bound = '1';
-        el.appointmentSearchInput.addEventListener('input', () => {
+        const syncSearchTerm = () => {
             searchTerm = String(el.appointmentSearchInput.value || '').toLowerCase().trim();
             renderTimelineForCurrentFilters();
-        });
+        };
+        el.appointmentSearchInput.addEventListener('input', syncSearchTerm);
+        el.appointmentSearchInput.addEventListener('search', syncSearchTerm);
     }
 
     async function fetchAdminStats() {
