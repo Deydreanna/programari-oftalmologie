@@ -13,11 +13,13 @@
         "start": "node server.js",
         "check:env": "node scripts/check-env.js",
         "db:migrate": "node scripts/run-pg-migrations.js",
+        "db:migrate:patient-text": "node scripts/migrate-encrypt-patient-text.js",
         "db:check:postgres": "node scripts/check-postgres.js",
         "seed:superadmin": "node scripts/seed-superadmin.js",
         "test:race": "node scripts/test-booking-race.js",
         "test:multidoctor": "node scripts/verify-multidoctor.js",
-        "test:auth-rbac": "node scripts/verify-auth-rbac.js"
+        "test:auth-rbac": "node scripts/verify-auth-rbac.js",
+        "test:patient-encryption": "node scripts/verify-patient-encryption.js"
     },
     "dependencies": {
         "bcrypt": "^6.0.0",

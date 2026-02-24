@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const path = require('path');
 const { validateBaseEnv } = require('./scripts/env-utils');
 const { runPostgresHealthCheck, getPostgresPool, redactPostgresUrlInText } = require('./db/postgres');
+const { normalizeCnp, validateCnp, maskCnp } = require('./db/patient-crypto');
 const pgUsers = require('./db/users-postgres');
 const pgDoctors = require('./db/doctors-postgres');
 const pgAppointments = require('./db/appointments-postgres');
@@ -791,16 +792,69 @@ const slotsQuerySchema = createSchema((input) => {
 });
 
 const bookBodySchema = createSchema((input) => {
-    const payload = ensureObjectStrict(input, ['name', 'phone', 'email', 'type', 'date', 'time', 'hasDiagnosis', 'diagnosticFileMeta', 'diagnosticFile', 'doctorId', 'doctorSlug']);
+    const payload = ensureObjectStrict(input, [
+        'name',
+        'firstName',
+        'lastName',
+        'phone',
+        'email',
+        'cnp',
+        'type',
+        'date',
+        'time',
+        'hasDiagnosis',
+        'diagnosticFileMeta',
+        'diagnosticFile',
+        'doctorId',
+        'doctorSlug'
+    ]);
     if (payload.doctorId === undefined && payload.doctorSlug === undefined) {
         throw new Error('doctorId or doctorSlug is required.');
     }
     const email = parseStringField(payload.email, 'email', { min: 3, max: 254 });
     if (!validateEmail(email)) throw new Error('email format is invalid.');
+
+    const parsedFirstName = payload.firstName !== undefined
+        ? parseStringField(payload.firstName, 'firstName', { min: 2, max: 80 })
+        : '';
+    const parsedLastName = payload.lastName !== undefined
+        ? parseStringField(payload.lastName, 'lastName', { min: 2, max: 80 })
+        : '';
+    const legacyName = payload.name !== undefined
+        ? parseStringField(payload.name, 'name', { min: 2, max: 120 })
+        : '';
+
+    let firstName = parsedFirstName;
+    let lastName = parsedLastName;
+    if ((!firstName || !lastName) && legacyName) {
+        const parts = legacyName.split(/\s+/).filter(Boolean);
+        if (!lastName && parts.length > 0) {
+            lastName = parts[0];
+        }
+        if (!firstName && parts.length > 1) {
+            firstName = parts.slice(1).join(' ');
+        }
+    }
+
+    if (!firstName || !lastName) {
+        throw new Error('firstName and lastName are required.');
+    }
+
+    const rawCnp = payload.cnp !== undefined
+        ? parseStringField(payload.cnp, 'cnp', { min: 13, max: 20 })
+        : '';
+    const cnp = normalizeCnp(rawCnp);
+    if (!validateCnp(cnp)) {
+        throw new Error('cnp format is invalid.');
+    }
+
     return {
-        name: parseStringField(payload.name, 'name', { min: 2, max: 120 }),
+        firstName,
+        lastName,
+        name: `${lastName} ${firstName}`.trim(),
         phone: parseStringField(payload.phone, 'phone', { min: 10, max: 20 }),
         email,
+        cnp,
         type: parseStringField(payload.type, 'type', { min: 2, max: 64 }),
         date: parseISODateField(payload.date, 'date'),
         time: parseTimeField(payload.time, 'time'),
@@ -1346,9 +1400,13 @@ function sanitizeAppointmentForAdminList(appointment) {
         _id: appointment._id,
         doctorId: appointment.doctorId || null,
         doctorSnapshotName: appointment.doctorSnapshotName || '',
+        firstName: appointment.firstName || '',
+        lastName: appointment.lastName || '',
         name: appointment.name,
         phone: appointment.phone,
         email: appointment.email || '',
+        cnp: appointment.cnp || '',
+        cnpMasked: maskCnp(appointment.cnp || ''),
         date: appointment.date,
         time: appointment.time,
         type: appointment.type,
@@ -1381,9 +1439,13 @@ function sanitizeAppointmentForScheduler({
         doctorName: appointment?.doctorSnapshotName || doctor?.displayName || '',
         startMinutes: Number.isFinite(parsedStartMinutes) ? parsedStartMinutes : 0,
         durationMinutes: normalizedDuration,
+        patientFirstName: appointment?.firstName || '',
+        patientLastName: appointment?.lastName || '',
         patientName: appointment?.name || '',
         patientPhone: appointment?.phone || null,
         patientEmail: appointment?.email || null,
+        patientCnp: appointment?.cnp || null,
+        patientCnpMasked: maskCnp(appointment?.cnp || ''),
         patientAge: null,
         type: appointment?.type || '',
         status: appointment?.emailSent ? 'sent' : 'unsent'
@@ -2038,7 +2100,22 @@ app.get('/api/slots', validateQuery(slotsQuerySchema), async (req, res) => {
 });
 
 async function handleAppointmentBooking(req, res) {
-    const { name, phone, email, type, date, time, hasDiagnosis, diagnosticFile, diagnosticFileMeta, doctorId, doctorSlug } = req.validatedBody;
+    const {
+        firstName,
+        lastName,
+        name,
+        phone,
+        email,
+        cnp,
+        type,
+        date,
+        time,
+        hasDiagnosis,
+        diagnosticFile,
+        diagnosticFileMeta,
+        doctorId,
+        doctorSlug
+    } = req.validatedBody;
 
     if (!validatePhone(phone)) {
         return res.status(400).json({ error: 'Format telefon invalid.' });
@@ -2082,9 +2159,12 @@ async function handleAppointmentBooking(req, res) {
 
         const newAppointment = await pgAppointments.createAppointmentTransactional({
             doctorIdentifier: doctor._id,
+            firstName,
+            lastName,
             name,
             phone: cleanPhone(phone),
             email: email.toLowerCase().trim(),
+            cnp,
             type,
             date,
             time,

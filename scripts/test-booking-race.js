@@ -57,6 +57,19 @@ function pickBookableDate(doctor) {
     return null;
 }
 
+function generateValidCnp(seed = Date.now()) {
+    const control = '279146358279';
+    const numericSeed = String(seed).replace(/[^\d]/g, '');
+    const body = `1${numericSeed.padStart(11, '0').slice(-11)}`;
+    let sum = 0;
+    for (let index = 0; index < 12; index += 1) {
+        sum += Number(body[index]) * Number(control[index]);
+    }
+    let checksum = sum % 11;
+    if (checksum === 10) checksum = 1;
+    return `${body}${checksum}`;
+}
+
 function readCsrfCookie(response) {
     const setCookieHeaders = typeof response.headers.getSetCookie === 'function'
         ? response.headers.getSetCookie()
@@ -100,6 +113,7 @@ async function run() {
         name: 'Race Test Patient',
         phone: '0712345678',
         email: `race-${Date.now()}@example.com`,
+        cnp: generateValidCnp(Date.now()),
         type: 'Control',
         date,
         time,

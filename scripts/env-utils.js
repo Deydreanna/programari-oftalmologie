@@ -1,4 +1,12 @@
-const REQUIRED_ENV_VARS = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'JWT_STEPUP_SECRET', 'ALLOWED_ORIGINS'];
+const REQUIRED_ENV_VARS = [
+    'JWT_ACCESS_SECRET',
+    'JWT_REFRESH_SECRET',
+    'JWT_STEPUP_SECRET',
+    'ALLOWED_ORIGINS',
+    'PATIENT_DATA_ENC_KEY',
+    'PATIENT_INDEX_KEY'
+];
+const { validatePatientCryptoEnv } = require('../db/patient-crypto');
 const SECURE_SSL_MODES = new Set(['require', 'verify-ca', 'verify-full']);
 const INSECURE_SSL_MODES = new Set(['disable', 'allow', 'prefer']);
 const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
@@ -114,6 +122,11 @@ function validateBaseEnv(env = process.env) {
     const stepupSecret = env.JWT_STEPUP_SECRET || '';
     if (stepupSecret && stepupSecret.length < 32) {
         errors.push('JWT_STEPUP_SECRET must be at least 32 characters.');
+    }
+
+    const patientCryptoValidation = validatePatientCryptoEnv(env);
+    if (!patientCryptoValidation.ok) {
+        errors.push(...patientCryptoValidation.errors);
     }
 
     const origins = parseAllowedOrigins(env.ALLOWED_ORIGINS || '');

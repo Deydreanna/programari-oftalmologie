@@ -107,6 +107,33 @@
         return out;
     }
 
+    function normalizeCnp(value) {
+        return String(value || '').trim().replace(/[^\d]/g, '');
+    }
+
+    function validateRomanianCnp(value) {
+        const cnp = normalizeCnp(value);
+        if (!/^\d{13}$/.test(cnp)) {
+            return false;
+        }
+
+        const firstDigit = Number(cnp[0]);
+        if (!Number.isInteger(firstDigit) || firstDigit < 1 || firstDigit > 9) {
+            return false;
+        }
+
+        const control = '279146358279';
+        let sum = 0;
+        for (let index = 0; index < 12; index += 1) {
+            sum += Number(cnp[index]) * Number(control[index]);
+        }
+        let expected = sum % 11;
+        if (expected === 10) {
+            expected = 1;
+        }
+        return Number(cnp[12]) === expected;
+    }
+
     function getDoctorMonthLimitDate() {
         const today = startOfDay(new Date());
         const monthsToShow = Number(selectedDoctor?.bookingSettings?.monthsToShow || 1);
@@ -612,6 +639,7 @@
         const name = `${lastName} ${firstName}`.trim();
         const phone = byId('phone').value.trim();
         const email = byId('email').value.trim();
+        const cnp = normalizeCnp(byId('cnp').value);
         const type = typeInput.value;
         const dateValue = formDate.value;
         const timeValue = formTime.value;
@@ -631,6 +659,11 @@
             return;
         }
 
+        if (!validateRomanianCnp(cnp)) {
+            showToast('Eroare', 'CNP invalid. Verificati cele 13 cifre.', 'error');
+            return;
+        }
+
         const submitBtn = byId('submitBtn');
         submitBtn.disabled = true;
         loadingSpinner.classList.remove('hidden');
@@ -639,9 +672,12 @@
             const res = await AUTH.apiFetch('/api/book', {
                 method: 'POST',
                 body: JSON.stringify({
+                    firstName,
+                    lastName,
                     name,
                     phone,
                     email,
+                    cnp,
                     type,
                     date: dateValue,
                     time: timeValue,

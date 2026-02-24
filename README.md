@@ -17,6 +17,8 @@ Variabile obligatorii:
 - `JWT_REFRESH_SECRET` (minim 32 caractere)
 - `JWT_STEPUP_SECRET` (minim 32 caractere)
 - `ALLOWED_ORIGINS` (lista separata prin virgula)
+- `PATIENT_DATA_ENC_KEY` (base64, exact 32 bytes decodati; AES-256-GCM)
+- `PATIENT_INDEX_KEY` (base64, exact 32 bytes decodati; HMAC-SHA256 blind indexes)
 
 Variabile optionale:
 - `ACCESS_TOKEN_TTL_MINUTES` (default `15`)
@@ -37,12 +39,14 @@ npm start
 ## Scripturi utile
 - `npm run check:env` - validare stricta a variabilelor de mediu
 - `npm run db:migrate` - ruleaza migrarile SQL
+- `npm run db:migrate:patient-text` - migrare idempotenta pentru criptarea text PII legacy din `appointments`
 - `npm run db:check:postgres` - health check Postgres
 - `npm run seed:superadmin` - creeaza/actualizeaza superadmin in Postgres
 - `npm run test:security` - verificari frontend security
 - `npm run test:race` - test cursa pe slot booking
 - `npm run test:multidoctor` - verificari multidoctor/scoping
 - `npm run test:auth-rbac` - verificari auth + RBAC
+- `npm run test:patient-encryption` - verificari crypto PII + blind index + CNP + endpoint checks
 - `npm run scan:secrets` - scan simplu pentru secrete hardcodate
 
 ## Note de compatibilitate API
@@ -59,6 +63,33 @@ Aplicatia mentine:
 - rate limiting + lockout/backoff login
 - audit logging in Postgres
 - `Cache-Control: no-store` pe endpointuri sensibile
+
+## Phase 1 - Criptare text PII pacient
+Campurile text pacient sunt criptate la nivel de aplicatie (AES-256-GCM) inainte de persistenta:
+- `firstName`
+- `lastName`
+- `phone`
+- `email`
+- `cnp`
+
+Blind indexes (HMAC-SHA256) sunt stocate separat pentru cautari exacte:
+- `phone_index`
+- `email_index`
+- `cnp_index`
+
+Compatibilitate legacy:
+- citirile suporta atat payload criptat, cat si valori plaintext vechi;
+- daca un payload criptat are auth/tag invalid, request-ul esueaza controlat (fara fallback la plaintext).
+
+Generare chei (base64 32 bytes):
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+Ruleaza comanda de 2 ori: o data pentru `PATIENT_DATA_ENC_KEY`, o data pentru `PATIENT_INDEX_KEY`.
+
+Atentie:
+- daca pierzi `PATIENT_DATA_ENC_KEY`, datele criptate nu mai pot fi decriptate;
+- pastreaza cheile in secret manager/backups securizate, nu in git.
 
 ## Admin scheduler timeline view
 Panoul admin foloseste un scheduler tip timeline in sectiunea `Programari Zilnice`:

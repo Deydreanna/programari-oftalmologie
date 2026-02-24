@@ -73,6 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
         drawerPatientName: byId('drawerPatientName'),
         drawerPatientPhone: byId('drawerPatientPhone'),
         drawerPatientEmail: byId('drawerPatientEmail'),
+        drawerPatientCnp: byId('drawerPatientCnp'),
         drawerDoctorName: byId('drawerDoctorName'),
         drawerType: byId('drawerType'),
         drawerStatus: byId('drawerStatus'),
@@ -1016,6 +1017,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        const patientCnp = String(appointment.patientCnp || appointment.cnp || '').trim();
+        if (el.drawerPatientCnp) {
+            if (patientCnp) {
+                el.drawerPatientCnp.textContent = `CNP: ${patientCnp}`;
+                el.drawerPatientCnp.classList.remove('hidden');
+            } else {
+                el.drawerPatientCnp.textContent = '';
+                el.drawerPatientCnp.classList.add('hidden');
+            }
+        }
+
         if (el.drawerDoctorName) {
             el.drawerDoctorName.textContent = String(appointment.doctorName || appointment.doctorSnapshotName || '-');
         }
@@ -1178,7 +1190,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return appointmentsCache.filter((app) => {
             return String(app.patientName || app.name || '').toLowerCase().includes(searchTerm)
                 || String(app.patientPhone || app.phone || '').toLowerCase().includes(searchTerm)
-                || String(app.patientEmail || app.email || '').toLowerCase().includes(searchTerm);
+                || String(app.patientEmail || app.email || '').toLowerCase().includes(searchTerm)
+                || String(app.patientCnp || app.cnp || '').toLowerCase().includes(searchTerm);
         });
     }
 

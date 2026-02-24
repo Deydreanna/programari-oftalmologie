@@ -16,6 +16,19 @@ function randomSuffix() {
     return crypto.randomBytes(4).toString('hex');
 }
 
+function generateValidCnp(seed = Date.now()) {
+    const control = '279146358279';
+    const numericSeed = String(seed).replace(/[^\d]/g, '');
+    const body = `1${numericSeed.padStart(11, '0').slice(-11)}`;
+    let sum = 0;
+    for (let index = 0; index < 12; index += 1) {
+        sum += Number(body[index]) * Number(control[index]);
+    }
+    let checksum = sum % 11;
+    if (checksum === 10) checksum = 1;
+    return `${body}${checksum}`;
+}
+
 function parseSetCookie(rawValue) {
     if (!rawValue) return null;
     const parts = String(rawValue).split(';')[0].split('=');
@@ -289,6 +302,7 @@ async function run() {
     const patientPayloadBase = {
         name: `Test Patient ${randomSuffix()}`,
         phone: '0712345678',
+        cnp: generateValidCnp(Date.now()),
         type: 'Control',
         date,
         time: slot

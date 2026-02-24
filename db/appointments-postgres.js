@@ -1,5 +1,14 @@
 const crypto = require('crypto');
 const { getPostgresPool } = require('./postgres');
+const {
+    BLIND_INDEX_KIND,
+    normalizeEmail,
+    normalizePhone,
+    normalizeCnp,
+    encryptTextField,
+    decryptTextField,
+    computeBlindIndex
+} = require('./patient-crypto');
 
 const LEGACY_OBJECT_ID_REGEX = /^[a-fA-F0-9]{24}$/;
 const POSTGRES_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -132,15 +141,26 @@ function mapDiagnosticFileMeta(row) {
 }
 
 function mapAppointmentRow(row) {
+    const firstName = decryptTextField(row.first_name, { fieldName: 'first_name' }) || '';
+    const lastName = decryptTextField(row.last_name, { fieldName: 'last_name' }) || '';
+    const fallbackName = decryptTextField(row.name, { fieldName: 'name' }) || '';
+    const displayName = `${lastName} ${firstName}`.trim() || fallbackName;
+    const phone = decryptTextField(row.phone, { fieldName: 'phone' }) || '';
+    const email = decryptTextField(row.email, { fieldName: 'email' }) || '';
+    const cnp = decryptTextField(row.cnp, { fieldName: 'cnp' }) || '';
+
     return {
         _id: row.legacy_mongo_id || row.id,
         pgId: row.id,
         legacyPublicId: row.legacy_mongo_id || null,
         doctorId: row.doctor_legacy_mongo_id || row.doctor_id,
         doctorSnapshotName: row.doctor_snapshot_name || '',
-        name: row.name,
-        phone: row.phone,
-        email: row.email || '',
+        firstName,
+        lastName,
+        name: displayName,
+        phone,
+        email,
+        cnp,
         date: row.appointment_date,
         time: row.appointment_time,
         type: row.type,
@@ -294,7 +314,10 @@ async function queryMappedAppointmentByPgId(appointmentPgId, client = null) {
             a.id::text AS id,
             TRIM(a.legacy_mongo_id) AS legacy_mongo_id,
             a.name,
+            a.first_name,
+            a.last_name,
             a.phone,
+            a.cnp,
             a.type,
             a.appointment_date::text AS appointment_date,
             to_char(a.appointment_time, 'HH24:MI') AS appointment_time,
@@ -470,9 +493,12 @@ async function createAuditLog({
 
 async function createAppointmentTransactional({
     doctorIdentifier,
+    firstName,
+    lastName,
     name,
     phone,
     email,
+    cnp = null,
     type,
     date,
     time,
@@ -487,11 +513,14 @@ async function createAppointmentTransactional({
     if (!normalizedDate || !normalizedTime) {
         throw new BookingValidationError('Data sau ora invalida.', { code: 'invalid_datetime', status: 400 });
     }
-    const normalizedName = String(name || '').trim();
-    const normalizedPhone = String(phone || '').trim();
-    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const normalizedFirstName = String(firstName || '').trim();
+    const normalizedLastName = String(lastName || '').trim();
+    const normalizedName = String(name || `${normalizedLastName} ${normalizedFirstName}`).trim();
+    const normalizedPhone = normalizePhone(phone);
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedCnp = normalizeCnp(cnp);
     const normalizedType = String(type || '').trim();
-    if (!normalizedName || !normalizedPhone || !normalizedEmail || !normalizedType) {
+    if (!normalizedFirstName || !normalizedLastName || !normalizedName || !normalizedPhone || !normalizedEmail || !normalizedType) {
         throw new BookingValidationError('Datele programarii sunt incomplete.', { code: 'invalid_payload', status: 400 });
     }
 
@@ -537,18 +566,36 @@ async function createAppointmentTransactional({
         }
 
         const userPgId = await queryUserPgIdByPublicId(userPublicId, txClient);
+        const encryptedName = encryptTextField(normalizedName);
+        const encryptedFirstName = encryptTextField(normalizedFirstName);
+        const encryptedLastName = encryptTextField(normalizedLastName);
+        const encryptedPhone = encryptTextField(normalizedPhone);
+        const encryptedEmail = encryptTextField(normalizedEmail);
+        const encryptedCnp = normalizedCnp ? encryptTextField(normalizedCnp) : null;
+        const phoneIndex = computeBlindIndex(normalizedPhone, BLIND_INDEX_KIND.PHONE);
+        const emailIndex = computeBlindIndex(normalizedEmail, BLIND_INDEX_KIND.EMAIL);
+        const cnpIndex = normalizedCnp
+            ? computeBlindIndex(normalizedCnp, BLIND_INDEX_KIND.CNP)
+            : null;
+
         let insertedId;
         try {
             const insertResult = await txClient.query(
                 `INSERT INTO appointments (
                     legacy_mongo_id,
                     name,
+                    first_name,
+                    last_name,
                     phone,
+                    cnp,
                     type,
                     appointment_date,
                     appointment_time,
                     notes,
                     email,
+                    email_index,
+                    phone_index,
+                    cnp_index,
                     email_sent,
                     has_diagnosis,
                     diagnostic_file_key,
@@ -564,30 +611,42 @@ async function createAppointmentTransactional({
                     $2,
                     $3,
                     $4,
-                    $5::date,
-                    $6::time,
+                    $5,
+                    $6,
                     $7,
-                    $8,
-                    FALSE,
-                    $9,
+                    $8::date,
+                    $9::time,
                     $10,
                     $11,
                     $12,
-                    $13::timestamptz,
-                    $14::uuid,
+                    $13,
+                    $14,
+                    FALSE,
                     $15,
-                    $16::uuid
+                    $16,
+                    $17,
+                    $18,
+                    $19::timestamptz,
+                    $20::uuid,
+                    $21,
+                    $22::uuid
                 )
                 RETURNING id::text AS id`,
                 [
                     generateLegacyPublicId(),
-                    normalizedName,
-                    normalizedPhone,
+                    encryptedName,
+                    encryptedFirstName,
+                    encryptedLastName,
+                    encryptedPhone,
+                    encryptedCnp,
                     normalizedType,
                     normalizedDate,
                     normalizedTime,
                     String(notes || ''),
-                    normalizedEmail,
+                    encryptedEmail,
+                    emailIndex,
+                    phoneIndex,
+                    cnpIndex,
                     !!hasDiagnosis,
                     diagnosticFileMeta?.key || null,
                     diagnosticFileMeta?.mime || null,
@@ -686,7 +745,10 @@ async function listAppointments({
             a.id::text AS id,
             TRIM(a.legacy_mongo_id) AS legacy_mongo_id,
             a.name,
+            a.first_name,
+            a.last_name,
             a.phone,
+            a.cnp,
             a.type,
             a.appointment_date::text AS appointment_date,
             to_char(a.appointment_time, 'HH24:MI') AS appointment_time,
@@ -724,7 +786,10 @@ async function findAppointmentByPublicId(publicId, client = null) {
                 a.id::text AS id,
                 TRIM(a.legacy_mongo_id) AS legacy_mongo_id,
                 a.name,
+                a.first_name,
+                a.last_name,
                 a.phone,
+                a.cnp,
                 a.type,
                 a.appointment_date::text AS appointment_date,
                 to_char(a.appointment_time, 'HH24:MI') AS appointment_time,
@@ -753,7 +818,10 @@ async function findAppointmentByPublicId(publicId, client = null) {
                 a.id::text AS id,
                 TRIM(a.legacy_mongo_id) AS legacy_mongo_id,
                 a.name,
+                a.first_name,
+                a.last_name,
                 a.phone,
+                a.cnp,
                 a.type,
                 a.appointment_date::text AS appointment_date,
                 to_char(a.appointment_time, 'HH24:MI') AS appointment_time,
