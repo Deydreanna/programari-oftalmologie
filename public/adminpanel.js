@@ -1612,18 +1612,43 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function ensureCreateUserToggleButton() {
+        if (el.toggleCreateUserBtn) {
+            return el.toggleCreateUserBtn;
+        }
+        if (!el.backToTimeline) {
+            return null;
+        }
+
+        const actionWrap = el.backToTimeline.parentElement;
+        if (!actionWrap) {
+            return null;
+        }
+
+        const button = document.createElement('button');
+        button.id = 'toggleCreateUserBtn';
+        button.type = 'button';
+        button.className = `${BTN_CLASS.primary}`;
+        button.setAttribute('aria-controls', 'createUserCard');
+        button.setAttribute('aria-expanded', 'false');
+        button.textContent = 'Creeaza utilizator nou';
+        actionWrap.insertBefore(button, el.backToTimeline);
+        el.toggleCreateUserBtn = button;
+        return button;
+    }
+
     function updateCreateUserVisibility({ focusForm = false } = {}) {
-        const canCreateUser = isSuperadmin();
-        const showForm = canCreateUser && isCreateUserFormOpen;
+        const showForm = isCreateUserFormOpen;
+        const toggleButton = ensureCreateUserToggleButton();
 
         if (el.createUserCard) {
             el.createUserCard.classList.toggle('hidden', !showForm);
         }
 
-        if (el.toggleCreateUserBtn) {
-            el.toggleCreateUserBtn.classList.toggle('hidden', !canCreateUser);
-            el.toggleCreateUserBtn.textContent = showForm ? 'Ascunde formularul' : 'Creeaza utilizator nou';
-            el.toggleCreateUserBtn.setAttribute('aria-expanded', showForm ? 'true' : 'false');
+        if (toggleButton) {
+            toggleButton.classList.remove('hidden');
+            toggleButton.textContent = showForm ? 'Ascunde formularul' : 'Creeaza utilizator nou';
+            toggleButton.setAttribute('aria-expanded', showForm ? 'true' : 'false');
         }
 
         if (showForm && focusForm) {
@@ -2493,7 +2518,8 @@ document.addEventListener('DOMContentLoaded', () => {
             createUser();
         });
 
-        el.toggleCreateUserBtn?.addEventListener('click', () => {
+        const toggleCreateUserBtn = ensureCreateUserToggleButton();
+        toggleCreateUserBtn?.addEventListener('click', () => {
             isCreateUserFormOpen = !isCreateUserFormOpen;
             updateCreateUserVisibility({ focusForm: isCreateUserFormOpen });
         });
