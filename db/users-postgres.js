@@ -377,49 +377,6 @@ async function deleteUserByPublicId(publicId, client = null) {
     return withTransaction(task);
 }
 
-async function assignAdminToDoctor(userPublicId, doctorLegacyId, client = null) {
-    const task = async (txClient) => {
-        const userRow = await findUserRowByPublicId(userPublicId, txClient);
-        if (!userRow) {
-            return false;
-        }
-        const normalizedDoctorId = String(doctorLegacyId || '').trim();
-        if (!LEGACY_OBJECT_ID_REGEX.test(normalizedDoctorId)) {
-            return false;
-        }
-
-        await txClient.query(
-            `INSERT INTO doctor_admin_assignments (doctor_id, user_id, legacy_doctor_mongo_id, legacy_user_mongo_id)
-             SELECT NULL, $1, $2, $3
-             WHERE NOT EXISTS (
-                SELECT 1
-                FROM doctor_admin_assignments
-                WHERE user_id = $1
-                  AND legacy_doctor_mongo_id = $2
-             )`,
-            [userRow.id, normalizedDoctorId, userRow.legacy_mongo_id || null]
-        );
-        return true;
-    };
-
-    if (client) {
-        return task(client);
-    }
-    return withTransaction(task);
-}
-
-async function canUserManageDoctor(userPublicId, doctorLegacyId, client = null) {
-    const user = await findUserByPublicId(userPublicId, client);
-    if (!user) return false;
-    return normalizeManagedDoctorIds(user.managedDoctorIds).includes(String(doctorLegacyId || '').trim());
-}
-
-async function listDoctorsForAdmin(userPublicId, client = null) {
-    const user = await findUserByPublicId(userPublicId, client);
-    if (!user) return [];
-    return normalizeManagedDoctorIds(user.managedDoctorIds);
-}
-
 module.exports = {
     LEGACY_OBJECT_ID_REGEX,
     isUniqueViolation,
@@ -432,8 +389,5 @@ module.exports = {
     listUsers,
     createUser,
     updateUserByPublicId,
-    deleteUserByPublicId,
-    assignAdminToDoctor,
-    canUserManageDoctor,
-    listDoctorsForAdmin
+    deleteUserByPublicId
 };

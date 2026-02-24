@@ -382,7 +382,7 @@
 
         const performRender = () => {
             if (isDestroyed) return;
-            mount.innerHTML = '';
+            mount.replaceChildren();
 
             const root = createNode('div', 'admin-scheduler-root');
             mount.appendChild(root);
@@ -702,7 +702,7 @@
                 }
                 renderHandle = 0;
             }
-            mount.innerHTML = '';
+            mount.replaceChildren();
         };
 
         return {

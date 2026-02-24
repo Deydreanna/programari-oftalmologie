@@ -91,20 +91,6 @@ function parseHHMMToMinutes(value) {
     return (hours * 60) + minutes;
 }
 
-function isValidHHMM(value) {
-    return TIME_HHMM_REGEX.test(String(value || ''));
-}
-
-function isValidWeekdayList(value) {
-    if (!Array.isArray(value) || value.length === 0) return false;
-    const normalized = new Set();
-    for (const weekday of value) {
-        if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return false;
-        normalized.add(weekday);
-    }
-    return normalized.size > 0;
-}
-
 function sanitizeInlineString(value) {
     return String(value || '').replace(/\0/g, '').trim();
 }
@@ -416,14 +402,6 @@ function parseObjectIdField(value, fieldName) {
 function isValidUserIdentifier(value) {
     const normalized = String(value || '').trim();
     return LEGACY_OBJECT_ID_REGEX.test(normalized) || POSTGRES_UUID_REGEX.test(normalized);
-}
-
-function parseUserIdField(value, fieldName) {
-    const idValue = parseStringField(value, fieldName, { min: 24, max: 64 });
-    if (!isValidUserIdentifier(idValue)) {
-        throw new Error(`${fieldName} is invalid.`);
-    }
-    return idValue;
 }
 
 function parseObjectIdArrayField(value, fieldName, { optional = false, maxLength = 20 } = {}) {
@@ -834,21 +812,6 @@ const bookBodySchema = createSchema((input) => {
     };
 });
 
-const roleUpdateBodySchema = createSchema((input) => {
-    const payload = ensureObjectStrict(input, ['userId', 'role']);
-    const userId = parseUserIdField(payload.userId, 'userId');
-    const role = parseStringField(payload.role, 'role', { min: 6, max: 10 });
-    if (![ROLE.VIEWER, ROLE.SCHEDULER].includes(role)) throw new Error('Invalid role.');
-    return { userId, role };
-});
-
-const dateOnlyBodySchema = createSchema((input) => {
-    const payload = ensureObjectStrict(input, ['date']);
-    return {
-        date: parseISODateField(payload.date, 'date')
-    };
-});
-
 const stepUpBodySchema = createSchema((input) => {
     const payload = ensureObjectStrict(input, ['password', 'action']);
     return {
@@ -1078,13 +1041,6 @@ function canUserAccessDoctor(user, doctorId) {
     return getUserManagedDoctorIds(user).includes(wanted);
 }
 
-function toISODateUTC(date) {
-    const y = date.getUTCFullYear();
-    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(date.getUTCDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-}
-
 function getUtcDateFromISO(dateStr) {
     const [year, month, day] = String(dateStr).split('-').map(Number);
     return new Date(Date.UTC(year, month - 1, day));
@@ -1100,15 +1056,6 @@ function isDateInDoctorRange(dateStr, monthsToShow) {
     const maxDate = new Date(todayUtc);
     maxDate.setUTCMonth(maxDate.getUTCMonth() + Number(monthsToShow || 1));
     return target <= maxDate;
-}
-
-function generateDoctorSlots(doctor) {
-    const settings = doctor?.bookingSettings || DEFAULT_BOOKING_SETTINGS;
-    return generateSlotsForWindow(
-        settings.workdayStart,
-        settings.workdayEnd,
-        settings.consultationDurationMinutes
-    );
 }
 
 function generateSlotsForWindow(workdayStart, workdayEnd, consultationDurationMinutes) {
@@ -1787,10 +1734,8 @@ const requireSuperadminOnly = requireRoles([ROLE.SUPERADMIN]);
 // =====================
 
 app.use('/api/auth/login', strictAuthLimiter);
-app.use('/api/auth/signup', strictAuthLimiter);
 app.use('/api/auth/refresh', refreshLimiter);
 app.use('/api/book', bookingLimiter);
-app.use('/api/appointments', bookingLimiter);
 app.use('/api/admin', adminLimiter);
 
 app.get('/debug/charset', requireSuperadminOnly, async (req, res) => {
@@ -1839,22 +1784,6 @@ app.post('/debug/charset', requireSuperadminOnly, async (req, res) => {
             error: 'Debug charset DB write/read failed.'
         });
     }
-});
-
-app.post('/api/auth/signup', async (req, res) => {
-    setAuthNoStore(res);
-    try {
-        await writeAuditLog(req, {
-            action: 'auth_signup_blocked',
-            result: 'denied',
-            targetType: 'endpoint',
-            targetId: '/api/auth/signup',
-            actorUser: null
-        });
-    } catch (_) {
-        // no-op: signup is disabled even if audit logging fails
-    }
-    return res.status(403).json({ error: 'Inregistrarea publica este dezactivata. Solicitati cont unui superadmin.' });
 });
 
 app.post('/api/auth/login', validateBody(loginBodySchema), async (req, res) => {
@@ -2189,10 +2118,10 @@ async function handleAppointmentBooking(req, res) {
 
         const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
 
-        executeEmailScript(base64Data).then(async ({ stdout, stderr }) => {
-            if (stdout) console.log(`[EMAIL STDOUT]: ${stdout}`);
-            if (stderr) console.error(`[EMAIL STDERR]: ${stderr}`);
-
+        executeEmailScript(base64Data).then(async (emailResult) => {
+            if (emailResult?.messageId) {
+                console.log(`[EMAIL SENT]: messageId=${emailResult.messageId}`);
+            }
             try {
                 await pgAppointments.setAppointmentEmailSentByPublicId(newAppointment._id, true);
             } catch (updateErr) {
@@ -2216,7 +2145,6 @@ async function handleAppointmentBooking(req, res) {
 }
 
 app.post('/api/book', optionalAuth, validateBody(bookBodySchema), handleAppointmentBooking);
-app.post('/api/appointments', optionalAuth, validateBody(bookBodySchema), handleAppointmentBooking);
 
 function sanitizeUserForAdmin(userDoc, doctorMap = new Map()) {
     const managedDoctorIds = normalizeManagedDoctorIds(userDoc.managedDoctorIds);
@@ -2385,71 +2313,6 @@ app.get('/api/admin/appointments', requireViewerSchedulerOrSuperadmin, async (re
     }
 });
 
-app.get('/api/admin/appointments/:id', requireViewerSchedulerOrSuperadmin, async (req, res) => {
-    setAuthNoStore(res);
-
-    const appointmentId = String(req.params.id || '').trim();
-    if (!LEGACY_OBJECT_ID_REGEX.test(appointmentId)) {
-        return res.status(400).json({ error: 'Programare invalida.' });
-    }
-
-    try {
-        const appointment = await pgAppointments.findAppointmentByPublicId(appointmentId);
-        if (!appointment) {
-            return res.status(404).json({ error: 'Programare negasita.' });
-        }
-        if (!canUserAccessDoctor(req.user, appointment.doctorId)) {
-            return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
-        }
-
-        await writeAuditLog(req, {
-            action: 'appointment_view',
-            result: 'success',
-            targetType: 'appointment',
-            targetId: appointmentId,
-            actorUser: req.user
-        });
-        return res.json(sanitizeAppointmentForAdminList(appointment));
-    } catch (_) {
-        return res.status(500).json({ error: 'Database error' });
-    }
-});
-
-app.get('/api/admin/appointments/:id/file-url', requireSchedulerOrSuperadmin, async (req, res) => {
-    setAuthNoStore(res);
-
-    const appointmentId = String(req.params.id || '').trim();
-    if (!LEGACY_OBJECT_ID_REGEX.test(appointmentId)) {
-        return res.status(400).json({ error: 'Programare invalida.' });
-    }
-
-    try {
-        const appointment = await pgAppointments.findAppointmentByPublicId(appointmentId);
-        if (!appointment) {
-            return res.status(404).json({ error: 'Programare negasita.' });
-        }
-        if (!canUserAccessDoctor(req.user, appointment.doctorId)) {
-            return res.status(403).json({ error: 'Acces interzis pentru acest medic.' });
-        }
-
-        await writeAuditLog(req, {
-            action: 'appointment_file_download_requested',
-            result: 'success',
-            targetType: 'appointment',
-            targetId: appointmentId,
-            actorUser: req.user
-        });
-
-        if (!ENABLE_DIAGNOSTIC_UPLOAD || !appointment.diagnosticFileMeta?.key) {
-            return res.status(404).json({ error: 'Documentul nu este disponibil pentru descarcare.' });
-        }
-
-        return res.status(501).json({ error: 'Generarea URL-urilor semnate nu este configurata in acest mediu.' });
-    } catch (_) {
-        return res.status(500).json({ error: 'Database error' });
-    }
-});
-
 app.post('/api/admin/resend-email/:id', requireSchedulerOrSuperadmin, async (req, res) => {
     setAuthNoStore(res);
 
@@ -2534,7 +2397,7 @@ app.post('/api/admin/reset', requireSuperadminOnly, requireStepUp('appointments_
     setAuthNoStore(res);
 
     try {
-        const deletedCount = await pgAppointments.withTransaction(async (client) => {
+        await pgAppointments.withTransaction(async (client) => {
             const count = await pgAppointments.deleteAllAppointments(client);
             await pgAppointments.createAuditLog({
                 action: 'appointments_reset',
@@ -2612,42 +2475,6 @@ app.delete('/api/admin/appointment/:id', requireSchedulerOrSuperadmin, async (re
             actorUser: req.user
         });
         return res.status(500).json({ error: 'Eroare la anularea programarii.' });
-    }
-});
-
-app.delete('/api/admin/appointments/by-date', requireSuperadminOnly, requireStepUp('appointments_delete_by_date'), validateBody(dateOnlyBodySchema), async (req, res) => {
-    setAuthNoStore(res);
-
-    try {
-        const { date } = req.validatedBody;
-        const deletedCount = await pgAppointments.withTransaction(async (client) => {
-            const count = await pgAppointments.deleteAppointmentsByDate(date, client);
-            await pgAppointments.createAuditLog({
-                action: 'appointments_delete_by_date',
-                result: 'success',
-                targetType: 'appointment_collection',
-                targetId: date,
-                actorUserPublicId: getUserPublicId(req.user) || req.user?._id || null,
-                actorRole: req.user?.role || 'anonymous',
-                ip: getClientIp(req),
-                userAgent: getUserAgent(req),
-                metadata: { deletedCount: count }
-            }, client);
-            return count;
-        });
-        return res.json({
-            success: true,
-            deletedCount,
-            message: `Au fost anulate ${deletedCount} programari pentru data ${date}.`
-        });
-    } catch (_) {
-        await writeAuditLog(req, {
-            action: 'appointments_delete_by_date',
-            result: 'failure',
-            targetType: 'appointment_collection',
-            actorUser: req.user
-        });
-        return res.status(500).json({ error: 'Eroare la anularea programarilor pe zi.' });
     }
 });
 
@@ -3266,46 +3093,6 @@ app.get('/api/admin/users', requireSuperadminOnly, async (req, res) => {
         });
         return res.json(normalizedUsers);
     } catch (_) {
-        return res.status(500).json({ error: 'Database error' });
-    }
-});
-
-app.post('/api/admin/users/role', requireSuperadminOnly, requireStepUp('user_role_change'), validateBody(roleUpdateBodySchema), async (req, res) => {
-    setAuthNoStore(res);
-
-    try {
-        const { userId, role } = req.validatedBody;
-
-        const user = await findUserById(userId);
-        if (!user) {
-            return res.status(404).json({ error: 'Utilizator negasit.' });
-        }
-
-        if (user.role === ROLE.SUPERADMIN) {
-            return res.status(403).json({ error: 'Rolul de Super Admin nu poate fi schimbat.' });
-        }
-
-        const previousRole = user.role;
-        user.role = role;
-        await persistUser(user);
-
-        await writeAuditLog(req, {
-            action: 'user_role_change',
-            result: 'success',
-            targetType: 'user',
-            targetId: String(user._id),
-            actorUser: req.user,
-            metadata: { previousRole, newRole: role }
-        });
-
-        return res.json({ success: true, message: `Rolul utilizatorului ${user.displayName} a fost actualizat la ${role}.` });
-    } catch (_) {
-        await writeAuditLog(req, {
-            action: 'user_role_change',
-            result: 'failure',
-            targetType: 'user',
-            actorUser: req.user
-        });
         return res.status(500).json({ error: 'Database error' });
     }
 });

@@ -1295,15 +1295,7 @@ async function unblockDoctorDateByLegacyId(legacyDoctorId, blockedDate, { actorU
 }
 
 module.exports = {
-    LEGACY_OBJECT_ID_REGEX,
     isUniqueViolation,
-    normalizeLegacyDoctorId,
-    normalizeWeekdays,
-    normalizeBlockedDates,
-    normalizeBookingSettings,
-    normalizeDayConfigs,
-    normalizeAvailabilityRules,
-    withTransaction,
     listDoctors,
     findDoctorByIdentifier,
     countDoctorsByLegacyIds,
