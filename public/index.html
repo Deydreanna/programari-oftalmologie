@@ -97,22 +97,22 @@
         <div class="max-w-3xl mx-auto px-6 py-4">
             <div class="flex items-center justify-between">
                 <!-- Step 1 -->
-                <div class="flex items-center gap-2" id="stepIndicator1">
+                <div class="step-indicator flex items-center gap-2" id="stepIndicator1">
                     <div class="step-dot active" id="stepDot1">1</div>
-                    <span class="text-sm font-semibold text-brand-300 hidden sm:inline">Alege Medic si Data</span>
+                    <span class="step-label text-sm font-semibold text-brand-300 hidden sm:inline">Alege Medic si Data</span>
                 </div>
                 <div class="step-line" id="stepLine1"></div>
                 <!-- Step 2 -->
-                <div class="flex items-center gap-2" id="stepIndicator2">
+                <div class="step-indicator flex items-center gap-2" id="stepIndicator2">
                     <div class="step-dot" id="stepDot2">2</div>
-                    <span class="text-sm font-semibold text-brand-400/50 hidden sm:inline" id="stepLabel2">Alege
+                    <span class="step-label text-sm font-semibold text-brand-400/50 hidden sm:inline" id="stepLabel2">Alege
                         Ora</span>
                 </div>
                 <div class="step-line" id="stepLine2"></div>
                 <!-- Step 3 -->
-                <div class="flex items-center gap-2" id="stepIndicator3">
+                <div class="step-indicator flex items-center gap-2" id="stepIndicator3">
                     <div class="step-dot" id="stepDot3">3</div>
-                    <span class="text-sm font-semibold text-brand-400/50 hidden sm:inline" id="stepLabel3">Date
+                    <span class="step-label text-sm font-semibold text-brand-400/50 hidden sm:inline" id="stepLabel3">Date
                         Personale</span>
                 </div>
             </div>
@@ -137,7 +137,7 @@
             </div>
             <div class="max-w-lg mx-auto">
                 <div id="calendar-card"
-                    class="bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 overflow-hidden">
+                    class="surface-card bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 overflow-hidden">
                     <div class="flex items-center justify-between px-6 py-5 bg-brand-700 border-b border-brand-600/20">
                         <button id="prevMonth" class="nav-btn" aria-label="Luna anterioara">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -179,7 +179,7 @@
                         class="text-brand-300 font-bold"></span></p>
             </div>
             <div class="max-w-2xl mx-auto">
-                <div class="bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 p-6 md:p-8">
+                <div id="slotsCard" class="surface-card bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 p-6 md:p-8">
                     <div id="slotsGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                         <!-- Slots rendered by JS -->
                     </div>
@@ -194,7 +194,7 @@
                     </div>
                 </div>
                 <button id="backToCalendar"
-                    class="mt-6 flex items-center gap-2 text-brand-400 font-semibold hover:text-brand-100 transition-colors mx-auto">
+                    class="flow-back-btn mt-6 flex items-center gap-2 text-brand-400 font-semibold hover:text-brand-100 transition-colors mx-auto">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7">
                         </path>
@@ -216,7 +216,7 @@
             </div>
             <div class="max-w-lg mx-auto">
                 <form id="bookingForm"
-                    class="bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 p-6 md:p-8 space-y-5">
+                    class="surface-card bg-brand-800 rounded-2xl shadow-xl border border-brand-600/20 p-6 md:p-8 space-y-5">
                     <input type="hidden" id="formDate">
                     <input type="hidden" id="formTime">
                     <input type="hidden" id="formDoctorId">
@@ -332,7 +332,7 @@
 
                     <!-- Submit -->
                     <button type="submit" id="submitBtn"
-                        class="w-full bg-brand-400 text-brand-900 py-4 rounded-xl font-bold text-lg hover:bg-brand-500 active:bg-brand-300 transition-all duration-200 flex justify-center items-center gap-3 shadow-lg shadow-brand-400/20 disabled:opacity-50 disabled:cursor-not-allowed">
+                        class="primary-cta w-full bg-brand-400 text-brand-900 py-4 rounded-xl font-bold text-lg hover:bg-brand-500 active:bg-brand-300 transition-all duration-200 flex justify-center items-center gap-3 shadow-lg shadow-brand-400/20 disabled:opacity-50 disabled:cursor-not-allowed">
                         <span>Confirma Programarea</span>
                         <svg id="loadingSpinner" class="animate-spin h-6 w-6 text-brand-900 hidden"
                             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -345,7 +345,7 @@
                     </button>
 
                     <button type="button" id="backToSlots"
-                        class="w-full flex items-center justify-center gap-2 text-brand-400 font-semibold hover:text-brand-100 transition-colors text-base py-2">
+                        class="flow-back-btn w-full flex items-center justify-center gap-2 text-brand-400 font-semibold hover:text-brand-100 transition-colors text-base py-2">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7">
                             </path>
@@ -367,7 +367,7 @@
         <div id="consentModal" class="consent-modal" role="dialog" aria-modal="true" aria-labelledby="consentModalTitle">
             <div class="consent-modal-header">
                 <h3 id="consentModalTitle" class="consent-modal-title">CONSIMTAMANT PENTRU PROTECTIA DATELOR</h3>
-                <button type="button" id="consentModalClose" class="consent-modal-close" aria-label="Inchide dialogul">×</button>
+                <button type="button" id="consentModalClose" class="consent-modal-close" aria-label="Inchide dialogul">&times;</button>
             </div>
             <div class="consent-modal-body custom-scrollbar">
                 <p>Prin exprimarea consimtamantului, declar ca am citit si am inteles informatiile privind prelucrarea datelor cu caracter personal de catre INSTITUTUL CLINIC DE URGENTE OFTALMOLOGICE "PROF. DR. MIRCEA OLTEANU", in scopul gestionarii programarilor medicale.</p>
@@ -443,6 +443,8 @@
 </body>
 
 </html>
+
+
 
 
 

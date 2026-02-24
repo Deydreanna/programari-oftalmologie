@@ -40,18 +40,24 @@
     </script>
     <style>
         .auth-card {
-            animation: fadeSlideIn 0.5s ease;
+            animation: fadeSlideIn 0.18s ease-out;
         }
 
         @keyframes fadeSlideIn {
             from {
                 opacity: 0;
-                transform: translateY(24px);
+                transform: translateY(14px);
             }
 
             to {
                 opacity: 1;
                 transform: translateY(0);
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .auth-card {
+                animation: none;
             }
         }
 
@@ -121,7 +127,7 @@
     <!-- Main -->
     <main class="flex-1 flex items-center justify-center px-4 py-12">
         <div class="w-full max-w-md">
-            <div class="auth-card bg-brand-800 rounded-2xl shadow-2xl border border-brand-600/20 p-8 md:p-10">
+            <div class="auth-card surface-card bg-brand-800 rounded-2xl shadow-2xl border border-brand-600/20 p-8 md:p-10">
 
                 <!-- Title -->
                 <div class="text-center mb-8">
@@ -192,7 +198,7 @@
 
                     <!-- Submit -->
                     <button type="submit" id="loginBtn"
-                        class="w-full bg-brand-400 text-brand-900 py-4 rounded-xl font-bold text-lg hover:bg-brand-500 active:bg-brand-300 transition-all duration-200 flex justify-center items-center gap-3 shadow-lg shadow-brand-400/20 disabled:opacity-50 disabled:cursor-not-allowed">
+                        class="primary-cta w-full bg-brand-400 text-brand-900 py-4 rounded-xl font-bold text-lg hover:bg-brand-500 active:bg-brand-300 transition-all duration-200 flex justify-center items-center gap-3 shadow-lg shadow-brand-400/20 disabled:opacity-50 disabled:cursor-not-allowed">
                         <span>Autentifica-te</span>
                         <svg id="loginSpinner" class="animate-spin h-5 w-5 text-brand-900 hidden"
                             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -214,7 +220,7 @@
 
                 <!-- Continue without auth -->
                 <a href="/"
-                    class="block w-full text-center py-3 rounded-xl border border-brand-600/30 text-brand-300 font-semibold hover:bg-brand-700 transition-colors text-sm">
+                    class="secondary-cta block w-full text-center py-3 rounded-xl border border-brand-600/30 text-brand-300 font-semibold hover:bg-brand-700 transition-colors text-sm">
                     Continua fara cont ->
                 </a>
 
