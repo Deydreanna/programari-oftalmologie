@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
         cancelDayAppointmentsBtn: byId('cancelDayAppointmentsBtn'),
         adminActionButtons: byId('adminActionButtons'),
         createUserCard: byId('createUserCard'),
+        toggleCreateUserBtn: byId('toggleCreateUserBtn'),
         createUserForm: byId('createUserForm'),
         newUserDisplayName: byId('newUserDisplayName'),
         newUserEmail: byId('newUserEmail'),
@@ -101,6 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let drawerAppointmentId = '';
     let searchTerm = '';
     let eventsBound = false;
+    let isCreateUserFormOpen = false;
     let isCreateDoctorFormOpen = false;
     let activeModalCleanup = null;
     let toastTimer = null;
@@ -1600,6 +1602,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             showToast('Succes', `Utilizatorul ${data.user?.displayName || payload.displayName} a fost creat.`);
             el.createUserForm.reset();
+            isCreateUserFormOpen = false;
+            updateCreateUserVisibility();
             await fetchUsers();
         } catch (_) {
             showToast('Eroare', 'Eroare de conexiune.', 'error');
@@ -1607,6 +1611,26 @@ document.addEventListener('DOMContentLoaded', () => {
             setButtonLoading(el.createUserSubmit, false);
         }
     }
+
+    function updateCreateUserVisibility({ focusForm = false } = {}) {
+        const canCreateUser = isSuperadmin();
+        const showForm = canCreateUser && isCreateUserFormOpen;
+
+        if (el.createUserCard) {
+            el.createUserCard.classList.toggle('hidden', !showForm);
+        }
+
+        if (el.toggleCreateUserBtn) {
+            el.toggleCreateUserBtn.classList.toggle('hidden', !canCreateUser);
+            el.toggleCreateUserBtn.textContent = showForm ? 'Ascunde formularul' : 'Creeaza utilizator nou';
+            el.toggleCreateUserBtn.setAttribute('aria-expanded', showForm ? 'true' : 'false');
+        }
+
+        if (showForm && focusForm) {
+            el.newUserDisplayName?.focus();
+        }
+    }
+
     async function createDoctor() {
         let dayConfigs;
         try {
@@ -2364,6 +2388,8 @@ document.addEventListener('DOMContentLoaded', () => {
         el.timelineContainer.classList.add('hidden');
         el.doctorManagerContainer.classList.add('hidden');
         el.userManagerContainer.classList.remove('hidden');
+        isCreateUserFormOpen = false;
+        updateCreateUserVisibility();
     }
 
     function showDoctorSection() {
@@ -2465,6 +2491,11 @@ document.addEventListener('DOMContentLoaded', () => {
         el.createUserForm.addEventListener('submit', async (event) => {
             event.preventDefault();
             createUser();
+        });
+
+        el.toggleCreateUserBtn?.addEventListener('click', () => {
+            isCreateUserFormOpen = !isCreateUserFormOpen;
+            updateCreateUserVisibility({ focusForm: isCreateUserFormOpen });
         });
 
         el.createDoctorForm?.addEventListener('submit', async (event) => {
@@ -2629,7 +2660,8 @@ document.addEventListener('DOMContentLoaded', () => {
         el.resetDatabaseBtn.classList.toggle('hidden', !superadmin);
         el.cancelDayAppointmentsBtn.classList.toggle('hidden', !superadmin);
         el.exportExcelBtn.classList.toggle('hidden', !superadmin);
-        el.createUserCard.classList.toggle('hidden', !superadmin);
+        isCreateUserFormOpen = false;
+        updateCreateUserVisibility();
         isCreateDoctorFormOpen = false;
         updateCreateDoctorVisibility();
 

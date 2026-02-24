@@ -206,7 +206,10 @@
                         <span class="admin-panel-title text-sm font-bold text-brand-100">Gestionare Utilizatori</span>
                         <p class="admin-panel-subtitle text-xs text-brand-300/70">Administrare conturi, roluri si asignari medici.</p>
                     </div>
-                    <button id="backToTimeline" class="admin-link-btn text-xs text-brand-400 font-bold hover:text-brand-100 transition-colors">Inapoi la programari</button>
+                    <div class="flex items-center gap-2">
+                        <button id="toggleCreateUserBtn" type="button" class="hidden admin-action-btn btn-primary" aria-controls="createUserCard" aria-expanded="false">Creeaza utilizator nou</button>
+                        <button id="backToTimeline" class="admin-link-btn text-xs text-brand-400 font-bold hover:text-brand-100 transition-colors">Inapoi la programari</button>
+                    </div>
                 </div>
 
                 <div id="createUserCard" class="hidden admin-form-card p-6 border-b border-brand-600/20 bg-brand-800/80">
