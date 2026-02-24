@@ -2229,14 +2229,25 @@ document.addEventListener('DOMContentLoaded', () => {
             slugCell.textContent = doctor.slug || '';
 
             const scheduleCell = document.createElement('td');
-            scheduleCell.className = 'py-4 cell-secondary cell-truncate';
-            const dayConfigs = getDoctorDayConfigs(doctor);
+            scheduleCell.className = 'py-4 cell-secondary';
+            const dayConfigs = getDoctorDayConfigs(doctor)
+                .slice()
+                .sort((a, b) => a.weekday - b.weekday);
             if (dayConfigs.length) {
-                const scheduleText = dayConfigs
-                    .map((config) => `${WEEKDAY_SHORT[config.weekday]} ${config.startTime}-${config.endTime} / ${config.consultationDurationMinutes}m`)
-                    .join('; ');
-                scheduleCell.textContent = scheduleText;
-                scheduleCell.title = scheduleText;
+                const scheduleRows = dayConfigs.map((config) => {
+                    const dayLabel = WEEKDAY_SHORT[config.weekday] || '-';
+                    return `${dayLabel} ${config.startTime}-${config.endTime} / ${config.consultationDurationMinutes}m`;
+                });
+                const scheduleList = document.createElement('div');
+                scheduleList.className = 'doctor-schedule-list';
+                scheduleRows.forEach((entry) => {
+                    const scheduleItem = document.createElement('div');
+                    scheduleItem.className = 'doctor-schedule-item';
+                    scheduleItem.textContent = entry;
+                    scheduleList.appendChild(scheduleItem);
+                });
+                scheduleCell.title = scheduleRows.join(' | ');
+                scheduleCell.appendChild(scheduleList);
             } else {
                 scheduleCell.textContent = '-';
             }

@@ -1024,6 +1024,18 @@ body.admin-panel-page .admin-table td.cell-secondary {
     overflow-wrap: anywhere;
 }
 
+body.admin-panel-page .doctor-schedule-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 180px;
+}
+
+body.admin-panel-page .doctor-schedule-item {
+    line-height: 1.35;
+    white-space: normal;
+}
+
 body.admin-panel-page .admin-action-group {
     justify-content: flex-end;
     gap: 6px;
