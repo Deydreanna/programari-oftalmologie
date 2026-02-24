@@ -316,17 +316,18 @@
                     </div>
 
                     <!-- GDPR -->
-                    <div class="p-4 bg-brand-700 rounded-xl border border-brand-600/30">
-                        <div class="flex items-start gap-3">
-                            <input type="checkbox" id="gdprConsent" required
-                                class="w-5 h-5 mt-0.5 rounded border-brand-600 accent-brand-400 focus:ring-brand-400">
-                            <label for="gdprConsent" class="text-sm text-brand-300 leading-relaxed">
-                                Sunt de acord cu <strong class="text-brand-100">prelucrarea datelor personale</strong>
-                                in conformitate cu
-                                Regulamentul (UE) 2016/679 (GDPR). Datele vor fi folosite exclusiv pentru gestionarea
-                                programarilor medicale. <span class="text-red-400">*</span>
-                            </label>
+                    <div class="consent-wrapper">
+                        <div class="consent-inline">
+                            <input type="checkbox" id="gdprConsent" required aria-describedby="consentError"
+                                class="consent-checkbox">
+                            <div class="consent-inline-text">
+                                <span>*Am citit politica privind </span>
+                                <button type="button" id="consentLink" class="consent-link"
+                                    aria-haspopup="dialog">Protecția datelor</button>
+                                <span> și sunt de acord cu prelucrarea acestora</span>
+                            </div>
                         </div>
+                        <p id="consentError" class="consent-error hidden" role="alert" aria-live="polite"></p>
                     </div>
 
                     <!-- Submit -->
@@ -361,6 +362,24 @@
         <p class="text-brand-400/50 mb-2">© 2026 INSTITUTUL CLINIC DE URGENTE OFTALMOLOGICE "PROF. DR. MIRCEA OLTEANU" - Toate drepturile rezervate</p>
         <a id="adminPanelLink" href="/adminpanel" class="hidden text-brand-400/50 hover:text-brand-300 transition-colors font-medium">Panou administrare</a>
     </footer>
+
+    <div id="consentModalOverlay" class="consent-modal-overlay hidden" aria-hidden="true">
+        <div id="consentModal" class="consent-modal" role="dialog" aria-modal="true" aria-labelledby="consentModalTitle">
+            <div class="consent-modal-header">
+                <h3 id="consentModalTitle" class="consent-modal-title">CONSIMȚĂMÂNT PENTRU PROTECȚIA DATELOR</h3>
+                <button type="button" id="consentModalClose" class="consent-modal-close" aria-label="Închide dialogul">×</button>
+            </div>
+            <div class="consent-modal-body custom-scrollbar">
+                <p>Prin exprimarea consimțământului, declar că am citit și am înțeles informațiile privind prelucrarea datelor cu caracter personal de către INSTITUTUL CLINIC DE URGENȚE OFTALMOLOGICE „PROF. DR. MIRCEA OLTEANU”, în scopul gestionării programărilor medicale.</p>
+                <p>Sunt de acord cu prelucrarea datelor de identificare și contact furnizate în formular (nume, prenume, telefon, e-mail, CNP), precum și a datelor strict necesare pentru confirmarea, organizarea și comunicarea aferentă programării.</p>
+                <p>Am fost informat(ă) că datele sunt prelucrate în condiții de confidențialitate și securitate, exclusiv de personal autorizat, pe durata necesară îndeplinirii scopurilor medicale și obligațiilor legale aplicabile.</p>
+                <p>Înțeleg că îmi pot exercita drepturile prevăzute de Regulamentul (UE) 2016/679 (GDPR), inclusiv dreptul de acces, rectificare, restricționare, opoziție, ștergere (în limitele legii) și dreptul de retragere a consimțământului, fără a afecta legalitatea prelucrării efectuate anterior retragerii.</p>
+            </div>
+            <div class="consent-modal-footer">
+                <button type="button" id="consentModalConfirm" class="consent-modal-confirm">Am citit și sunt de acord</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Admin Login Modal REMOVED - Using account role instead -->
 

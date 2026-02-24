@@ -42,6 +42,12 @@
     const loadingSpinner = byId('loadingSpinner');
     const backToSlots = byId('backToSlots');
     const gdprConsent = byId('gdprConsent');
+    const consentLink = byId('consentLink');
+    const consentModalOverlay = byId('consentModalOverlay');
+    const consentModal = byId('consentModal');
+    const consentModalClose = byId('consentModalClose');
+    const consentModalConfirm = byId('consentModalConfirm');
+    const consentError = byId('consentError');
 
     const typeSelector = byId('typeSelector');
     const typeInput = byId('type');
@@ -62,6 +68,7 @@
     let selectedDate = null;
     let selectedDoctor = null;
     let doctorList = [];
+    let lastConsentTrigger = null;
 
     function clearNode(node) {
         while (node.firstChild) {
@@ -92,6 +99,100 @@
         setTimeout(() => {
             toast.classList.add('translate-y-20', 'opacity-0');
         }, 12000);
+    }
+
+    function setConsentError(message = '') {
+        if (!consentError || !gdprConsent) return;
+
+        const hasError = !!String(message || '').trim();
+        consentError.textContent = hasError ? String(message) : '';
+        consentError.classList.toggle('hidden', !hasError);
+        gdprConsent.setAttribute('aria-invalid', hasError ? 'true' : 'false');
+    }
+
+    function clearConsentError() {
+        setConsentError('');
+    }
+
+    function isConsentModalOpen() {
+        return !!consentModalOverlay && !consentModalOverlay.classList.contains('hidden');
+    }
+
+    function openConsentModal() {
+        if (!consentModalOverlay) return;
+        lastConsentTrigger = document.activeElement;
+        consentModalOverlay.classList.remove('hidden');
+        consentModalOverlay.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('consent-modal-open');
+
+        if (consentModalClose) {
+            requestAnimationFrame(() => {
+                consentModalClose.focus();
+            });
+        }
+    }
+
+    function closeConsentModal({ restoreFocus = true } = {}) {
+        if (!consentModalOverlay) return;
+        consentModalOverlay.classList.add('hidden');
+        consentModalOverlay.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('consent-modal-open');
+
+        if (!restoreFocus) return;
+        const focusTarget = (lastConsentTrigger && typeof lastConsentTrigger.focus === 'function')
+            ? lastConsentTrigger
+            : consentLink;
+        if (focusTarget && typeof focusTarget.focus === 'function') {
+            focusTarget.focus();
+        }
+    }
+
+    function bindConsentUx() {
+        if (!gdprConsent || !consentLink || !consentModalOverlay || !consentModal || !consentModalClose || !consentModalConfirm) {
+            return;
+        }
+        if (consentLink.dataset.bound === '1') {
+            return;
+        }
+        consentLink.dataset.bound = '1';
+
+        consentLink.addEventListener('click', () => {
+            openConsentModal();
+        });
+
+        consentModalClose.addEventListener('click', () => {
+            closeConsentModal();
+        });
+
+        consentModalOverlay.addEventListener('click', (event) => {
+            if (event.target === consentModalOverlay) {
+                closeConsentModal();
+            }
+        });
+
+        consentModal.addEventListener('click', (event) => {
+            event.stopPropagation();
+        });
+
+        consentModalConfirm.addEventListener('click', () => {
+            gdprConsent.checked = true;
+            gdprConsent.dispatchEvent(new Event('input', { bubbles: true }));
+            gdprConsent.dispatchEvent(new Event('change', { bubbles: true }));
+            clearConsentError();
+            closeConsentModal();
+        });
+
+        gdprConsent.addEventListener('change', () => {
+            if (gdprConsent.checked) {
+                clearConsentError();
+            }
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && isConsentModalOpen()) {
+                closeConsentModal();
+            }
+        });
     }
 
     function toISODateLocal(date) {
@@ -620,6 +721,8 @@
         dropZone.classList.remove('hidden');
     });
 
+    bindConsentUx();
+
     bookingForm.addEventListener('submit', async (event) => {
         event.preventDefault();
 
@@ -630,9 +733,11 @@
         }
 
         if (!gdprConsent.checked) {
+            setConsentError('Pentru a continua, trebuie să confirmați consimțământul pentru prelucrarea datelor.');
             showToast('Atentie', 'Trebuie sa acceptati prelucrarea datelor personale (GDPR).', 'error');
             return;
         }
+        clearConsentError();
 
         const firstName = byId('firstName').value.trim();
         const lastName = byId('lastName').value.trim();
@@ -702,6 +807,7 @@
             fileUploadContainer.classList.add('hidden');
             filePreview.classList.add('hidden');
             dropZone.classList.remove('hidden');
+            clearConsentError();
 
             selectedDate = null;
             formDate.value = '';
