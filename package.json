@@ -4,7 +4,7 @@
     "description": "Ophthalmology Appointment System",
     "main": "server.js",
     "engines": {
-        "node": "20.x"
+        "node": "24.x"
     },
     "scripts": {
         "test": "npm run test:security",

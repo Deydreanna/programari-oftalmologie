@@ -5,7 +5,7 @@ Aplicatie Node.js + Express pentru programari oftalmologie, cu autentificare pe 
 Runtime-ul este **Postgres-only** (compatibil Neon). Suportul MongoDB a fost eliminat.
 
 ## Cerinte
-- Node.js `20.x`
+- Node.js `24.x`
 - O baza Postgres accesibila prin `DATABASE_URL` cu TLS activ
 
 ## Configurare mediu
