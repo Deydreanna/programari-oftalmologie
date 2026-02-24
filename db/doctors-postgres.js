@@ -17,6 +17,17 @@ const DEFAULT_BOOKING_SETTINGS = Object.freeze({
 
 const DEFAULT_AVAILABILITY_WEEKDAYS = Object.freeze([3]);
 const DEFAULT_SPECIALTY = 'Oftalmologie';
+const DOCTOR_EMAIL_FIELD_LIMITS = Object.freeze({
+    emailFromName: 120,
+    emailReplyTo: 254,
+    emailSubjectTemplate: 240,
+    emailHtmlTemplate: 20000,
+    emailTextTemplate: 20000,
+    emailSignature: 400,
+    emailClinicNameOverride: 240,
+    emailLocationOverride: 320,
+    emailContactPhoneOverride: 64
+});
 
 function isUniqueViolation(error) {
     return error?.code === '23505';
@@ -94,6 +105,31 @@ function normalizeWeekdays(value = []) {
         normalized.push(weekday);
     }
     return normalized.sort((a, b) => a - b);
+}
+
+function normalizeNullableString(value, maxLength) {
+    if (value === undefined || value === null) return null;
+    const normalized = String(value).trim();
+    if (!normalized) return null;
+    return normalized.slice(0, maxLength);
+}
+
+function normalizeDoctorEmailSettings(settings = {}) {
+    const payload = (settings && typeof settings === 'object' && !Array.isArray(settings))
+        ? settings
+        : {};
+    return {
+        emailEnabled: payload.emailEnabled !== false,
+        emailFromName: normalizeNullableString(payload.emailFromName, DOCTOR_EMAIL_FIELD_LIMITS.emailFromName),
+        emailReplyTo: normalizeNullableString(payload.emailReplyTo, DOCTOR_EMAIL_FIELD_LIMITS.emailReplyTo)?.toLowerCase() || null,
+        emailSubjectTemplate: normalizeNullableString(payload.emailSubjectTemplate, DOCTOR_EMAIL_FIELD_LIMITS.emailSubjectTemplate),
+        emailHtmlTemplate: normalizeNullableString(payload.emailHtmlTemplate, DOCTOR_EMAIL_FIELD_LIMITS.emailHtmlTemplate),
+        emailTextTemplate: normalizeNullableString(payload.emailTextTemplate, DOCTOR_EMAIL_FIELD_LIMITS.emailTextTemplate),
+        emailSignature: normalizeNullableString(payload.emailSignature, DOCTOR_EMAIL_FIELD_LIMITS.emailSignature),
+        emailClinicNameOverride: normalizeNullableString(payload.emailClinicNameOverride, DOCTOR_EMAIL_FIELD_LIMITS.emailClinicNameOverride),
+        emailLocationOverride: normalizeNullableString(payload.emailLocationOverride, DOCTOR_EMAIL_FIELD_LIMITS.emailLocationOverride),
+        emailContactPhoneOverride: normalizeNullableString(payload.emailContactPhoneOverride, DOCTOR_EMAIL_FIELD_LIMITS.emailContactPhoneOverride)
+    };
 }
 
 function parseHHMMToMinutes(value) {
@@ -273,6 +309,18 @@ function mapDoctorRow(row, { dayConfigs = [], blockedDates = [] } = {}) {
         timezone: row.timezone || DEFAULT_BOOKING_SETTINGS.timezone
     };
     const normalizedDayConfigs = normalizeDayConfigs(dayConfigs, bookingSettings, []);
+    const emailSettings = normalizeDoctorEmailSettings({
+        emailEnabled: row.email_enabled,
+        emailFromName: row.email_from_name,
+        emailReplyTo: row.email_reply_to,
+        emailSubjectTemplate: row.email_subject_template,
+        emailHtmlTemplate: row.email_html_template,
+        emailTextTemplate: row.email_text_template,
+        emailSignature: row.email_signature,
+        emailClinicNameOverride: row.email_clinic_name_override,
+        emailLocationOverride: row.email_location_override,
+        emailContactPhoneOverride: row.email_contact_phone_override
+    });
     return {
         _id: publicId,
         pgId: String(row.id),
@@ -286,6 +334,7 @@ function mapDoctorRow(row, { dayConfigs = [], blockedDates = [] } = {}) {
             weekdays: normalizedDayConfigs.map((config) => config.weekday),
             dayConfigs: normalizedDayConfigs
         },
+        emailSettings,
         blockedDates: normalizeBlockedDates(blockedDates),
         createdByUserId: row.created_by_public_id || null,
         updatedByUserId: row.updated_by_public_id || null,
@@ -330,6 +379,16 @@ async function queryDoctorRowByPgId(doctorPgId, client = null) {
             d.workday_end,
             d.months_to_show,
             d.timezone,
+            d.email_enabled,
+            d.email_from_name,
+            d.email_reply_to,
+            d.email_subject_template,
+            d.email_html_template,
+            d.email_text_template,
+            d.email_signature,
+            d.email_clinic_name_override,
+            d.email_location_override,
+            d.email_contact_phone_override,
             d.created_at,
             d.updated_at,
             COALESCE(u_created.legacy_mongo_id, u_created.id::text) AS created_by_public_id,
@@ -358,6 +417,16 @@ async function queryDoctorRowByLegacyId(legacyId, client = null) {
             d.workday_end,
             d.months_to_show,
             d.timezone,
+            d.email_enabled,
+            d.email_from_name,
+            d.email_reply_to,
+            d.email_subject_template,
+            d.email_html_template,
+            d.email_text_template,
+            d.email_signature,
+            d.email_clinic_name_override,
+            d.email_location_override,
+            d.email_contact_phone_override,
             d.created_at,
             d.updated_at,
             COALESCE(u_created.legacy_mongo_id, u_created.id::text) AS created_by_public_id,
@@ -829,6 +898,16 @@ async function listDoctors({ legacyIds = null, isActive = null } = {}, client = 
             d.workday_end,
             d.months_to_show,
             d.timezone,
+            d.email_enabled,
+            d.email_from_name,
+            d.email_reply_to,
+            d.email_subject_template,
+            d.email_html_template,
+            d.email_text_template,
+            d.email_signature,
+            d.email_clinic_name_override,
+            d.email_location_override,
+            d.email_contact_phone_override,
             d.created_at,
             d.updated_at,
             COALESCE(u_created.legacy_mongo_id, u_created.id::text) AS created_by_public_id,
@@ -874,6 +953,16 @@ async function findDoctorByIdentifier(rawIdentifier, { requireActive = true } = 
             d.workday_end,
             d.months_to_show,
             d.timezone,
+            d.email_enabled,
+            d.email_from_name,
+            d.email_reply_to,
+            d.email_subject_template,
+            d.email_html_template,
+            d.email_text_template,
+            d.email_signature,
+            d.email_clinic_name_override,
+            d.email_location_override,
+            d.email_contact_phone_override,
             d.created_at,
             d.updated_at,
             COALESCE(u_created.legacy_mongo_id, u_created.id::text) AS created_by_public_id,
@@ -916,6 +1005,7 @@ async function createDoctor({
     isActive = true,
     bookingSettings = DEFAULT_BOOKING_SETTINGS,
     availabilityRules = { weekdays: DEFAULT_AVAILABILITY_WEEKDAYS },
+    emailSettings = {},
     blockedDates = [],
     legacyPublicId = null,
     createdByUserPublicId = null,
@@ -936,6 +1026,7 @@ async function createDoctor({
         normalizedBookingSettings,
         normalizedAvailability.dayConfigs
     );
+    const normalizedEmailSettings = normalizeDoctorEmailSettings(emailSettings);
     const normalizedBlockedDates = normalizeBlockedDates(blockedDates);
 
     const task = async (txClient) => {
@@ -953,6 +1044,16 @@ async function createDoctor({
                 workday_end,
                 months_to_show,
                 timezone,
+                email_enabled,
+                email_from_name,
+                email_reply_to,
+                email_subject_template,
+                email_html_template,
+                email_text_template,
+                email_signature,
+                email_clinic_name_override,
+                email_location_override,
+                email_contact_phone_override,
                 created_by_user_id,
                 updated_by_user_id
             )
@@ -967,8 +1068,18 @@ async function createDoctor({
                 $8::time,
                 $9,
                 $10,
-                $11::uuid,
-                $12::uuid
+                $11,
+                $12,
+                $13,
+                $14,
+                $15,
+                $16,
+                $17,
+                $18,
+                $19,
+                $20,
+                $21::uuid,
+                $22::uuid
             )
             RETURNING id`,
             [
@@ -982,6 +1093,16 @@ async function createDoctor({
                 bookingSettingsForLegacyColumns.workdayEnd,
                 bookingSettingsForLegacyColumns.monthsToShow,
                 bookingSettingsForLegacyColumns.timezone,
+                normalizedEmailSettings.emailEnabled,
+                normalizedEmailSettings.emailFromName,
+                normalizedEmailSettings.emailReplyTo,
+                normalizedEmailSettings.emailSubjectTemplate,
+                normalizedEmailSettings.emailHtmlTemplate,
+                normalizedEmailSettings.emailTextTemplate,
+                normalizedEmailSettings.emailSignature,
+                normalizedEmailSettings.emailClinicNameOverride,
+                normalizedEmailSettings.emailLocationOverride,
+                normalizedEmailSettings.emailContactPhoneOverride,
                 createdByUserPgId,
                 updatedByUserPgId || createdByUserPgId
             ]
@@ -1026,6 +1147,11 @@ async function updateDoctorByLegacyId(legacyDoctorId, updates = {}, client = nul
         let mergedBookingSettings = normalizeBookingSettings({
             ...existingMapped.bookingSettings,
             ...(updates.bookingSettings || {})
+        });
+        const hasEmailSettingsUpdate = Object.prototype.hasOwnProperty.call(updates, 'emailSettings');
+        const mergedEmailSettings = normalizeDoctorEmailSettings({
+            ...existingMapped.emailSettings,
+            ...(hasEmailSettingsUpdate ? updates.emailSettings : {})
         });
 
         let availabilityToPersist = null;
@@ -1088,6 +1214,29 @@ async function updateDoctorByLegacyId(legacyDoctorId, updates = {}, client = nul
             params.push(mergedBookingSettings.monthsToShow);
             setClauses.push(`timezone = $${index++}`);
             params.push(mergedBookingSettings.timezone);
+        }
+
+        if (hasEmailSettingsUpdate) {
+            setClauses.push(`email_enabled = $${index++}`);
+            params.push(mergedEmailSettings.emailEnabled);
+            setClauses.push(`email_from_name = $${index++}`);
+            params.push(mergedEmailSettings.emailFromName);
+            setClauses.push(`email_reply_to = $${index++}`);
+            params.push(mergedEmailSettings.emailReplyTo);
+            setClauses.push(`email_subject_template = $${index++}`);
+            params.push(mergedEmailSettings.emailSubjectTemplate);
+            setClauses.push(`email_html_template = $${index++}`);
+            params.push(mergedEmailSettings.emailHtmlTemplate);
+            setClauses.push(`email_text_template = $${index++}`);
+            params.push(mergedEmailSettings.emailTextTemplate);
+            setClauses.push(`email_signature = $${index++}`);
+            params.push(mergedEmailSettings.emailSignature);
+            setClauses.push(`email_clinic_name_override = $${index++}`);
+            params.push(mergedEmailSettings.emailClinicNameOverride);
+            setClauses.push(`email_location_override = $${index++}`);
+            params.push(mergedEmailSettings.emailLocationOverride);
+            setClauses.push(`email_contact_phone_override = $${index++}`);
+            params.push(mergedEmailSettings.emailContactPhoneOverride);
         }
 
         const updatedByUserPgId = await queryUserPgIdByPublicId(updates.updatedByUserPublicId, txClient);

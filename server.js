@@ -6,7 +6,6 @@ const rateLimit = require('express-rate-limit');
 const xlsx = require('xlsx');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const path = require('path');
 const { validateBaseEnv } = require('./scripts/env-utils');
@@ -15,6 +14,7 @@ const { normalizeCnp, validateCnp, maskCnp } = require('./db/patient-crypto');
 const pgUsers = require('./db/users-postgres');
 const pgDoctors = require('./db/doctors-postgres');
 const pgAppointments = require('./db/appointments-postgres');
+const { sendBookingConfirmation } = require('./services/email/sendBookingConfirmation');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -583,6 +583,68 @@ function parseDoctorBlockedDates(value, { optional = false } = {}) {
     return normalized;
 }
 
+function parseOptionalNullableStringField(value, fieldName, { max = 1024 } = {}) {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    const parsed = parseStringField(value, fieldName, { min: 0, max });
+    return parsed ? parsed : null;
+}
+
+function parseDoctorEmailSettings(value, { optional = false } = {}) {
+    if (value === undefined && optional) return undefined;
+    const payload = ensureObjectStrict(value, [
+        'emailEnabled',
+        'emailFromName',
+        'emailReplyTo',
+        'emailSubjectTemplate',
+        'emailHtmlTemplate',
+        'emailTextTemplate',
+        'emailSignature',
+        'emailClinicNameOverride',
+        'emailLocationOverride',
+        'emailContactPhoneOverride'
+    ]);
+    const out = {};
+
+    if (payload.emailEnabled !== undefined) {
+        out.emailEnabled = parseBooleanField(payload.emailEnabled, 'emailSettings.emailEnabled');
+    }
+
+    const emailFromName = parseOptionalNullableStringField(payload.emailFromName, 'emailSettings.emailFromName', { max: 120 });
+    if (emailFromName !== undefined) out.emailFromName = emailFromName;
+
+    const emailReplyTo = parseOptionalNullableStringField(payload.emailReplyTo, 'emailSettings.emailReplyTo', { max: 254 });
+    if (emailReplyTo !== undefined) {
+        if (emailReplyTo && !validateEmail(emailReplyTo)) {
+            throw new Error('emailSettings.emailReplyTo format is invalid.');
+        }
+        out.emailReplyTo = emailReplyTo ? emailReplyTo.toLowerCase() : null;
+    }
+
+    const emailSubjectTemplate = parseOptionalNullableStringField(payload.emailSubjectTemplate, 'emailSettings.emailSubjectTemplate', { max: 240 });
+    if (emailSubjectTemplate !== undefined) out.emailSubjectTemplate = emailSubjectTemplate;
+
+    const emailHtmlTemplate = parseOptionalNullableStringField(payload.emailHtmlTemplate, 'emailSettings.emailHtmlTemplate', { max: 20000 });
+    if (emailHtmlTemplate !== undefined) out.emailHtmlTemplate = emailHtmlTemplate;
+
+    const emailTextTemplate = parseOptionalNullableStringField(payload.emailTextTemplate, 'emailSettings.emailTextTemplate', { max: 20000 });
+    if (emailTextTemplate !== undefined) out.emailTextTemplate = emailTextTemplate;
+
+    const emailSignature = parseOptionalNullableStringField(payload.emailSignature, 'emailSettings.emailSignature', { max: 400 });
+    if (emailSignature !== undefined) out.emailSignature = emailSignature;
+
+    const emailClinicNameOverride = parseOptionalNullableStringField(payload.emailClinicNameOverride, 'emailSettings.emailClinicNameOverride', { max: 240 });
+    if (emailClinicNameOverride !== undefined) out.emailClinicNameOverride = emailClinicNameOverride;
+
+    const emailLocationOverride = parseOptionalNullableStringField(payload.emailLocationOverride, 'emailSettings.emailLocationOverride', { max: 320 });
+    if (emailLocationOverride !== undefined) out.emailLocationOverride = emailLocationOverride;
+
+    const emailContactPhoneOverride = parseOptionalNullableStringField(payload.emailContactPhoneOverride, 'emailSettings.emailContactPhoneOverride', { max: 64 });
+    if (emailContactPhoneOverride !== undefined) out.emailContactPhoneOverride = emailContactPhoneOverride;
+
+    return out;
+}
+
 function parseDiagnosticFileMeta(value) {
     if (value === undefined) return undefined;
     const input = ensureObjectStrict(value, ['key', 'mime', 'size']);
@@ -678,7 +740,16 @@ const adminUpdateUserBodySchema = createSchema((input) => {
 });
 
 const doctorCreateBodySchema = createSchema((input) => {
-    const payload = ensureObjectStrict(input, ['slug', 'displayName', 'specialty', 'isActive', 'bookingSettings', 'availabilityRules', 'blockedDates']);
+    const payload = ensureObjectStrict(input, [
+        'slug',
+        'displayName',
+        'specialty',
+        'isActive',
+        'bookingSettings',
+        'availabilityRules',
+        'blockedDates',
+        'emailSettings'
+    ]);
     const bookingSettingsInput = payload.bookingSettings || DEFAULT_BOOKING_SETTINGS;
     const availabilityRulesInput = payload.availabilityRules || { weekdays: DEFAULT_AVAILABILITY_WEEKDAYS };
     return {
@@ -688,12 +759,22 @@ const doctorCreateBodySchema = createSchema((input) => {
         isActive: parseBooleanField(payload.isActive, 'isActive', { optional: true }) ?? true,
         bookingSettings: parseDoctorBookingSettings(bookingSettingsInput),
         availabilityRules: parseDoctorAvailabilityRules(availabilityRulesInput),
-        blockedDates: parseDoctorBlockedDates(payload.blockedDates || [])
+        blockedDates: parseDoctorBlockedDates(payload.blockedDates || []),
+        emailSettings: parseDoctorEmailSettings(payload.emailSettings, { optional: true })
     };
 });
 
 const doctorPatchBodySchema = createSchema((input) => {
-    const payload = ensureObjectStrict(input, ['slug', 'displayName', 'specialty', 'isActive', 'bookingSettings', 'availabilityRules', 'blockedDates']);
+    const payload = ensureObjectStrict(input, [
+        'slug',
+        'displayName',
+        'specialty',
+        'isActive',
+        'bookingSettings',
+        'availabilityRules',
+        'blockedDates',
+        'emailSettings'
+    ]);
     const out = {};
     if (payload.slug !== undefined) out.slug = parseDoctorSlugField(payload.slug, 'slug');
     if (payload.displayName !== undefined) out.displayName = parseStringField(payload.displayName, 'displayName', { min: 2, max: 120 });
@@ -702,6 +783,7 @@ const doctorPatchBodySchema = createSchema((input) => {
     if (payload.bookingSettings !== undefined) out.bookingSettings = parseDoctorBookingSettings(payload.bookingSettings);
     if (payload.availabilityRules !== undefined) out.availabilityRules = parseDoctorAvailabilityRules(payload.availabilityRules);
     if (payload.blockedDates !== undefined) out.blockedDates = parseDoctorBlockedDates(payload.blockedDates);
+    if (payload.emailSettings !== undefined) out.emailSettings = parseDoctorEmailSettings(payload.emailSettings);
     if (Object.keys(out).length === 0) {
         throw new Error('No updatable doctor fields provided.');
     }
@@ -1161,7 +1243,7 @@ function sanitizeDoctorForPublic(doctor) {
     };
 }
 
-function sanitizeDoctorForAdmin(doctor, { includeAudit = false } = {}) {
+function sanitizeDoctorForAdmin(doctor, { includeAudit = false, includeEmailSettings = false } = {}) {
     const dayConfigs = Array.isArray(doctor.availabilityRules?.dayConfigs)
         ? doctor.availabilityRules.dayConfigs
             .map((config) => ({
@@ -1195,6 +1277,21 @@ function sanitizeDoctorForAdmin(doctor, { includeAudit = false } = {}) {
         createdAt: doctor.createdAt,
         updatedAt: doctor.updatedAt
     };
+
+    if (includeEmailSettings) {
+        payload.emailSettings = {
+            emailEnabled: doctor.emailSettings?.emailEnabled !== false,
+            emailFromName: doctor.emailSettings?.emailFromName || null,
+            emailReplyTo: doctor.emailSettings?.emailReplyTo || null,
+            emailSubjectTemplate: doctor.emailSettings?.emailSubjectTemplate || null,
+            emailHtmlTemplate: doctor.emailSettings?.emailHtmlTemplate || null,
+            emailTextTemplate: doctor.emailSettings?.emailTextTemplate || null,
+            emailSignature: doctor.emailSettings?.emailSignature || null,
+            emailClinicNameOverride: doctor.emailSettings?.emailClinicNameOverride || null,
+            emailLocationOverride: doctor.emailSettings?.emailLocationOverride || null,
+            emailContactPhoneOverride: doctor.emailSettings?.emailContactPhoneOverride || null
+        };
+    }
 
     if (includeAudit) {
         payload.createdByUserId = doctor.createdByUserId || null;
@@ -1531,148 +1628,13 @@ const adminLimiter = rateLimit({
     message: { error: 'Prea multe cereri administrative de la acest IP.' }
 });
 
-async function executeEmailScript(base64Data) {
-    const smtpHost = process.env.EMAIL_SMTP_HOST || 'smtp.gmail.com';
-    const smtpPort = Number(process.env.EMAIL_SMTP_PORT || 587);
-    const smtpSecure = process.env.EMAIL_SMTP_SECURE === 'true';
-    const senderEmail = process.env.EMAIL_USER;
-    const senderPass = process.env.EMAIL_PASS;
-    const senderName = process.env.EMAIL_FROM_NAME || CLINIC_DISPLAY_NAME;
-
-    if (!senderEmail || !senderPass) {
-        throw new Error('EMAIL_USER and EMAIL_PASS are required.');
-    }
-
-    const appointmentData = JSON.parse(Buffer.from(base64Data, 'base64').toString('utf8'));
-    const { name, email, type, time, location } = appointmentData;
-    if (!name || !email || !type || !time || !location) {
-        throw new Error('Incomplete email payload.');
-    }
-
-    const [datePart, timePart] = time.split(' ');
-    if (!datePart || !timePart) {
-        throw new Error(`Invalid appointment time: ${time}`);
-    }
-    const [year, month, day] = datePart.split('-').map(Number);
-    const [hour, minute] = timePart.split(':').map(Number);
-    if ([year, month, day, hour, minute].some(Number.isNaN)) {
-        throw new Error(`Invalid date/time values: ${time}`);
-    }
-
-    const pad2 = (n) => String(n).padStart(2, '0');
-    const addMinutes = (y, mo, d, h, mi, delta) => {
-        const dt = new Date(Date.UTC(y, mo - 1, d, h, mi + delta, 0));
-        return {
-            year: dt.getUTCFullYear(),
-            month: dt.getUTCMonth() + 1,
-            day: dt.getUTCDate(),
-            hour: dt.getUTCHours(),
-            minute: dt.getUTCMinutes()
-        };
-    };
-    const toIcsLocal = ({ year: y, month: mo, day: d, hour: h, minute: mi }) =>
-        `${y}${pad2(mo)}${pad2(d)}T${pad2(h)}${pad2(mi)}00`;
-    const nowUtcStamp = () => {
-        const now = new Date();
-        return `${now.getUTCFullYear()}${pad2(now.getUTCMonth() + 1)}${pad2(now.getUTCDate())}T${pad2(now.getUTCHours())}${pad2(now.getUTCMinutes())}${pad2(now.getUTCSeconds())}Z`;
-    };
-    const escapeIcs = (value) =>
-        String(value || '')
-            .replace(/\\/g, '\\\\')
-            .replace(/\n/g, '\\n')
-            .replace(/;/g, '\\;')
-            .replace(/,/g, '\\,');
-
-    const start = { year, month, day, hour, minute };
-    const end = addMinutes(year, month, day, hour, minute, 30);
-    const uid = `${Date.now()}-${Math.random().toString(36).slice(2)}@antigravity`;
-    const dtStart = toIcsLocal(start);
-    const dtEnd = toIcsLocal(end);
-    const dtStamp = nowUtcStamp();
-    const dateRo = `${pad2(day)}.${pad2(month)}.${year}`;
-    const timeRo = `${pad2(hour)}:${pad2(minute)}`;
-    const summary = `Programare ${CLINIC_DISPLAY_NAME} - [${type}]`;
-
-    const icsContent = [
-        'BEGIN:VCALENDAR',
-        'PRODID:-//Antigravity Appointments//RO',
-        'VERSION:2.0',
-        'CALSCALE:GREGORIAN',
-        'METHOD:REQUEST',
-        'BEGIN:VTIMEZONE',
-        'TZID:Europe/Bucharest',
-        'BEGIN:STANDARD',
-        'TZOFFSETFROM:+0300',
-        'TZOFFSETTO:+0200',
-        'TZNAME:EET',
-        'DTSTART:19701025T040000',
-        'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
-        'END:STANDARD',
-        'BEGIN:DAYLIGHT',
-        'TZOFFSETFROM:+0200',
-        'TZOFFSETTO:+0300',
-        'TZNAME:EEST',
-        'DTSTART:19700329T030000',
-        'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU',
-        'END:DAYLIGHT',
-        'END:VTIMEZONE',
-        'BEGIN:VEVENT',
-        `UID:${uid}`,
-        `DTSTAMP:${dtStamp}`,
-        `DTSTART;TZID=Europe/Bucharest:${dtStart}`,
-        `DTEND;TZID=Europe/Bucharest:${dtEnd}`,
-        `SUMMARY:${escapeIcs(summary)}`,
-        `DESCRIPTION:${escapeIcs(`Pacient: ${name}\nTip: ${type}`)}`,
-        `LOCATION:${escapeIcs(location)}`,
-        'STATUS:CONFIRMED',
-        'BEGIN:VALARM',
-        'ACTION:DISPLAY',
-        'DESCRIPTION:Reminder',
-        'TRIGGER:-PT60M',
-        'END:VALARM',
-        'END:VEVENT',
-        'END:VCALENDAR'
-    ].join('\r\n');
-
-    const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpSecure,
-        auth: {
-            user: senderEmail,
-            pass: senderPass
-        }
+async function sendBookingConfirmationEmail({ appointment, doctor = null }) {
+    return sendBookingConfirmation({
+        appointment,
+        doctor,
+        clinicName: CLINIC_DISPLAY_NAME,
+        clinicLocation: CLINIC_LOCATION
     });
-
-    const htmlBody = `
-        <div style="font-family: Arial, sans-serif;">
-            <h2>Buna ziua, ${name}!</h2>
-            <p>Programarea dumneavoastra a fost confirmata cu succes.</p>
-            <ul>
-                <li><strong>Tip:</strong> ${type}</li>
-                <li><strong>Data si ora:</strong> ${dateRo} ${timeRo}</li>
-                <li><strong>Locatie:</strong> ${location}</li>
-            </ul>
-            <p>Gasiti atasata invitatia de calendar (.ics).</p>
-            <p>Multumim,<br/>Echipa ${senderName}</p>
-        </div>
-    `;
-
-    const info = await transporter.sendMail({
-        from: `"${senderName}" <${senderEmail}>`,
-        to: email,
-        subject: `Confirmare programare: ${summary}`,
-        html: htmlBody,
-        attachments: [
-            {
-                filename: 'invite.ics',
-                content: icsContent,
-                contentType: 'text/calendar; charset=UTF-8; method=REQUEST'
-            }
-        ]
-    });
-
-    return { messageId: info.messageId, envelope: info.envelope };
 }
 
 async function getAuthenticatedUser(req) {
@@ -2188,19 +2150,9 @@ async function handleAppointmentBooking(req, res) {
             }
         });
 
-        const appointmentData = {
-            name,
-            email,
-            type,
-            time: `${date} ${time}`,
-            location: CLINIC_LOCATION
-        };
-
-        const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
-
-        executeEmailScript(base64Data).then(async (emailResult) => {
+        sendBookingConfirmationEmail({ appointment: newAppointment, doctor }).then(async (emailResult) => {
             if (emailResult?.messageId) {
-                console.log(`[EMAIL SENT]: messageId=${emailResult.messageId}`);
+                console.log(`[EMAIL SENT]: messageId=${emailResult.messageId} template=${emailResult.templateSource || 'unknown'}`);
             }
             try {
                 await pgAppointments.setAppointmentEmailSentByPublicId(newAppointment._id, true);
@@ -2208,7 +2160,7 @@ async function handleAppointmentBooking(req, res) {
                 console.error('[EMAIL DB UPDATE ERROR]:', updateErr.message);
             }
         }).catch((error) => {
-            console.error(`[EMAIL FAILURE]:`, error?.stderr || error.message);
+            console.error('[EMAIL FAILURE]:', error?.message || 'send_failed');
         });
 
         return res.json({ success: true, message: 'Programare confirmata! Verificati e-mail-ul pentru invitatie.' });
@@ -2409,19 +2361,10 @@ app.post('/api/admin/resend-email/:id', requireSchedulerOrSuperadmin, async (req
         }
         if (!appointment.email) return res.status(400).json({ error: 'Clientul nu are e-mail.' });
 
-        const { name, email, type, date, time } = appointment;
-        const appointmentData = {
-            name,
-            email,
-            type,
-            time: `${date} ${time}`,
-            location: CLINIC_LOCATION
-        };
-
-        const base64Data = Buffer.from(JSON.stringify(appointmentData)).toString('base64');
+        const doctor = await resolveDoctorByIdentifier(appointment.doctorId, { requireActive: false });
 
         try {
-            await executeEmailScript(base64Data);
+            await sendBookingConfirmationEmail({ appointment, doctor });
             await pgAppointments.setAppointmentEmailSentByPublicId(appointment._id, true);
             await writeAuditLog(req, {
                 action: 'appointment_resend_email',
@@ -2438,11 +2381,11 @@ app.post('/api/admin/resend-email/:id', requireSchedulerOrSuperadmin, async (req
                 targetType: 'appointment',
                 targetId: appointmentId,
                 actorUser: req.user,
-                metadata: { reason: err?.message || 'send_failed' }
+                metadata: { reason: 'send_failed' }
             });
             return res.status(500).json({
                 error: 'Trimiterea a esuat.',
-                details: err?.stderr || err.message || 'Eroare necunoscuta'
+                details: 'Eroare la trimiterea emailului de confirmare.'
             });
         }
     } catch (_) {
@@ -2642,7 +2585,10 @@ app.get('/api/admin/doctors', requireViewerSchedulerOrSuperadmin, async (req, re
             actorUser: req.user,
             metadata: { count: doctors.length }
         });
-        return res.json(doctors.map((doctor) => sanitizeDoctorForAdmin(doctor, { includeAudit: isSuperadminUser(req.user) })));
+        return res.json(doctors.map((doctor) => sanitizeDoctorForAdmin(doctor, {
+            includeAudit: isSuperadminUser(req.user),
+            includeEmailSettings: isSuperadminUser(req.user)
+        })));
     } catch (error) {
         console.error('Admin doctors list error:', error?.message || error);
         return res.status(500).json({ error: 'Database error' });
@@ -2662,6 +2608,7 @@ app.post('/api/admin/doctors', requireSuperadminOnly, validateBody(doctorCreateB
             bookingSettings: payload.bookingSettings,
             availabilityRules: payload.availabilityRules,
             blockedDates: payload.blockedDates,
+            emailSettings: payload.emailSettings,
             createdByUserPublicId: getUserPublicId(req.user) || req.user?._id || null,
             updatedByUserPublicId: getUserPublicId(req.user) || req.user?._id || null
         });
@@ -2674,7 +2621,10 @@ app.post('/api/admin/doctors', requireSuperadminOnly, validateBody(doctorCreateB
             actorUser: req.user,
             metadata: { slug: doctor.slug }
         });
-        return res.status(201).json({ success: true, doctor: sanitizeDoctorForAdmin(doctor, { includeAudit: true }) });
+        return res.status(201).json({
+            success: true,
+            doctor: sanitizeDoctorForAdmin(doctor, { includeAudit: true, includeEmailSettings: true })
+        });
     } catch (error) {
         await writeAuditLog(req, {
             action: 'doctor_create',
@@ -2702,6 +2652,10 @@ app.patch('/api/admin/doctors/:id', requireSchedulerOrSuperadmin, validateBody(d
 
     try {
         const updates = req.validatedBody;
+        if (!isSuperadminUser(req.user) && updates.emailSettings !== undefined) {
+            return res.status(403).json({ error: 'Doar superadmin poate modifica setarile email ale medicului.' });
+        }
+
         const updateDoc = {};
         if (updates.slug !== undefined) updateDoc.slug = updates.slug;
         if (updates.displayName !== undefined) updateDoc.displayName = sanitizeInlineString(updates.displayName);
@@ -2710,6 +2664,7 @@ app.patch('/api/admin/doctors/:id', requireSchedulerOrSuperadmin, validateBody(d
         if (updates.bookingSettings !== undefined) updateDoc.bookingSettings = updates.bookingSettings;
         if (updates.availabilityRules !== undefined) updateDoc.availabilityRules = updates.availabilityRules;
         if (updates.blockedDates !== undefined) updateDoc.blockedDates = updates.blockedDates;
+        if (updates.emailSettings !== undefined) updateDoc.emailSettings = updates.emailSettings;
         updateDoc.updatedByUserPublicId = getUserPublicId(req.user) || req.user?._id || null;
 
         const doctor = await pgDoctors.updateDoctorByLegacyId(doctorId, updateDoc);
@@ -2727,7 +2682,13 @@ app.patch('/api/admin/doctors/:id', requireSchedulerOrSuperadmin, validateBody(d
             actorUser: req.user,
             metadata: { fields: Object.keys(updates || {}) }
         });
-        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(doctor, { includeAudit: true }) });
+        return res.json({
+            success: true,
+            doctor: sanitizeDoctorForAdmin(doctor, {
+                includeAudit: isSuperadminUser(req.user),
+                includeEmailSettings: isSuperadminUser(req.user)
+            })
+        });
     } catch (error) {
         await writeAuditLog(req, {
             action: 'doctor_update',
@@ -2831,7 +2792,10 @@ app.get('/api/admin/doctors/:id/day-schedule/:date', requireSchedulerOrSuperadmi
 
         return res.json({
             success: true,
-            doctor: sanitizeDoctorForAdmin(doctor, { includeAudit: isSuperadminUser(req.user) }),
+            doctor: sanitizeDoctorForAdmin(doctor, {
+                includeAudit: isSuperadminUser(req.user),
+                includeEmailSettings: isSuperadminUser(req.user)
+            }),
             date: rawDate,
             daySchedule: {
                 weekday: daySchedule.weekday,
@@ -2977,7 +2941,10 @@ app.patch('/api/admin/doctors/:id/day-schedule/:date', requireSchedulerOrSuperad
 
         return res.json({
             success: true,
-            doctor: refreshedDoctor ? sanitizeDoctorForAdmin(refreshedDoctor, { includeAudit: isSuperadminUser(req.user) }) : null,
+            doctor: refreshedDoctor ? sanitizeDoctorForAdmin(refreshedDoctor, {
+                includeAudit: isSuperadminUser(req.user),
+                includeEmailSettings: isSuperadminUser(req.user)
+            }) : null,
             date: rawDate,
             daySchedule: updatedDaySchedule
                 ? {
@@ -3039,7 +3006,13 @@ app.post('/api/admin/doctors/:id/block-date', requireSchedulerOrSuperadmin, vali
             actorUser: req.user,
             metadata: { date }
         });
-        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(doctor, { includeAudit: true }) });
+        return res.json({
+            success: true,
+            doctor: sanitizeDoctorForAdmin(doctor, {
+                includeAudit: isSuperadminUser(req.user),
+                includeEmailSettings: isSuperadminUser(req.user)
+            })
+        });
     } catch (_) {
         return res.status(500).json({ error: 'Eroare la blocarea zilei.' });
     }
@@ -3080,7 +3053,13 @@ app.delete('/api/admin/doctors/:id/block-date/:date', requireSchedulerOrSuperadm
             metadata: { date: rawDate }
         });
 
-        return res.json({ success: true, doctor: sanitizeDoctorForAdmin(doctor, { includeAudit: true }) });
+        return res.json({
+            success: true,
+            doctor: sanitizeDoctorForAdmin(doctor, {
+                includeAudit: isSuperadminUser(req.user),
+                includeEmailSettings: isSuperadminUser(req.user)
+            })
+        });
     } catch (_) {
         return res.status(500).json({ error: 'Eroare la reactivarea zilei.' });
     }

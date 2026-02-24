@@ -312,6 +312,54 @@
                             <div id="doctorDayConfigList" class="space-y-2"></div>
                             <p class="text-xs text-brand-400/70 mt-2">Regula: intervalul trebuie sa fie divizibil perfect la durata consultatiei.</p>
                         </div>
+                        <div id="doctorEmailSettingsSection" class="md:col-span-4 space-y-3 border border-brand-600/20 rounded-xl p-4 bg-brand-700/40">
+                            <div>
+                                <p class="form-label mb-1">Setari email confirmare</p>
+                                <p class="text-xs text-brand-400/70">Placeholder-uri disponibile: {{doctorName}}, {{appointmentDate}}, {{appointmentTime}}, {{patientName}}, {{clinicName}}, {{doctorSignature}}, {{contactPhone}}, {{location}}</p>
+                            </div>
+                            <label class="flex items-center gap-2 text-sm text-brand-300 font-semibold">
+                                <input id="doctorEmailEnabled" type="checkbox" class="w-4 h-4 rounded border-brand-600 accent-brand-500" checked>
+                                Foloseste configurarea email personalizata pentru acest medic
+                            </label>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div>
+                                    <label for="doctorEmailFromName" class="form-label">Nume expeditor email (optional)</label>
+                                    <input id="doctorEmailFromName" type="text" class="form-input" placeholder="Ex: Clinica Dr. Popescu">
+                                </div>
+                                <div>
+                                    <label for="doctorEmailReplyTo" class="form-label">Reply-To (optional)</label>
+                                    <input id="doctorEmailReplyTo" type="email" class="form-input" placeholder="contact@exemplu.ro">
+                                </div>
+                                <div class="md:col-span-2">
+                                    <label for="doctorEmailSubjectTemplate" class="form-label">Subiect email confirmare (template optional)</label>
+                                    <textarea id="doctorEmailSubjectTemplate" class="form-input min-h-[70px]" placeholder="Ex: Confirmare programare - {{doctorName}} - {{appointmentDate}}"></textarea>
+                                </div>
+                                <div class="md:col-span-2">
+                                    <label for="doctorEmailHtmlTemplate" class="form-label">Template HTML email (optional)</label>
+                                    <textarea id="doctorEmailHtmlTemplate" class="form-input min-h-[140px]" placeholder="<p>Buna ziua, {{patientName}}...</p>"></textarea>
+                                </div>
+                                <div class="md:col-span-2">
+                                    <label for="doctorEmailTextTemplate" class="form-label">Template text email (optional)</label>
+                                    <textarea id="doctorEmailTextTemplate" class="form-input min-h-[120px]" placeholder="Buna ziua, {{patientName}}..."></textarea>
+                                </div>
+                                <div class="md:col-span-2">
+                                    <label for="doctorEmailSignature" class="form-label">Semnatura email (optional)</label>
+                                    <textarea id="doctorEmailSignature" class="form-input min-h-[80px]" placeholder="Cu stima,&#10;Dr. {{doctorName}}"></textarea>
+                                </div>
+                                <div>
+                                    <label for="doctorEmailClinicNameOverride" class="form-label">Nume clinica (override optional)</label>
+                                    <input id="doctorEmailClinicNameOverride" type="text" class="form-input">
+                                </div>
+                                <div>
+                                    <label for="doctorEmailLocationOverride" class="form-label">Locatie (override optional)</label>
+                                    <input id="doctorEmailLocationOverride" type="text" class="form-input">
+                                </div>
+                                <div>
+                                    <label for="doctorEmailContactPhoneOverride" class="form-label">Telefon contact (override optional)</label>
+                                    <input id="doctorEmailContactPhoneOverride" type="text" class="form-input" placeholder="Ex: 021 000 00 00">
+                                </div>
+                            </div>
+                        </div>
                         <div class="md:col-span-4">
                             <button id="createDoctorSubmit" type="submit" class="admin-action-btn btn-primary">Creeaza medic</button>
                         </div>

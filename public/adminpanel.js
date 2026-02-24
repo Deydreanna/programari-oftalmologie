@@ -51,6 +51,17 @@ document.addEventListener('DOMContentLoaded', () => {
         doctorIsActive: byId('doctorIsActive'),
         doctorMonthsToShow: byId('doctorMonthsToShow'),
         doctorDayConfigList: byId('doctorDayConfigList'),
+        doctorEmailSettingsSection: byId('doctorEmailSettingsSection'),
+        doctorEmailEnabled: byId('doctorEmailEnabled'),
+        doctorEmailFromName: byId('doctorEmailFromName'),
+        doctorEmailReplyTo: byId('doctorEmailReplyTo'),
+        doctorEmailSubjectTemplate: byId('doctorEmailSubjectTemplate'),
+        doctorEmailHtmlTemplate: byId('doctorEmailHtmlTemplate'),
+        doctorEmailTextTemplate: byId('doctorEmailTextTemplate'),
+        doctorEmailSignature: byId('doctorEmailSignature'),
+        doctorEmailClinicNameOverride: byId('doctorEmailClinicNameOverride'),
+        doctorEmailLocationOverride: byId('doctorEmailLocationOverride'),
+        doctorEmailContactPhoneOverride: byId('doctorEmailContactPhoneOverride'),
         adminCalendarGrid: byId('adminCalendarGrid'),
         adminCalendarMonthLabel: byId('adminCalendarMonthLabel'),
         adminCalendarPrevMonth: byId('adminCalendarPrevMonth'),
@@ -783,6 +794,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function collectDoctorDayConfigsFromForm() {
         return collectDayConfigsFromContainer(el.doctorDayConfigList);
+    }
+
+    function normalizeOptionalTemplateInput(rawValue) {
+        const normalized = String(rawValue || '').trim();
+        return normalized ? normalized : null;
+    }
+
+    function buildDoctorEmailSettingsPayloadFromCreateForm() {
+        if (!isSuperadmin()) {
+            return undefined;
+        }
+
+        const emailEnabled = !!el.doctorEmailEnabled?.checked;
+        const emailFromName = normalizeOptionalTemplateInput(el.doctorEmailFromName?.value);
+        const emailReplyTo = normalizeOptionalTemplateInput(el.doctorEmailReplyTo?.value);
+        const emailSubjectTemplate = normalizeOptionalTemplateInput(el.doctorEmailSubjectTemplate?.value);
+        const emailHtmlTemplate = normalizeOptionalTemplateInput(el.doctorEmailHtmlTemplate?.value);
+        const emailTextTemplate = normalizeOptionalTemplateInput(el.doctorEmailTextTemplate?.value);
+        const emailSignature = normalizeOptionalTemplateInput(el.doctorEmailSignature?.value);
+        const emailClinicNameOverride = normalizeOptionalTemplateInput(el.doctorEmailClinicNameOverride?.value);
+        const emailLocationOverride = normalizeOptionalTemplateInput(el.doctorEmailLocationOverride?.value);
+        const emailContactPhoneOverride = normalizeOptionalTemplateInput(el.doctorEmailContactPhoneOverride?.value);
+
+        const payload = { emailEnabled };
+        if (emailFromName) payload.emailFromName = emailFromName;
+        if (emailReplyTo) payload.emailReplyTo = emailReplyTo;
+        if (emailSubjectTemplate) payload.emailSubjectTemplate = emailSubjectTemplate;
+        if (emailHtmlTemplate) payload.emailHtmlTemplate = emailHtmlTemplate;
+        if (emailTextTemplate) payload.emailTextTemplate = emailTextTemplate;
+        if (emailSignature) payload.emailSignature = emailSignature;
+        if (emailClinicNameOverride) payload.emailClinicNameOverride = emailClinicNameOverride;
+        if (emailLocationOverride) payload.emailLocationOverride = emailLocationOverride;
+        if (emailContactPhoneOverride) payload.emailContactPhoneOverride = emailContactPhoneOverride;
+        return payload;
     }
 
     function setupAdminSearch() {
@@ -1671,6 +1716,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const firstConfig = dayConfigs[0];
+        const emailSettings = buildDoctorEmailSettingsPayloadFromCreateForm();
         const payload = {
             slug: el.doctorSlug.value.trim().toLowerCase(),
             displayName: el.doctorDisplayName.value.trim(),
@@ -1687,11 +1733,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 weekdays: dayConfigs.map((config) => config.weekday),
                 dayConfigs
             },
-            blockedDates: []
+            blockedDates: [],
+            emailSettings
         };
 
         if (!payload.slug || !payload.displayName) {
             showToast('Eroare', 'Slug si nume afisat sunt obligatorii.', 'error');
+            return;
+        }
+        if (payload.emailSettings?.emailReplyTo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.emailSettings.emailReplyTo)) {
+            showToast('Eroare', 'Reply-To are format invalid.', 'error');
             return;
         }
 
@@ -1725,6 +1776,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (el.createDoctorCard) {
             el.createDoctorCard.classList.toggle('hidden', !showForm);
+        }
+
+        if (el.doctorEmailSettingsSection) {
+            el.doctorEmailSettingsSection.classList.toggle('hidden', !canCreateDoctor);
         }
 
         if (el.toggleCreateDoctorBtn) {
@@ -1774,6 +1829,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 resolve(null);
                 return;
             }
+            const canEditEmailSettings = isSuperadmin();
+            let emailEnabledInput = null;
+            let emailFromNameInput = null;
+            let emailReplyToInput = null;
+            let emailSubjectTemplateInput = null;
+            let emailHtmlTemplateInput = null;
+            let emailTextTemplateInput = null;
+            let emailSignatureInput = null;
+            let emailClinicNameOverrideInput = null;
+            let emailLocationOverrideInput = null;
+            let emailContactPhoneOverrideInput = null;
 
             const grid = document.createElement('div');
             grid.className = 'admin-modal-grid';
@@ -1813,6 +1879,91 @@ document.addEventListener('DOMContentLoaded', () => {
             grid.appendChild(createModalField('Activ', activeSelect));
 
             modal.body.appendChild(grid);
+
+            if (canEditEmailSettings) {
+                const existingEmailSettings = (doctor.emailSettings && typeof doctor.emailSettings === 'object')
+                    ? doctor.emailSettings
+                    : {};
+
+                const emailSection = document.createElement('div');
+                emailSection.className = 'space-y-3 border border-brand-600/20 rounded-xl p-4 bg-brand-700/30 mt-4';
+
+                const emailTitle = document.createElement('p');
+                emailTitle.className = 'form-label';
+                emailTitle.textContent = 'Setari email confirmare';
+                emailSection.appendChild(emailTitle);
+
+                const placeholdersHelper = document.createElement('p');
+                placeholdersHelper.className = 'admin-modal-helper';
+                placeholdersHelper.textContent = 'Placeholder-uri disponibile: {{doctorName}}, {{appointmentDate}}, {{appointmentTime}}, {{patientName}}, {{clinicName}}, {{doctorSignature}}, {{contactPhone}}, {{location}}';
+                emailSection.appendChild(placeholdersHelper);
+
+                const enabledWrap = document.createElement('label');
+                enabledWrap.className = 'flex items-center gap-2 text-sm text-brand-300 font-semibold';
+                emailEnabledInput = document.createElement('input');
+                emailEnabledInput.type = 'checkbox';
+                emailEnabledInput.className = 'w-4 h-4 rounded border-brand-600 accent-brand-500';
+                emailEnabledInput.checked = existingEmailSettings.emailEnabled !== false;
+                enabledWrap.appendChild(emailEnabledInput);
+                enabledWrap.appendChild(document.createTextNode('Foloseste configurarea email personalizata pentru acest medic'));
+                emailSection.appendChild(enabledWrap);
+
+                const emailGrid = document.createElement('div');
+                emailGrid.className = 'admin-modal-grid';
+
+                emailFromNameInput = document.createElement('input');
+                emailFromNameInput.type = 'text';
+                emailFromNameInput.className = 'form-input';
+                emailFromNameInput.value = String(existingEmailSettings.emailFromName || '');
+                emailGrid.appendChild(createModalField('Nume expeditor email (optional)', emailFromNameInput));
+
+                emailReplyToInput = document.createElement('input');
+                emailReplyToInput.type = 'email';
+                emailReplyToInput.className = 'form-input';
+                emailReplyToInput.value = String(existingEmailSettings.emailReplyTo || '');
+                emailGrid.appendChild(createModalField('Reply-To (optional)', emailReplyToInput));
+
+                emailSubjectTemplateInput = document.createElement('textarea');
+                emailSubjectTemplateInput.className = 'form-input min-h-[72px]';
+                emailSubjectTemplateInput.value = String(existingEmailSettings.emailSubjectTemplate || '');
+                emailGrid.appendChild(createModalField('Subiect email confirmare (template optional)', emailSubjectTemplateInput));
+
+                emailHtmlTemplateInput = document.createElement('textarea');
+                emailHtmlTemplateInput.className = 'form-input min-h-[140px]';
+                emailHtmlTemplateInput.value = String(existingEmailSettings.emailHtmlTemplate || '');
+                emailGrid.appendChild(createModalField('Template HTML email (optional)', emailHtmlTemplateInput));
+
+                emailTextTemplateInput = document.createElement('textarea');
+                emailTextTemplateInput.className = 'form-input min-h-[120px]';
+                emailTextTemplateInput.value = String(existingEmailSettings.emailTextTemplate || '');
+                emailGrid.appendChild(createModalField('Template text email (optional)', emailTextTemplateInput));
+
+                emailSignatureInput = document.createElement('textarea');
+                emailSignatureInput.className = 'form-input min-h-[82px]';
+                emailSignatureInput.value = String(existingEmailSettings.emailSignature || '');
+                emailGrid.appendChild(createModalField('Semnatura email (optional)', emailSignatureInput));
+
+                emailClinicNameOverrideInput = document.createElement('input');
+                emailClinicNameOverrideInput.type = 'text';
+                emailClinicNameOverrideInput.className = 'form-input';
+                emailClinicNameOverrideInput.value = String(existingEmailSettings.emailClinicNameOverride || '');
+                emailGrid.appendChild(createModalField('Nume clinica (override optional)', emailClinicNameOverrideInput));
+
+                emailLocationOverrideInput = document.createElement('input');
+                emailLocationOverrideInput.type = 'text';
+                emailLocationOverrideInput.className = 'form-input';
+                emailLocationOverrideInput.value = String(existingEmailSettings.emailLocationOverride || '');
+                emailGrid.appendChild(createModalField('Locatie (override optional)', emailLocationOverrideInput));
+
+                emailContactPhoneOverrideInput = document.createElement('input');
+                emailContactPhoneOverrideInput.type = 'text';
+                emailContactPhoneOverrideInput.className = 'form-input';
+                emailContactPhoneOverrideInput.value = String(existingEmailSettings.emailContactPhoneOverride || '');
+                emailGrid.appendChild(createModalField('Telefon contact (override optional)', emailContactPhoneOverrideInput));
+
+                emailSection.appendChild(emailGrid);
+                modal.body.appendChild(emailSection);
+            }
 
             const scheduleToggleWrap = document.createElement('label');
             scheduleToggleWrap.className = 'flex items-center gap-2 text-sm text-brand-300 font-semibold';
@@ -1897,6 +2048,26 @@ document.addEventListener('DOMContentLoaded', () => {
                         workdayEnd: doctor.bookingSettings?.workdayEnd || '14:00',
                         monthsToShow,
                         timezone: doctor.bookingSettings?.timezone || 'Europe/Bucharest'
+                    };
+                }
+
+                if (canEditEmailSettings) {
+                    const emailReplyTo = normalizeOptionalTemplateInput(emailReplyToInput?.value);
+                    if (emailReplyTo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailReplyTo)) {
+                        modal.setError('Reply-To are format invalid.');
+                        return;
+                    }
+                    nextPayload.emailSettings = {
+                        emailEnabled: !!emailEnabledInput?.checked,
+                        emailFromName: normalizeOptionalTemplateInput(emailFromNameInput?.value),
+                        emailReplyTo: emailReplyTo || null,
+                        emailSubjectTemplate: normalizeOptionalTemplateInput(emailSubjectTemplateInput?.value),
+                        emailHtmlTemplate: normalizeOptionalTemplateInput(emailHtmlTemplateInput?.value),
+                        emailTextTemplate: normalizeOptionalTemplateInput(emailTextTemplateInput?.value),
+                        emailSignature: normalizeOptionalTemplateInput(emailSignatureInput?.value),
+                        emailClinicNameOverride: normalizeOptionalTemplateInput(emailClinicNameOverrideInput?.value),
+                        emailLocationOverride: normalizeOptionalTemplateInput(emailLocationOverrideInput?.value),
+                        emailContactPhoneOverride: normalizeOptionalTemplateInput(emailContactPhoneOverrideInput?.value)
                     };
                 }
 
