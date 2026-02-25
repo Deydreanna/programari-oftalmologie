@@ -62,6 +62,12 @@ document.addEventListener('DOMContentLoaded', () => {
         doctorEmailClinicNameOverride: byId('doctorEmailClinicNameOverride'),
         doctorEmailLocationOverride: byId('doctorEmailLocationOverride'),
         doctorEmailContactPhoneOverride: byId('doctorEmailContactPhoneOverride'),
+        doctorEmailPresetSelect: byId('doctorEmailPresetSelect'),
+        doctorEmailPresetApplyBtn: byId('doctorEmailPresetApplyBtn'),
+        doctorEmailPresetResetBtn: byId('doctorEmailPresetResetBtn'),
+        doctorEmailTestTo: byId('doctorEmailTestTo'),
+        doctorEmailTestSendBtn: byId('doctorEmailTestSendBtn'),
+        doctorEmailPreviewBtn: byId('doctorEmailPreviewBtn'),
         adminCalendarGrid: byId('adminCalendarGrid'),
         adminCalendarMonthLabel: byId('adminCalendarMonthLabel'),
         adminCalendarPrevMonth: byId('adminCalendarPrevMonth'),
@@ -115,6 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let isCreateUserFormOpen = false;
     let isCreateDoctorFormOpen = false;
     let activeModalCleanup = null;
+    let emailPreviewModalCleanup = null;
     let toastTimer = null;
 
     const WEEKDAY_LABELS = ['Duminica', 'Luni', 'Marti', 'Miercuri', 'Joi', 'Vineri', 'Sambata'];
@@ -126,6 +133,20 @@ document.addEventListener('DOMContentLoaded', () => {
         danger: 'admin-action-btn btn-danger',
         ghost: 'admin-action-btn btn-ghost'
     });
+    const EMAIL_TEMPLATE_PRESETS = Array.isArray(window.EMAIL_TEMPLATE_PRESETS)
+        ? window.EMAIL_TEMPLATE_PRESETS
+        : [];
+    const EMAIL_TEMPLATE_PRESET_MAP = new Map(
+        EMAIL_TEMPLATE_PRESETS
+            .map((preset) => {
+                if (!preset || typeof preset !== 'object' || Array.isArray(preset)) return null;
+                const id = String(preset.id || '').trim();
+                if (!id) return null;
+                return [id, preset];
+            })
+            .filter(Boolean)
+    );
+    const SIMPLE_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     const isStaffRole = (role) => role === 'viewer' || role === 'scheduler' || role === 'superadmin';
     const isSuperadmin = () => (AUTH.getUser()?.role || '') === 'superadmin';
@@ -801,23 +822,38 @@ document.addEventListener('DOMContentLoaded', () => {
         return normalized ? normalized : null;
     }
 
-    function buildDoctorEmailSettingsPayloadFromCreateForm() {
-        if (!isSuperadmin()) {
-            return undefined;
-        }
+    function isValidEmailInput(value) {
+        const normalized = String(value || '').trim();
+        if (!normalized) return false;
+        return SIMPLE_EMAIL_REGEX.test(normalized);
+    }
 
-        const emailEnabled = !!el.doctorEmailEnabled?.checked;
-        const emailFromName = normalizeOptionalTemplateInput(el.doctorEmailFromName?.value);
-        const emailReplyTo = normalizeOptionalTemplateInput(el.doctorEmailReplyTo?.value);
-        const emailSubjectTemplate = normalizeOptionalTemplateInput(el.doctorEmailSubjectTemplate?.value);
-        const emailHtmlTemplate = normalizeOptionalTemplateInput(el.doctorEmailHtmlTemplate?.value);
-        const emailTextTemplate = normalizeOptionalTemplateInput(el.doctorEmailTextTemplate?.value);
-        const emailSignature = normalizeOptionalTemplateInput(el.doctorEmailSignature?.value);
-        const emailClinicNameOverride = normalizeOptionalTemplateInput(el.doctorEmailClinicNameOverride?.value);
-        const emailLocationOverride = normalizeOptionalTemplateInput(el.doctorEmailLocationOverride?.value);
-        const emailContactPhoneOverride = normalizeOptionalTemplateInput(el.doctorEmailContactPhoneOverride?.value);
+    function buildDoctorEmailSettingsPayloadFromInputs({
+        emailEnabledInput = null,
+        emailFromNameInput = null,
+        emailReplyToInput = null,
+        emailSubjectTemplateInput = null,
+        emailHtmlTemplateInput = null,
+        emailTextTemplateInput = null,
+        emailSignatureInput = null,
+        emailClinicNameOverrideInput = null,
+        emailLocationOverrideInput = null,
+        emailContactPhoneOverrideInput = null
+    } = {}) {
+        const payload = {
+            emailEnabled: !!emailEnabledInput?.checked
+        };
 
-        const payload = { emailEnabled };
+        const emailFromName = normalizeOptionalTemplateInput(emailFromNameInput?.value);
+        const emailReplyTo = normalizeOptionalTemplateInput(emailReplyToInput?.value);
+        const emailSubjectTemplate = normalizeOptionalTemplateInput(emailSubjectTemplateInput?.value);
+        const emailHtmlTemplate = normalizeOptionalTemplateInput(emailHtmlTemplateInput?.value);
+        const emailTextTemplate = normalizeOptionalTemplateInput(emailTextTemplateInput?.value);
+        const emailSignature = normalizeOptionalTemplateInput(emailSignatureInput?.value);
+        const emailClinicNameOverride = normalizeOptionalTemplateInput(emailClinicNameOverrideInput?.value);
+        const emailLocationOverride = normalizeOptionalTemplateInput(emailLocationOverrideInput?.value);
+        const emailContactPhoneOverride = normalizeOptionalTemplateInput(emailContactPhoneOverrideInput?.value);
+
         if (emailFromName) payload.emailFromName = emailFromName;
         if (emailReplyTo) payload.emailReplyTo = emailReplyTo;
         if (emailSubjectTemplate) payload.emailSubjectTemplate = emailSubjectTemplate;
@@ -827,7 +863,482 @@ document.addEventListener('DOMContentLoaded', () => {
         if (emailClinicNameOverride) payload.emailClinicNameOverride = emailClinicNameOverride;
         if (emailLocationOverride) payload.emailLocationOverride = emailLocationOverride;
         if (emailContactPhoneOverride) payload.emailContactPhoneOverride = emailContactPhoneOverride;
+
         return payload;
+    }
+
+    function buildDoctorEmailPreviewDraftFromInputs({
+        displayNameInput = null,
+        specialtyInput = null,
+        emailEnabledInput = null,
+        emailFromNameInput = null,
+        emailReplyToInput = null,
+        emailSubjectTemplateInput = null,
+        emailHtmlTemplateInput = null,
+        emailTextTemplateInput = null,
+        emailSignatureInput = null,
+        emailClinicNameOverrideInput = null,
+        emailLocationOverrideInput = null,
+        emailContactPhoneOverrideInput = null
+    } = {}) {
+        const draft = {};
+        const displayName = normalizeOptionalTemplateInput(displayNameInput?.value);
+        const specialty = normalizeOptionalTemplateInput(specialtyInput?.value);
+        if (displayName) draft.displayName = displayName;
+        if (specialty) draft.specialty = specialty;
+
+        const emailSettings = buildDoctorEmailSettingsPayloadFromInputs({
+            emailEnabledInput,
+            emailFromNameInput,
+            emailReplyToInput,
+            emailSubjectTemplateInput,
+            emailHtmlTemplateInput,
+            emailTextTemplateInput,
+            emailSignatureInput,
+            emailClinicNameOverrideInput,
+            emailLocationOverrideInput,
+            emailContactPhoneOverrideInput
+        });
+        Object.assign(draft, emailSettings);
+        return draft;
+    }
+
+    function sanitizePreviewHtmlForIframe(rawHtml) {
+        const source = String(rawHtml || '');
+        if (!source) return '';
+
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(source, 'text/html');
+            doc.querySelectorAll('script, iframe, object, embed').forEach((node) => node.remove());
+            doc.querySelectorAll('base').forEach((node) => node.remove());
+            doc.querySelectorAll('link[rel="stylesheet"], link[rel="preload"], link[rel="prefetch"], link[rel="modulepreload"]').forEach((node) => node.remove());
+            doc.querySelectorAll('meta[http-equiv]').forEach((node) => {
+                const httpEquiv = String(node.getAttribute('http-equiv') || '').toLowerCase();
+                if (httpEquiv === 'refresh') {
+                    node.remove();
+                }
+            });
+            doc.querySelectorAll('style').forEach((node) => {
+                const cssText = String(node.textContent || '');
+                if (/(?:@import\s+(?:url\(\s*['"]?\s*(?:https?:)?\/\/|['"]\s*(?:https?:)?\/\/)|url\s*\(\s*['"]?\s*(?:https?:)?\/\/)/i.test(cssText)) {
+                    node.remove();
+                }
+            });
+
+            doc.querySelectorAll('*').forEach((node) => {
+                Array.from(node.attributes || []).forEach((attr) => {
+                    const name = String(attr.name || '').toLowerCase();
+                    const value = String(attr.value || '').trim();
+                    const lowerValue = value.toLowerCase();
+
+                    if (name.startsWith('on')) {
+                        node.removeAttribute(attr.name);
+                        return;
+                    }
+
+                    if (name === 'src' || name === 'href') {
+                        if (
+                            lowerValue.startsWith('javascript:')
+                            || lowerValue.startsWith('vbscript:')
+                            || lowerValue.startsWith('data:text/html')
+                            || lowerValue.startsWith('http://')
+                            || lowerValue.startsWith('https://')
+                            || lowerValue.startsWith('//')
+                        ) {
+                            node.removeAttribute(attr.name);
+                        }
+                    }
+
+                    if (name === 'srcset' || name === 'poster' || name === 'background') {
+                        node.removeAttribute(attr.name);
+                    }
+
+                    if (name === 'style') {
+                        if (
+                            /url\s*\(\s*['"]?\s*(?:https?:)?\/\//i.test(lowerValue)
+                            || /url\s*\(\s*['"]?\s*(?:javascript:|data:text\/html)/i.test(lowerValue)
+                            || /@import/i.test(lowerValue)
+                            || /expression\s*\(/i.test(lowerValue)
+                        ) {
+                            node.removeAttribute(attr.name);
+                        }
+                    }
+                });
+            });
+
+            return `<!doctype html>${doc.documentElement.outerHTML}`;
+        } catch (_) {
+            return source;
+        }
+    }
+
+    function openEmailPreviewModal({
+        subject = '',
+        html = '',
+        text = '',
+        templateSource = ''
+    } = {}) {
+        if (typeof emailPreviewModalCleanup === 'function') {
+            const cleanupPrevious = emailPreviewModalCleanup;
+            emailPreviewModalCleanup = null;
+            cleanupPrevious();
+        }
+
+        const overlay = document.createElement('div');
+        overlay.className = 'email-preview-overlay';
+        overlay.setAttribute('aria-hidden', 'false');
+
+        const dialog = document.createElement('div');
+        dialog.className = 'email-preview-modal custom-scrollbar';
+        dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-modal', 'true');
+        overlay.appendChild(dialog);
+
+        const header = document.createElement('div');
+        header.className = 'email-preview-header';
+        const titleWrap = document.createElement('div');
+        const title = document.createElement('h3');
+        title.className = 'email-preview-title';
+        title.textContent = 'Previzualizare email confirmare';
+        titleWrap.appendChild(title);
+        if (templateSource) {
+            const subtitle = document.createElement('p');
+            subtitle.className = 'email-preview-subtitle';
+            subtitle.textContent = `Sursa template: ${templateSource}`;
+            titleWrap.appendChild(subtitle);
+        }
+        const closeIconBtn = document.createElement('button');
+        closeIconBtn.type = 'button';
+        closeIconBtn.className = 'email-preview-close-btn';
+        closeIconBtn.setAttribute('aria-label', 'Inchide previzualizarea');
+        closeIconBtn.textContent = '×';
+        header.appendChild(titleWrap);
+        header.appendChild(closeIconBtn);
+        dialog.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'email-preview-body';
+
+        const subjectWrap = document.createElement('div');
+        subjectWrap.className = 'email-preview-subject';
+        const subjectLabel = document.createElement('p');
+        subjectLabel.className = 'email-preview-subject-label';
+        subjectLabel.textContent = 'Subiect';
+        const subjectValue = document.createElement('p');
+        subjectValue.className = 'email-preview-subject-value';
+        subjectValue.textContent = String(subject || '(fara subiect)');
+        subjectWrap.appendChild(subjectLabel);
+        subjectWrap.appendChild(subjectValue);
+        body.appendChild(subjectWrap);
+
+        const tabRow = document.createElement('div');
+        tabRow.className = 'email-preview-tabs';
+        const htmlTabBtn = document.createElement('button');
+        htmlTabBtn.type = 'button';
+        htmlTabBtn.className = 'email-preview-tab is-active';
+        htmlTabBtn.textContent = 'HTML';
+        const textTabBtn = document.createElement('button');
+        textTabBtn.type = 'button';
+        textTabBtn.className = 'email-preview-tab';
+        textTabBtn.textContent = 'Text';
+        tabRow.appendChild(htmlTabBtn);
+        tabRow.appendChild(textTabBtn);
+        body.appendChild(tabRow);
+
+        const htmlPane = document.createElement('div');
+        htmlPane.className = 'email-preview-pane';
+        const iframe = document.createElement('iframe');
+        iframe.className = 'email-preview-iframe';
+        iframe.setAttribute('title', 'Previzualizare HTML email');
+        iframe.setAttribute('sandbox', 'allow-same-origin');
+        iframe.setAttribute('referrerpolicy', 'no-referrer');
+        iframe.srcdoc = sanitizePreviewHtmlForIframe(html);
+        htmlPane.appendChild(iframe);
+        body.appendChild(htmlPane);
+
+        const textPane = document.createElement('div');
+        textPane.className = 'email-preview-pane hidden';
+        const textBlock = document.createElement('pre');
+        textBlock.className = 'email-preview-text';
+        textBlock.textContent = String(text || '').trim() || 'Varianta text este goala.';
+        textPane.appendChild(textBlock);
+        body.appendChild(textPane);
+        dialog.appendChild(body);
+
+        const footer = document.createElement('div');
+        footer.className = 'email-preview-footer';
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = BTN_CLASS.primary;
+        closeBtn.textContent = 'Inchide';
+        footer.appendChild(closeBtn);
+        dialog.appendChild(footer);
+
+        const switchTab = (tabName) => {
+            const showHtml = tabName === 'html';
+            htmlTabBtn.classList.toggle('is-active', showHtml);
+            textTabBtn.classList.toggle('is-active', !showHtml);
+            htmlPane.classList.toggle('hidden', !showHtml);
+            textPane.classList.toggle('hidden', showHtml);
+        };
+
+        const onOverlayClick = (event) => {
+            if (event.target === overlay) {
+                closePreviewModal();
+            }
+        };
+
+        const onEsc = (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                if (typeof event.stopImmediatePropagation === 'function') {
+                    event.stopImmediatePropagation();
+                }
+                closePreviewModal();
+            }
+        };
+
+        const closePreviewModal = () => {
+            if (typeof emailPreviewModalCleanup === 'function') {
+                const cleanup = emailPreviewModalCleanup;
+                emailPreviewModalCleanup = null;
+                cleanup();
+            }
+        };
+
+        htmlTabBtn.addEventListener('click', () => switchTab('html'));
+        textTabBtn.addEventListener('click', () => switchTab('text'));
+        closeBtn.addEventListener('click', closePreviewModal);
+        closeIconBtn.addEventListener('click', closePreviewModal);
+        overlay.addEventListener('click', onOverlayClick);
+        document.addEventListener('keydown', onEsc, true);
+
+        emailPreviewModalCleanup = () => {
+            overlay.removeEventListener('click', onOverlayClick);
+            document.removeEventListener('keydown', onEsc, true);
+            overlay.remove();
+        };
+
+        document.body.appendChild(overlay);
+        closeBtn.focus();
+    }
+
+    function populateEmailPresetSelect(selectEl) {
+        if (!selectEl) return;
+        const currentValue = String(selectEl.value || '').trim();
+        clearNode(selectEl);
+
+        const emptyOption = document.createElement('option');
+        emptyOption.value = '';
+        emptyOption.textContent = 'Selectează preset';
+        selectEl.appendChild(emptyOption);
+
+        EMAIL_TEMPLATE_PRESETS.forEach((preset) => {
+            const presetId = String(preset?.id || '').trim();
+            if (!presetId) return;
+            const option = document.createElement('option');
+            option.value = presetId;
+            option.textContent = String(preset?.label || presetId);
+            selectEl.appendChild(option);
+        });
+
+        if (currentValue && EMAIL_TEMPLATE_PRESET_MAP.has(currentValue)) {
+            selectEl.value = currentValue;
+        }
+    }
+
+    function getEmailTemplatePresetById(presetId) {
+        const normalizedId = String(presetId || '').trim();
+        if (!normalizedId) return null;
+        return EMAIL_TEMPLATE_PRESET_MAP.get(normalizedId) || null;
+    }
+
+    function applyEmailTemplatePresetToInputs(presetId, {
+        subjectInput = null,
+        htmlInput = null,
+        textInput = null,
+        signatureInput = null,
+        emailEnabledInput = null
+    } = {}) {
+        const preset = getEmailTemplatePresetById(presetId);
+        if (!preset) return false;
+
+        if (subjectInput) {
+            subjectInput.value = String(preset.subject || '');
+        }
+        if (htmlInput) {
+            htmlInput.value = String(preset.html || '');
+        }
+        if (textInput) {
+            textInput.value = String(preset.text || '');
+        }
+        if (signatureInput) {
+            signatureInput.value = String(preset.signature || '');
+        }
+        if (emailEnabledInput && ('checked' in emailEnabledInput)) {
+            emailEnabledInput.checked = true;
+        }
+        return true;
+    }
+
+    function applyCreateDoctorSelectedEmailPreset({ successMessage = 'Presetul a fost aplicat. Puteți edita câmpurile ulterior.' } = {}) {
+        if (!isSuperadmin()) return;
+        const presetId = String(el.doctorEmailPresetSelect?.value || '').trim();
+        if (!presetId) {
+            showToast('Atentie', 'Selectează un preset email înainte de aplicare.', 'error');
+            return;
+        }
+        const applied = applyEmailTemplatePresetToInputs(presetId, {
+            subjectInput: el.doctorEmailSubjectTemplate,
+            htmlInput: el.doctorEmailHtmlTemplate,
+            textInput: el.doctorEmailTextTemplate,
+            signatureInput: el.doctorEmailSignature,
+            emailEnabledInput: el.doctorEmailEnabled
+        });
+        if (!applied) {
+            showToast('Eroare', 'Preset email invalid.', 'error');
+            return;
+        }
+        showToast('Succes', successMessage);
+    }
+
+    function initializeCreateDoctorEmailPresetControls() {
+        populateEmailPresetSelect(el.doctorEmailPresetSelect);
+        const hasPresets = EMAIL_TEMPLATE_PRESETS.length > 0;
+        if (el.doctorEmailPresetSelect) {
+            el.doctorEmailPresetSelect.disabled = !hasPresets;
+        }
+        if (el.doctorEmailPresetApplyBtn) {
+            el.doctorEmailPresetApplyBtn.disabled = !hasPresets;
+        }
+        if (el.doctorEmailPresetResetBtn) {
+            el.doctorEmailPresetResetBtn.disabled = !hasPresets;
+        }
+    }
+
+    function syncCreateDoctorEmailTestControls() {
+        if (!el.doctorEmailTestSendBtn) return;
+        const isAllowed = isSuperadmin();
+        const testEmail = String(el.doctorEmailTestTo?.value || '').trim();
+        el.doctorEmailTestSendBtn.disabled = !isAllowed || !isValidEmailInput(testEmail);
+        if (el.doctorEmailPreviewBtn) {
+            el.doctorEmailPreviewBtn.disabled = !isAllowed;
+        }
+    }
+
+    async function sendCreateDoctorTestEmail() {
+        if (!isSuperadmin()) {
+            showToast('Acces interzis', 'Doar superadmin poate trimite emailuri de test.', 'error');
+            return;
+        }
+
+        const toEmail = String(el.doctorEmailTestTo?.value || '').trim().toLowerCase();
+        if (!isValidEmailInput(toEmail)) {
+            showToast('Eroare', 'Introdu o adresa de email valida pentru test.', 'error');
+            syncCreateDoctorEmailTestControls();
+            return;
+        }
+
+        const confirmed = window.confirm(`Trimiti email de test catre ${toEmail}?`);
+        if (!confirmed) return;
+
+        const doctorDraft = {
+            displayName: String(el.doctorDisplayName?.value || '').trim() || 'Medic Test',
+            specialty: String(el.doctorSpecialty?.value || '').trim() || 'Oftalmologie',
+            emailSettings: buildDoctorEmailSettingsPayloadFromCreateForm() || {}
+        };
+
+        setButtonLoading(el.doctorEmailTestSendBtn, true, 'Se trimite...');
+        try {
+            const res = await AUTH.apiFetch('/api/admin/doctors/email-test-preview', {
+                method: 'POST',
+                body: JSON.stringify({
+                    toEmail,
+                    doctor: doctorDraft
+                })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showToast('Eroare', data.error || 'Trimiterea emailului de test a esuat.', 'error');
+                return;
+            }
+            showToast('Succes', data.message || 'Emailul de test a fost trimis.');
+        } catch (_) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        } finally {
+            setButtonLoading(el.doctorEmailTestSendBtn, false);
+            syncCreateDoctorEmailTestControls();
+        }
+    }
+
+    async function previewCreateDoctorEmail() {
+        if (!isSuperadmin()) {
+            showToast('Acces interzis', 'Doar superadmin poate previzualiza emailuri.', 'error');
+            return;
+        }
+
+        const doctorDraft = buildDoctorEmailPreviewDraftFromInputs({
+            displayNameInput: el.doctorDisplayName,
+            specialtyInput: el.doctorSpecialty,
+            emailEnabledInput: el.doctorEmailEnabled,
+            emailFromNameInput: el.doctorEmailFromName,
+            emailReplyToInput: el.doctorEmailReplyTo,
+            emailSubjectTemplateInput: el.doctorEmailSubjectTemplate,
+            emailHtmlTemplateInput: el.doctorEmailHtmlTemplate,
+            emailTextTemplateInput: el.doctorEmailTextTemplate,
+            emailSignatureInput: el.doctorEmailSignature,
+            emailClinicNameOverrideInput: el.doctorEmailClinicNameOverride,
+            emailLocationOverrideInput: el.doctorEmailLocationOverride,
+            emailContactPhoneOverrideInput: el.doctorEmailContactPhoneOverride
+        });
+
+        setButtonLoading(el.doctorEmailPreviewBtn, true, 'Se genereaza...');
+        try {
+            const res = await AUTH.apiFetch('/api/admin/doctors/email-preview', {
+                method: 'POST',
+                body: JSON.stringify({
+                    useCurrentFormValues: true,
+                    draft: doctorDraft
+                })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showToast('Eroare', data.error || 'Nu s-a putut genera previzualizarea.', 'error');
+                return;
+            }
+
+            openEmailPreviewModal({
+                subject: data.subject,
+                html: data.html,
+                text: data.text,
+                templateSource: data.templateSource
+            });
+        } catch (_) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        } finally {
+            setButtonLoading(el.doctorEmailPreviewBtn, false);
+            syncCreateDoctorEmailTestControls();
+        }
+    }
+
+    function buildDoctorEmailSettingsPayloadFromCreateForm() {
+        if (!isSuperadmin()) {
+            return undefined;
+        }
+        return buildDoctorEmailSettingsPayloadFromInputs({
+            emailEnabledInput: el.doctorEmailEnabled,
+            emailFromNameInput: el.doctorEmailFromName,
+            emailReplyToInput: el.doctorEmailReplyTo,
+            emailSubjectTemplateInput: el.doctorEmailSubjectTemplate,
+            emailHtmlTemplateInput: el.doctorEmailHtmlTemplate,
+            emailTextTemplateInput: el.doctorEmailTextTemplate,
+            emailSignatureInput: el.doctorEmailSignature,
+            emailClinicNameOverrideInput: el.doctorEmailClinicNameOverride,
+            emailLocationOverrideInput: el.doctorEmailLocationOverride,
+            emailContactPhoneOverrideInput: el.doctorEmailContactPhoneOverride
+        });
     }
 
     function setupAdminSearch() {
@@ -1741,7 +2252,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast('Eroare', 'Slug si nume afisat sunt obligatorii.', 'error');
             return;
         }
-        if (payload.emailSettings?.emailReplyTo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.emailSettings.emailReplyTo)) {
+        if (payload.emailSettings?.emailReplyTo && !isValidEmailInput(payload.emailSettings.emailReplyTo)) {
             showToast('Eroare', 'Reply-To are format invalid.', 'error');
             return;
         }
@@ -1760,6 +2271,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast('Succes', 'Medic creat.');
             el.createDoctorForm.reset();
             renderDoctorDayConfigList();
+            syncCreateDoctorEmailTestControls();
             isCreateDoctorFormOpen = false;
             updateCreateDoctorVisibility();
             await fetchDoctors();
@@ -1791,6 +2303,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (showForm && focusForm) {
             el.doctorSlug?.focus();
         }
+        syncCreateDoctorEmailTestControls();
     }
 
     async function patchDoctor(doctorId, payload, successMsg) {
@@ -1840,6 +2353,8 @@ document.addEventListener('DOMContentLoaded', () => {
             let emailClinicNameOverrideInput = null;
             let emailLocationOverrideInput = null;
             let emailContactPhoneOverrideInput = null;
+            let emailPresetSelect = null;
+            let emailTestToInput = null;
 
             const grid = document.createElement('div');
             grid.className = 'admin-modal-grid';
@@ -1908,6 +2423,79 @@ document.addEventListener('DOMContentLoaded', () => {
                 enabledWrap.appendChild(document.createTextNode('Foloseste configurarea email personalizata pentru acest medic'));
                 emailSection.appendChild(enabledWrap);
 
+                const presetControls = document.createElement('div');
+                presetControls.className = 'admin-modal-grid';
+
+                emailPresetSelect = document.createElement('select');
+                emailPresetSelect.className = 'form-input';
+                populateEmailPresetSelect(emailPresetSelect);
+                const hasPresets = EMAIL_TEMPLATE_PRESETS.length > 0;
+                emailPresetSelect.disabled = !hasPresets;
+                const presetField = createModalField('Preset email (opțional)', emailPresetSelect);
+                const presetHint = document.createElement('p');
+                presetHint.className = 'admin-modal-helper';
+                presetHint.textContent = 'Selectarea unui preset completează câmpurile. Puteți edita ulterior.';
+                presetField.appendChild(presetHint);
+                presetControls.appendChild(presetField);
+
+                const presetActionsWrap = document.createElement('div');
+                presetActionsWrap.className = 'flex items-end gap-2';
+
+                const applyPresetBtn = document.createElement('button');
+                applyPresetBtn.type = 'button';
+                applyPresetBtn.className = BTN_CLASS.secondary;
+                applyPresetBtn.textContent = 'Aplica preset';
+                applyPresetBtn.disabled = !hasPresets;
+                applyPresetBtn.addEventListener('click', () => {
+                    const presetId = String(emailPresetSelect?.value || '').trim();
+                    if (!presetId) {
+                        modal.setError('Selectează un preset email înainte de aplicare.');
+                        return;
+                    }
+                    const applied = applyEmailTemplatePresetToInputs(presetId, {
+                        subjectInput: emailSubjectTemplateInput,
+                        htmlInput: emailHtmlTemplateInput,
+                        textInput: emailTextTemplateInput,
+                        signatureInput: emailSignatureInput,
+                        emailEnabledInput: emailEnabledInput
+                    });
+                    if (!applied) {
+                        modal.setError('Preset email invalid.');
+                        return;
+                    }
+                    modal.setError('');
+                });
+
+                const resetPresetBtn = document.createElement('button');
+                resetPresetBtn.type = 'button';
+                resetPresetBtn.className = BTN_CLASS.ghost;
+                resetPresetBtn.textContent = 'Reset la preset';
+                resetPresetBtn.disabled = !hasPresets;
+                resetPresetBtn.addEventListener('click', () => {
+                    const presetId = String(emailPresetSelect?.value || '').trim();
+                    if (!presetId) {
+                        modal.setError('Selectează un preset pentru reaplicare.');
+                        return;
+                    }
+                    const applied = applyEmailTemplatePresetToInputs(presetId, {
+                        subjectInput: emailSubjectTemplateInput,
+                        htmlInput: emailHtmlTemplateInput,
+                        textInput: emailTextTemplateInput,
+                        signatureInput: emailSignatureInput,
+                        emailEnabledInput: emailEnabledInput
+                    });
+                    if (!applied) {
+                        modal.setError('Preset email invalid.');
+                        return;
+                    }
+                    modal.setError('');
+                });
+
+                presetActionsWrap.appendChild(applyPresetBtn);
+                presetActionsWrap.appendChild(resetPresetBtn);
+                presetControls.appendChild(presetActionsWrap);
+                emailSection.appendChild(presetControls);
+
                 const emailGrid = document.createElement('div');
                 emailGrid.className = 'admin-modal-grid';
 
@@ -1962,6 +2550,147 @@ document.addEventListener('DOMContentLoaded', () => {
                 emailGrid.appendChild(createModalField('Telefon contact (override optional)', emailContactPhoneOverrideInput));
 
                 emailSection.appendChild(emailGrid);
+
+                const testControls = document.createElement('div');
+                testControls.className = 'admin-modal-grid';
+
+                emailTestToInput = document.createElement('input');
+                emailTestToInput.type = 'email';
+                emailTestToInput.className = 'form-input';
+                emailTestToInput.placeholder = 'exemplu@domeniu.ro';
+                const testField = createModalField('Email pentru test', emailTestToInput);
+                const testHint = document.createElement('p');
+                testHint.className = 'admin-modal-helper';
+                testHint.textContent = 'Se trimite un email de test folosind template-ul curent al medicului. Nu se creează programare.';
+                testField.appendChild(testHint);
+                testControls.appendChild(testField);
+
+                const testButtonWrap = document.createElement('div');
+                testButtonWrap.className = 'flex items-end gap-2 flex-wrap';
+                const previewBtn = document.createElement('button');
+                previewBtn.type = 'button';
+                previewBtn.className = BTN_CLASS.ghost;
+                previewBtn.textContent = 'Previzualizeaza email';
+
+                previewBtn.addEventListener('click', async () => {
+                    const doctorDraft = buildDoctorEmailPreviewDraftFromInputs({
+                        displayNameInput,
+                        specialtyInput,
+                        emailEnabledInput,
+                        emailFromNameInput,
+                        emailReplyToInput,
+                        emailSubjectTemplateInput,
+                        emailHtmlTemplateInput,
+                        emailTextTemplateInput,
+                        emailSignatureInput,
+                        emailClinicNameOverrideInput,
+                        emailLocationOverrideInput,
+                        emailContactPhoneOverrideInput
+                    });
+
+                    setButtonLoading(previewBtn, true, 'Se genereaza...');
+                    try {
+                        const res = await AUTH.apiFetch(`/api/admin/doctors/${doctor._id}/email-preview`, {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                useCurrentFormValues: true,
+                                draft: doctorDraft
+                            })
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) {
+                            modal.setError(data.error || 'Nu s-a putut genera previzualizarea.');
+                            return;
+                        }
+
+                        modal.setError('');
+                        openEmailPreviewModal({
+                            subject: data.subject,
+                            html: data.html,
+                            text: data.text,
+                            templateSource: data.templateSource
+                        });
+                    } catch (_) {
+                        modal.setError('Eroare de conexiune la generarea previzualizarii.');
+                    } finally {
+                        setButtonLoading(previewBtn, false);
+                    }
+                });
+
+                const testSendBtn = document.createElement('button');
+                testSendBtn.type = 'button';
+                testSendBtn.className = BTN_CLASS.secondary;
+                testSendBtn.textContent = 'Trimite email de test';
+                testSendBtn.disabled = true;
+
+                const syncTestSendState = () => {
+                    const toEmail = String(emailTestToInput?.value || '').trim();
+                    testSendBtn.disabled = !isValidEmailInput(toEmail);
+                };
+                emailTestToInput.addEventListener('input', syncTestSendState);
+                syncTestSendState();
+
+                testSendBtn.addEventListener('click', async () => {
+                    const toEmail = String(emailTestToInput?.value || '').trim().toLowerCase();
+                    if (!isValidEmailInput(toEmail)) {
+                        modal.setError('Introdu o adresa de email valida pentru test.');
+                        syncTestSendState();
+                        return;
+                    }
+                    const currentDisplayName = String(displayNameInput.value || '').trim();
+                    if (!currentDisplayName) {
+                        modal.setError('Numele afisat este obligatoriu pentru trimiterea testului.');
+                        return;
+                    }
+
+                    const confirmed = window.confirm(`Trimiti email de test catre ${toEmail}?`);
+                    if (!confirmed) return;
+
+                    const doctorOverrides = {
+                        displayName: currentDisplayName,
+                        specialty: String(specialtyInput.value || '').trim() || 'Oftalmologie',
+                        emailSettings: buildDoctorEmailSettingsPayloadFromInputs({
+                            emailEnabledInput,
+                            emailFromNameInput,
+                            emailReplyToInput,
+                            emailSubjectTemplateInput,
+                            emailHtmlTemplateInput,
+                            emailTextTemplateInput,
+                            emailSignatureInput,
+                            emailClinicNameOverrideInput,
+                            emailLocationOverrideInput,
+                            emailContactPhoneOverrideInput
+                        })
+                    };
+
+                    setButtonLoading(testSendBtn, true, 'Se trimite...');
+                    try {
+                        const res = await AUTH.apiFetch(`/api/admin/doctors/${doctor._id}/email-test`, {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                toEmail,
+                                doctorOverrides
+                            })
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) {
+                            modal.setError(data.error || 'Trimiterea emailului de test a esuat.');
+                            return;
+                        }
+                        modal.setError('');
+                        showToast('Succes', data.message || 'Emailul de test a fost trimis.');
+                    } catch (_) {
+                        modal.setError('Eroare de conexiune la trimiterea emailului de test.');
+                    } finally {
+                        setButtonLoading(testSendBtn, false);
+                        syncTestSendState();
+                    }
+                });
+
+                testButtonWrap.appendChild(previewBtn);
+                testButtonWrap.appendChild(testSendBtn);
+                testControls.appendChild(testButtonWrap);
+                emailSection.appendChild(testControls);
                 modal.body.appendChild(emailSection);
             }
 
@@ -2052,23 +2781,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 if (canEditEmailSettings) {
-                    const emailReplyTo = normalizeOptionalTemplateInput(emailReplyToInput?.value);
-                    if (emailReplyTo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailReplyTo)) {
+                    const nextEmailSettings = buildDoctorEmailSettingsPayloadFromInputs({
+                        emailEnabledInput,
+                        emailFromNameInput,
+                        emailReplyToInput,
+                        emailSubjectTemplateInput,
+                        emailHtmlTemplateInput,
+                        emailTextTemplateInput,
+                        emailSignatureInput,
+                        emailClinicNameOverrideInput,
+                        emailLocationOverrideInput,
+                        emailContactPhoneOverrideInput
+                    });
+                    if (nextEmailSettings?.emailReplyTo && !isValidEmailInput(nextEmailSettings.emailReplyTo)) {
                         modal.setError('Reply-To are format invalid.');
                         return;
                     }
-                    nextPayload.emailSettings = {
-                        emailEnabled: !!emailEnabledInput?.checked,
-                        emailFromName: normalizeOptionalTemplateInput(emailFromNameInput?.value),
-                        emailReplyTo: emailReplyTo || null,
-                        emailSubjectTemplate: normalizeOptionalTemplateInput(emailSubjectTemplateInput?.value),
-                        emailHtmlTemplate: normalizeOptionalTemplateInput(emailHtmlTemplateInput?.value),
-                        emailTextTemplate: normalizeOptionalTemplateInput(emailTextTemplateInput?.value),
-                        emailSignature: normalizeOptionalTemplateInput(emailSignatureInput?.value),
-                        emailClinicNameOverride: normalizeOptionalTemplateInput(emailClinicNameOverrideInput?.value),
-                        emailLocationOverride: normalizeOptionalTemplateInput(emailLocationOverrideInput?.value),
-                        emailContactPhoneOverride: normalizeOptionalTemplateInput(emailContactPhoneOverrideInput?.value)
-                    };
+                    nextPayload.emailSettings = nextEmailSettings;
                 }
 
                 resolve(nextPayload);
@@ -2699,6 +3428,24 @@ document.addEventListener('DOMContentLoaded', () => {
             createDoctor();
         });
 
+        el.doctorEmailTestTo?.addEventListener('input', syncCreateDoctorEmailTestControls);
+        el.doctorEmailTestSendBtn?.addEventListener('click', async () => {
+            await sendCreateDoctorTestEmail();
+        });
+        el.doctorEmailPreviewBtn?.addEventListener('click', async () => {
+            await previewCreateDoctorEmail();
+        });
+
+        el.doctorEmailPresetApplyBtn?.addEventListener('click', () => {
+            applyCreateDoctorSelectedEmailPreset();
+        });
+
+        el.doctorEmailPresetResetBtn?.addEventListener('click', () => {
+            applyCreateDoctorSelectedEmailPreset({
+                successMessage: 'Presetul selectat a fost reaplicat.'
+            });
+        });
+
         el.toggleCreateDoctorBtn?.addEventListener('click', () => {
             isCreateDoctorFormOpen = !isCreateDoctorFormOpen;
             updateCreateDoctorVisibility({ focusForm: isCreateDoctorFormOpen });
@@ -2843,6 +3590,8 @@ document.addEventListener('DOMContentLoaded', () => {
         setupAdminSearch();
         updateAdminDateDisplay();
         renderDoctorDayConfigList();
+        initializeCreateDoctorEmailPresetControls();
+        syncCreateDoctorEmailTestControls();
 
         await fetchDoctors();
         await fetchAdminAppointments();

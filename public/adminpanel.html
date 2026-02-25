@@ -330,6 +330,17 @@
                                     <label for="doctorEmailReplyTo" class="form-label">Reply-To (optional)</label>
                                     <input id="doctorEmailReplyTo" type="email" class="form-input" placeholder="contact@exemplu.ro">
                                 </div>
+                                <div>
+                                    <label for="doctorEmailPresetSelect" class="form-label">Preset email (opțional)</label>
+                                    <select id="doctorEmailPresetSelect" class="form-input">
+                                        <option value="">Selectează preset</option>
+                                    </select>
+                                    <p class="text-xs text-brand-400/70 mt-2">Selectarea unui preset completează câmpurile. Puteți edita ulterior.</p>
+                                </div>
+                                <div class="flex items-end gap-2">
+                                    <button id="doctorEmailPresetApplyBtn" type="button" class="admin-action-btn btn-secondary">Aplica preset</button>
+                                    <button id="doctorEmailPresetResetBtn" type="button" class="admin-action-btn btn-ghost">Reset la preset</button>
+                                </div>
                                 <div class="md:col-span-2">
                                     <label for="doctorEmailSubjectTemplate" class="form-label">Subiect email confirmare (template optional)</label>
                                     <textarea id="doctorEmailSubjectTemplate" class="form-input min-h-[70px]" placeholder="Ex: Confirmare programare - {{doctorName}} - {{appointmentDate}}"></textarea>
@@ -357,6 +368,17 @@
                                 <div>
                                     <label for="doctorEmailContactPhoneOverride" class="form-label">Telefon contact (override optional)</label>
                                     <input id="doctorEmailContactPhoneOverride" type="text" class="form-input" placeholder="Ex: 021 000 00 00">
+                                </div>
+                                <div>
+                                    <label for="doctorEmailTestTo" class="form-label">Email pentru test</label>
+                                    <input id="doctorEmailTestTo" type="email" class="form-input" placeholder="exemplu@domeniu.ro">
+                                </div>
+                                <div class="flex items-end gap-2 flex-wrap">
+                                    <button id="doctorEmailPreviewBtn" type="button" class="admin-action-btn btn-ghost">Previzualizeaza email</button>
+                                    <button id="doctorEmailTestSendBtn" type="button" class="admin-action-btn btn-secondary" disabled>Trimite email de test</button>
+                                </div>
+                                <div class="md:col-span-2">
+                                    <p class="text-xs text-brand-400/70">Se trimite un email de test folosind template-ul curent al medicului. Nu se creează programare.</p>
                                 </div>
                             </div>
                         </div>
@@ -420,6 +442,7 @@
 
     <script src="auth.js"></script>
     <script src="admin/scheduler.js"></script>
+    <script src="email-presets.js"></script>
     <script src="adminpanel.js"></script>
 </body>
 

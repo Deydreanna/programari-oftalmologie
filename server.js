@@ -15,6 +15,10 @@ const pgUsers = require('./db/users-postgres');
 const pgDoctors = require('./db/doctors-postgres');
 const pgAppointments = require('./db/appointments-postgres');
 const { sendBookingConfirmation } = require('./services/email/sendBookingConfirmation');
+const {
+    sendTestBookingConfirmationEmail,
+    renderTestBookingConfirmationPreview
+} = require('./services/email/sendTestBookingConfirmation');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,6 +28,13 @@ const CLINIC_LOCATION = "Piata Alexandru Lahovari nr. 1, Sector 1, Bucuresti";
 const LOGIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_LOCKOUT_AFTER_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+const EMAIL_TEST_WINDOW_MS = 10 * 60 * 1000;
+const EMAIL_TEST_MAX_PER_WINDOW = 5;
+const EMAIL_PREVIEW_WINDOW_MS = 10 * 60 * 1000;
+const EMAIL_PREVIEW_MAX_PER_WINDOW = 20;
+const EMAIL_PREVIEW_MAX_SUBJECT_CHARS = 500;
+const EMAIL_PREVIEW_MAX_HTML_CHARS = 120000;
+const EMAIL_PREVIEW_MAX_TEXT_CHARS = 60000;
 const MAX_DIAGNOSTIC_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_DIAGNOSTIC_MIME_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png']);
 const ENABLE_DIAGNOSTIC_UPLOAD = process.env.ENABLE_DIAGNOSTIC_UPLOAD === 'true';
@@ -82,6 +93,8 @@ const CSRF_COOKIE_OPTIONS = Object.freeze({
 });
 const loginAttempts = new Map();
 const refreshAttempts = new Map();
+const emailTestAttempts = new Map();
+const emailPreviewAttempts = new Map();
 
 function parseHHMMToMinutes(value) {
     if (typeof value !== 'string') return NaN;
@@ -645,6 +658,86 @@ function parseDoctorEmailSettings(value, { optional = false } = {}) {
     return out;
 }
 
+function parseDoctorEmailTestDoctorDraft(value, { optional = false } = {}) {
+    if (value === undefined && optional) return undefined;
+    const payload = ensureObjectStrict(value, ['displayName', 'specialty', 'emailSettings']);
+    const out = {};
+
+    if (payload.displayName !== undefined) {
+        out.displayName = parseStringField(payload.displayName, 'doctor.displayName', { min: 2, max: 120 });
+    }
+    if (payload.specialty !== undefined) {
+        out.specialty = parseStringField(payload.specialty, 'doctor.specialty', { min: 2, max: 120 });
+    }
+    if (payload.emailSettings !== undefined) {
+        out.emailSettings = parseDoctorEmailSettings(payload.emailSettings);
+    }
+
+    return out;
+}
+
+function parseDoctorEmailPreviewDraft(value, { optional = false } = {}) {
+    if (value === undefined && optional) return undefined;
+    const payload = ensureObjectStrict(value, [
+        'displayName',
+        'specialty',
+        'emailSettings',
+        'emailEnabled',
+        'emailFromName',
+        'emailReplyTo',
+        'emailSubjectTemplate',
+        'emailHtmlTemplate',
+        'emailTextTemplate',
+        'emailSignature',
+        'emailClinicNameOverride',
+        'emailLocationOverride',
+        'emailContactPhoneOverride'
+    ]);
+    const out = {};
+
+    const displayName = parseOptionalNullableStringField(payload.displayName, 'draft.displayName', { max: 120 });
+    if (displayName) out.displayName = displayName;
+
+    const specialty = parseOptionalNullableStringField(payload.specialty, 'draft.specialty', { max: 120 });
+    if (specialty) out.specialty = specialty;
+
+    const nestedEmailSettings = payload.emailSettings !== undefined
+        ? parseDoctorEmailSettings(payload.emailSettings)
+        : undefined;
+
+    const flatEmailSettingsInput = {};
+    const flatFields = [
+        'emailEnabled',
+        'emailFromName',
+        'emailReplyTo',
+        'emailSubjectTemplate',
+        'emailHtmlTemplate',
+        'emailTextTemplate',
+        'emailSignature',
+        'emailClinicNameOverride',
+        'emailLocationOverride',
+        'emailContactPhoneOverride'
+    ];
+    for (const field of flatFields) {
+        if (payload[field] !== undefined) {
+            flatEmailSettingsInput[field] = payload[field];
+        }
+    }
+
+    const flatEmailSettings = Object.keys(flatEmailSettingsInput).length
+        ? parseDoctorEmailSettings(flatEmailSettingsInput)
+        : undefined;
+
+    if (nestedEmailSettings !== undefined || flatEmailSettings !== undefined) {
+        out.emailSettings = {
+            ...(nestedEmailSettings && typeof nestedEmailSettings === 'object' ? nestedEmailSettings : {}),
+            ...(flatEmailSettings && typeof flatEmailSettings === 'object' ? flatEmailSettings : {})
+        };
+    }
+
+    return out;
+}
+
 function parseDiagnosticFileMeta(value) {
     if (value === undefined) return undefined;
     const input = ensureObjectStrict(value, ['key', 'mime', 'size']);
@@ -861,6 +954,40 @@ const doctorDayScheduleBodySchema = createSchema((input) => {
         startTime: out.startTime,
         endTime: out.endTime,
         consultationDurationMinutes: out.consultationDurationMinutes
+    };
+});
+
+const doctorEmailTestBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['toEmail', 'doctorOverrides']);
+    const toEmail = parseStringField(payload.toEmail, 'toEmail', { min: 3, max: 254 }).toLowerCase();
+    if (!validateEmail(toEmail)) {
+        throw new Error('toEmail format is invalid.');
+    }
+
+    return {
+        toEmail,
+        doctorOverrides: parseDoctorEmailTestDoctorDraft(payload.doctorOverrides, { optional: true })
+    };
+});
+
+const doctorEmailTestPreviewBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['toEmail', 'doctor']);
+    const toEmail = parseStringField(payload.toEmail, 'toEmail', { min: 3, max: 254 }).toLowerCase();
+    if (!validateEmail(toEmail)) {
+        throw new Error('toEmail format is invalid.');
+    }
+
+    return {
+        toEmail,
+        doctor: parseDoctorEmailTestDoctorDraft(payload.doctor, { optional: true }) || {}
+    };
+});
+
+const doctorEmailPreviewBodySchema = createSchema((input) => {
+    const payload = ensureObjectStrict(input, ['useCurrentFormValues', 'draft']);
+    return {
+        useCurrentFormValues: parseBooleanField(payload.useCurrentFormValues, 'useCurrentFormValues', { optional: true }) ?? false,
+        draft: parseDoctorEmailPreviewDraft(payload.draft, { optional: true }) || {}
     };
 });
 
@@ -1463,6 +1590,56 @@ function getLoginLock(req, identifier = '') {
     return 0;
 }
 
+function consumeEmailTestQuota(req) {
+    const now = Date.now();
+    const userKey = getUserPublicId(req.user) || String(req.user?._id || req.user?.id || '').trim() || 'anonymous';
+    const key = `${userKey}:${getClientIp(req)}`;
+
+    const existing = emailTestAttempts.get(key) || [];
+    const recent = existing.filter((timestamp) => Number.isFinite(timestamp) && (now - timestamp) < EMAIL_TEST_WINDOW_MS);
+    if (recent.length >= EMAIL_TEST_MAX_PER_WINDOW) {
+        const oldest = recent[0];
+        const retryAfterMs = Math.max(0, EMAIL_TEST_WINDOW_MS - (now - oldest));
+        return {
+            allowed: false,
+            retryAfterSeconds: Math.ceil(retryAfterMs / 1000)
+        };
+    }
+
+    recent.push(now);
+    emailTestAttempts.set(key, recent);
+
+    return {
+        allowed: true,
+        remaining: Math.max(0, EMAIL_TEST_MAX_PER_WINDOW - recent.length)
+    };
+}
+
+function consumeEmailPreviewQuota(req) {
+    const now = Date.now();
+    const userKey = getUserPublicId(req.user) || String(req.user?._id || req.user?.id || '').trim() || 'anonymous';
+    const key = `${userKey}:${getClientIp(req)}`;
+
+    const existing = emailPreviewAttempts.get(key) || [];
+    const recent = existing.filter((timestamp) => Number.isFinite(timestamp) && (now - timestamp) < EMAIL_PREVIEW_WINDOW_MS);
+    if (recent.length >= EMAIL_PREVIEW_MAX_PER_WINDOW) {
+        const oldest = recent[0];
+        const retryAfterMs = Math.max(0, EMAIL_PREVIEW_WINDOW_MS - (now - oldest));
+        return {
+            allowed: false,
+            retryAfterSeconds: Math.ceil(retryAfterMs / 1000)
+        };
+    }
+
+    recent.push(now);
+    emailPreviewAttempts.set(key, recent);
+
+    return {
+        allowed: true,
+        remaining: Math.max(0, EMAIL_PREVIEW_MAX_PER_WINDOW - recent.length)
+    };
+}
+
 function getRefreshAttemptState(key) {
     const now = Date.now();
     const existing = refreshAttempts.get(key);
@@ -1635,6 +1812,112 @@ async function sendBookingConfirmationEmail({ appointment, doctor = null }) {
         clinicName: CLINIC_DISPLAY_NAME,
         clinicLocation: CLINIC_LOCATION
     });
+}
+
+function buildDoctorForEmailTest(baseDoctor = null, overrides = {}) {
+    const doctor = (baseDoctor && typeof baseDoctor === 'object' && !Array.isArray(baseDoctor))
+        ? baseDoctor
+        : {};
+    const safeOverrides = (overrides && typeof overrides === 'object' && !Array.isArray(overrides))
+        ? overrides
+        : {};
+    const mergedEmailSettings = safeOverrides.emailSettings !== undefined
+        ? {
+            ...(doctor.emailSettings && typeof doctor.emailSettings === 'object' ? doctor.emailSettings : {}),
+            ...safeOverrides.emailSettings
+        }
+        : doctor.emailSettings;
+
+    return {
+        ...doctor,
+        displayName: safeOverrides.displayName !== undefined
+            ? sanitizeInlineString(safeOverrides.displayName)
+            : doctor.displayName,
+        specialty: safeOverrides.specialty !== undefined
+            ? sanitizeInlineString(safeOverrides.specialty)
+            : doctor.specialty,
+        emailSettings: mergedEmailSettings
+    };
+}
+
+async function sendDoctorEmailTest({ doctor, toEmail }) {
+    return sendTestBookingConfirmationEmail({
+        doctor,
+        toEmail,
+        clinicName: CLINIC_DISPLAY_NAME,
+        clinicLocation: CLINIC_LOCATION,
+        contactPhone: '07xx xxx xxx'
+    });
+}
+
+function renderDoctorEmailPreview({ doctor }) {
+    return renderTestBookingConfirmationPreview({
+        doctor,
+        clinicName: CLINIC_DISPLAY_NAME,
+        clinicLocation: CLINIC_LOCATION,
+        contactPhone: '07xx xxx xxx'
+    });
+}
+
+function isUnsafePreviewUrl(rawValue) {
+    const value = String(rawValue || '').trim().toLowerCase();
+    if (!value) return false;
+    return (
+        value.startsWith('javascript:')
+        || value.startsWith('vbscript:')
+        || value.startsWith('data:text/html')
+        || value.startsWith('http://')
+        || value.startsWith('https://')
+        || value.startsWith('//')
+    );
+}
+
+function sanitizeEmailPreviewHtml(rawHtml) {
+    let html = String(rawHtml || '').replace(/\0/g, '');
+    if (!html) return '';
+
+    html = html
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<script\b[^>]*\/?>/gi, '')
+        .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, '')
+        .replace(/<iframe\b[^>]*\/?>/gi, '')
+        .replace(/<object\b[^>]*>[\s\S]*?<\/object>/gi, '')
+        .replace(/<object\b[^>]*\/?>/gi, '')
+        .replace(/<embed\b[^>]*\/?>/gi, '')
+        .replace(/<base\b[^>]*\/?>/gi, '')
+        .replace(/<link\b[^>]*rel\s*=\s*(['"])?(?:stylesheet|preload|prefetch|modulepreload)\1?[^>]*>/gi, '')
+        .replace(/<meta\b[^>]*http-equiv\s*=\s*(['"])?refresh\1?[^>]*>/gi, '')
+        .replace(/\son[a-z-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+        .replace(/\s(srcset|poster|background)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+        .replace(/\sstyle\s*=\s*"[^"]*(?:url\s*\(\s*['"]?\s*(?:https?:)?\/\/[^)]*\)|url\s*\(\s*['"]?\s*(?:javascript:|data:text\/html)[^)]*\)|@import|expression\s*\()[^"]*"/gi, '')
+        .replace(/\sstyle\s*=\s*'[^']*(?:url\s*\(\s*['"]?\s*(?:https?:)?\/\/[^)]*\)|url\s*\(\s*['"]?\s*(?:javascript:|data:text\/html)[^)]*\)|@import|expression\s*\()[^']*'/gi, '')
+        .replace(/@import\s+(?:url\(\s*['"]?\s*(?:https?:)?\/\/[^)]*\)|['"]\s*(?:https?:)?\/\/[^'"]*['"])\s*;?/gi, '');
+
+    html = html.replace(/\s(href|src)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi, (match, attrName, dqValue, sqValue, bareValue) => {
+        const value = dqValue ?? sqValue ?? bareValue ?? '';
+        if (isUnsafePreviewUrl(value)) {
+            return ` ${attrName}=""`;
+        }
+        return match;
+    });
+
+    return html.slice(0, EMAIL_PREVIEW_MAX_HTML_CHARS);
+}
+
+function clampPreviewText(rawValue, maxChars) {
+    return String(rawValue || '')
+        .replace(/\0/g, '')
+        .replace(/\r/g, '')
+        .slice(0, maxChars);
+}
+
+function buildEmailPreviewResponse(rendered = {}) {
+    return {
+        subject: clampPreviewText(rendered.subject, EMAIL_PREVIEW_MAX_SUBJECT_CHARS),
+        html: sanitizeEmailPreviewHtml(rendered.html),
+        text: clampPreviewText(rendered.text, EMAIL_PREVIEW_MAX_TEXT_CHARS),
+        templateSource: sanitizeInlineString(rendered.templateSource || 'unknown') || 'unknown'
+    };
 }
 
 async function getAuthenticatedUser(req) {
@@ -2592,6 +2875,285 @@ app.get('/api/admin/doctors', requireViewerSchedulerOrSuperadmin, async (req, re
     } catch (error) {
         console.error('Admin doctors list error:', error?.message || error);
         return res.status(500).json({ error: 'Database error' });
+    }
+});
+
+app.post('/api/admin/doctors/email-preview', requireSuperadminOnly, validateBody(doctorEmailPreviewBodySchema), async (req, res) => {
+    setAuthNoStore(res);
+
+    const { useCurrentFormValues, draft } = req.validatedBody;
+    const quota = consumeEmailPreviewQuota(req);
+    if (!quota.allowed) {
+        return res.status(429).json({
+            error: `Ati atins limita de previzualizari. Reincercati in ${quota.retryAfterSeconds} secunde.`
+        });
+    }
+
+    const baseDoctor = {
+        displayName: 'Medic Test',
+        specialty: DEFAULT_DOCTOR_SPECIALTY,
+        emailSettings: {}
+    };
+    const effectiveDoctor = useCurrentFormValues
+        ? buildDoctorForEmailTest(baseDoctor, draft || {})
+        : baseDoctor;
+
+    try {
+        const renderedPreview = renderDoctorEmailPreview({ doctor: effectiveDoctor });
+        const previewResponse = buildEmailPreviewResponse(renderedPreview);
+
+        await writeAuditLog(req, {
+            action: 'doctor_email_preview_render',
+            result: 'success',
+            targetType: 'doctor',
+            targetId: 'draft',
+            actorUser: req.user,
+            metadata: {
+                templateSource: previewResponse.templateSource,
+                draftApplied: !!useCurrentFormValues
+            }
+        });
+
+        return res.json({
+            success: true,
+            remaining: quota.remaining,
+            ...previewResponse
+        });
+    } catch (error) {
+        const errorMessage = String(error?.message || '');
+        const safeReason = errorMessage.toLowerCase().includes('template') ? 'template_error' : 'render_failed';
+        console.error(`[EMAIL PREVIEW FAILURE] target=draft reason=${safeReason}`);
+
+        await writeAuditLog(req, {
+            action: 'doctor_email_preview_render',
+            result: 'failure',
+            targetType: 'doctor',
+            targetId: 'draft',
+            actorUser: req.user,
+            metadata: { reason: safeReason }
+        });
+
+        if (safeReason === 'template_error') {
+            return res.status(400).json({
+                error: 'Template invalid sau nu a putut fi randat. Verificati campurile HTML/Text.'
+            });
+        }
+
+        return res.status(500).json({ error: 'Nu s-a putut genera previzualizarea emailului.' });
+    }
+});
+
+app.post('/api/admin/doctors/:id/email-preview', requireSuperadminOnly, validateBody(doctorEmailPreviewBodySchema), async (req, res) => {
+    setAuthNoStore(res);
+
+    const doctorId = String(req.params.id || '').trim();
+    if (!LEGACY_OBJECT_ID_REGEX.test(doctorId)) {
+        return res.status(400).json({ error: 'Medic invalid.' });
+    }
+
+    const { useCurrentFormValues, draft } = req.validatedBody;
+    const quota = consumeEmailPreviewQuota(req);
+    if (!quota.allowed) {
+        return res.status(429).json({
+            error: `Ati atins limita de previzualizari. Reincercati in ${quota.retryAfterSeconds} secunde.`
+        });
+    }
+
+    try {
+        const doctor = await resolveDoctorByIdentifier(doctorId, { requireActive: false });
+        if (!doctor) {
+            return res.status(404).json({ error: 'Medic negasit.' });
+        }
+
+        const effectiveDoctor = useCurrentFormValues
+            ? buildDoctorForEmailTest(doctor, draft || {})
+            : doctor;
+        const renderedPreview = renderDoctorEmailPreview({ doctor: effectiveDoctor });
+        const previewResponse = buildEmailPreviewResponse(renderedPreview);
+
+        await writeAuditLog(req, {
+            action: 'doctor_email_preview_render',
+            result: 'success',
+            targetType: 'doctor',
+            targetId: doctorId,
+            actorUser: req.user,
+            metadata: {
+                templateSource: previewResponse.templateSource,
+                draftApplied: !!useCurrentFormValues
+            }
+        });
+
+        return res.json({
+            success: true,
+            remaining: quota.remaining,
+            ...previewResponse
+        });
+    } catch (error) {
+        const errorMessage = String(error?.message || '');
+        const safeReason = errorMessage.toLowerCase().includes('template') ? 'template_error' : 'render_failed';
+        console.error(`[EMAIL PREVIEW FAILURE] doctor=${doctorId} reason=${safeReason}`);
+
+        await writeAuditLog(req, {
+            action: 'doctor_email_preview_render',
+            result: 'failure',
+            targetType: 'doctor',
+            targetId: doctorId,
+            actorUser: req.user,
+            metadata: { reason: safeReason }
+        });
+
+        if (safeReason === 'template_error') {
+            return res.status(400).json({
+                error: 'Template invalid sau nu a putut fi randat. Verificati campurile HTML/Text.'
+            });
+        }
+
+        return res.status(500).json({ error: 'Nu s-a putut genera previzualizarea emailului.' });
+    }
+});
+
+app.post('/api/admin/doctors/email-test-preview', requireSuperadminOnly, validateBody(doctorEmailTestPreviewBodySchema), async (req, res) => {
+    setAuthNoStore(res);
+
+    const { toEmail, doctor: doctorDraft } = req.validatedBody;
+    const quota = consumeEmailTestQuota(req);
+    if (!quota.allowed) {
+        return res.status(429).json({
+            error: `Ati atins limita de emailuri de test. Reincercati in ${quota.retryAfterSeconds} secunde.`
+        });
+    }
+
+    const previewDoctor = buildDoctorForEmailTest({
+        displayName: 'Medic Test',
+        specialty: DEFAULT_DOCTOR_SPECIALTY,
+        emailSettings: {}
+    }, doctorDraft || {});
+
+    try {
+        const result = await sendDoctorEmailTest({
+            doctor: previewDoctor,
+            toEmail
+        });
+
+        await writeAuditLog(req, {
+            action: 'doctor_email_test_preview_send',
+            result: 'success',
+            targetType: 'doctor',
+            targetId: 'draft',
+            actorUser: req.user,
+            metadata: {
+                toEmailHash: hashIdentifier(toEmail),
+                templateSource: result?.templateSource || 'unknown'
+            }
+        });
+
+        return res.json({
+            success: true,
+            message: 'Emailul de test a fost trimis.',
+            templateSource: result?.templateSource || 'unknown',
+            remaining: quota.remaining
+        });
+    } catch (error) {
+        const errorMessage = String(error?.message || '');
+        const safeReason = errorMessage.toLowerCase().includes('template') ? 'template_error' : 'send_failed';
+        console.error(
+            `[EMAIL TEST PREVIEW FAILURE] toHash=${hashIdentifier(toEmail)} reason=${safeReason}`
+        );
+
+        await writeAuditLog(req, {
+            action: 'doctor_email_test_preview_send',
+            result: 'failure',
+            targetType: 'doctor',
+            targetId: 'draft',
+            actorUser: req.user,
+            metadata: {
+                toEmailHash: hashIdentifier(toEmail),
+                reason: safeReason
+            }
+        });
+
+        if (errorMessage.toLowerCase().includes('template')) {
+            return res.status(400).json({
+                error: 'Template invalid sau nu a putut fi randat. Verificati campurile HTML/Text.'
+            });
+        }
+
+        return res.status(500).json({ error: 'Trimiterea emailului de test a esuat. Incercati din nou.' });
+    }
+});
+
+app.post('/api/admin/doctors/:id/email-test', requireSuperadminOnly, validateBody(doctorEmailTestBodySchema), async (req, res) => {
+    setAuthNoStore(res);
+
+    const doctorId = String(req.params.id || '').trim();
+    if (!LEGACY_OBJECT_ID_REGEX.test(doctorId)) {
+        return res.status(400).json({ error: 'Medic invalid.' });
+    }
+
+    const { toEmail, doctorOverrides } = req.validatedBody;
+    const quota = consumeEmailTestQuota(req);
+    if (!quota.allowed) {
+        return res.status(429).json({
+            error: `Ati atins limita de emailuri de test. Reincercati in ${quota.retryAfterSeconds} secunde.`
+        });
+    }
+
+    try {
+        const doctor = await resolveDoctorByIdentifier(doctorId, { requireActive: false });
+        if (!doctor) {
+            return res.status(404).json({ error: 'Medic negasit.' });
+        }
+
+        const effectiveDoctor = buildDoctorForEmailTest(doctor, doctorOverrides || {});
+        const result = await sendDoctorEmailTest({
+            doctor: effectiveDoctor,
+            toEmail
+        });
+
+        await writeAuditLog(req, {
+            action: 'doctor_email_test_send',
+            result: 'success',
+            targetType: 'doctor',
+            targetId: doctorId,
+            actorUser: req.user,
+            metadata: {
+                toEmailHash: hashIdentifier(toEmail),
+                templateSource: result?.templateSource || 'unknown'
+            }
+        });
+
+        return res.json({
+            success: true,
+            message: 'Emailul de test a fost trimis.',
+            templateSource: result?.templateSource || 'unknown',
+            remaining: quota.remaining
+        });
+    } catch (error) {
+        const errorMessage = String(error?.message || '');
+        const safeReason = errorMessage.toLowerCase().includes('template') ? 'template_error' : 'send_failed';
+        console.error(
+            `[EMAIL TEST FAILURE] doctor=${doctorId} toHash=${hashIdentifier(toEmail)} reason=${safeReason}`
+        );
+
+        await writeAuditLog(req, {
+            action: 'doctor_email_test_send',
+            result: 'failure',
+            targetType: 'doctor',
+            targetId: doctorId,
+            actorUser: req.user,
+            metadata: {
+                toEmailHash: hashIdentifier(toEmail),
+                reason: safeReason
+            }
+        });
+
+        if (errorMessage.toLowerCase().includes('template')) {
+            return res.status(400).json({
+                error: 'Template invalid sau nu a putut fi randat. Verificati campurile HTML/Text.'
+            });
+        }
+
+        return res.status(500).json({ error: 'Trimiterea emailului de test a esuat. Incercati din nou.' });
     }
 });
 

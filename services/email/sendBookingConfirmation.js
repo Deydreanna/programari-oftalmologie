@@ -368,7 +368,7 @@ function tryBuildTemplate(builder, fallback, contextLabel) {
     }
 }
 
-async function sendBookingConfirmation({
+function buildBookingConfirmationRenderPayload({
     appointment,
     doctor = null,
     clinicName = '',
@@ -377,11 +377,6 @@ async function sendBookingConfirmation({
 } = {}) {
     if (!appointment || typeof appointment !== 'object') {
         throw new Error('Appointment payload is required.');
-    }
-
-    const recipientEmail = toTrimmedString(appointment.email).toLowerCase();
-    if (!recipientEmail) {
-        throw new Error('Appointment email is missing.');
     }
 
     const dateTimeParts = parseAppointmentDateTime(appointment);
@@ -447,13 +442,56 @@ async function sendBookingConfirmation({
         templateSource = 'default';
     }
 
-    const sender = getEmailSender((customEmailActive ? customTemplateConfig?.fromName : null) || resolvedClinicName);
+    return {
+        templatePayload,
+        templateSource,
+        dateTimeParts,
+        customEmailActive,
+        doctorEmailSettings,
+        customTemplateConfig,
+        resolvedClinicName,
+        resolvedLocation,
+        resolvedContactPhone,
+        resolvedPatientName,
+        resolvedDoctorName,
+        resolvedType
+    };
+}
+
+async function sendBookingConfirmation({
+    appointment,
+    doctor = null,
+    clinicName = '',
+    clinicLocation = '',
+    contactPhone = ''
+} = {}) {
+    if (!appointment || typeof appointment !== 'object') {
+        throw new Error('Appointment payload is required.');
+    }
+
+    const recipientEmail = toTrimmedString(appointment.email).toLowerCase();
+    if (!recipientEmail) {
+        throw new Error('Appointment email is missing.');
+    }
+
+    const rendered = buildBookingConfirmationRenderPayload({
+        appointment,
+        doctor,
+        clinicName,
+        clinicLocation,
+        contactPhone
+    });
+
+    const sender = getEmailSender(
+        (rendered.customEmailActive ? rendered.customTemplateConfig?.fromName : null)
+        || rendered.resolvedClinicName
+    );
     const senderAddress = toTrimmedString(sender.fromEmail);
     const senderName = sanitizeEmailHeaderValue(sender.fromName || '').replace(/"/g, '\'');
     const transporter = getEmailTransporter();
     const replyTo = normalizeReplyTo(
-        (customEmailActive ? customTemplateConfig?.replyTo : null)
-        || (customEmailActive ? doctorEmailSettings?.emailReplyTo : null)
+        (rendered.customEmailActive ? rendered.customTemplateConfig?.replyTo : null)
+        || (rendered.customEmailActive ? rendered.doctorEmailSettings?.emailReplyTo : null)
     );
 
     const info = await transporter.sendMail({
@@ -463,18 +501,18 @@ async function sendBookingConfirmation({
         },
         to: recipientEmail,
         ...(replyTo ? { replyTo } : {}),
-        subject: templatePayload.subject,
-        html: templatePayload.html,
-        text: templatePayload.text,
+        subject: rendered.templatePayload.subject,
+        html: rendered.templatePayload.html,
+        text: rendered.templatePayload.text,
         attachments: [
             buildCalendarInviteAttachment({
-                dateTimeParts,
+                dateTimeParts: rendered.dateTimeParts,
                 durationMinutes: resolveConsultationDurationMinutes(doctor),
-                clinicName: resolvedClinicName,
-                location: resolvedLocation,
-                doctorName: resolvedDoctorName,
-                patientName: resolvedPatientName,
-                appointmentType: resolvedType
+                clinicName: rendered.resolvedClinicName,
+                location: rendered.resolvedLocation,
+                doctorName: rendered.resolvedDoctorName,
+                patientName: rendered.resolvedPatientName,
+                appointmentType: rendered.resolvedType
             })
         ]
     });
@@ -482,10 +520,34 @@ async function sendBookingConfirmation({
     return {
         messageId: info?.messageId || null,
         envelope: info?.envelope || null,
-        templateSource
+        templateSource: rendered.templateSource
+    };
+}
+
+function renderBookingConfirmationEmail({
+    appointment,
+    doctor = null,
+    clinicName = '',
+    clinicLocation = '',
+    contactPhone = ''
+} = {}) {
+    const rendered = buildBookingConfirmationRenderPayload({
+        appointment,
+        doctor,
+        clinicName,
+        clinicLocation,
+        contactPhone
+    });
+
+    return {
+        subject: rendered.templatePayload.subject,
+        html: rendered.templatePayload.html,
+        text: rendered.templatePayload.text,
+        templateSource: rendered.templateSource
     };
 }
 
 module.exports = {
-    sendBookingConfirmation
+    sendBookingConfirmation,
+    renderBookingConfirmationEmail
 };
