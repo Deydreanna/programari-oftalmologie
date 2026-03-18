@@ -570,13 +570,31 @@ document.addEventListener('DOMContentLoaded', () => {
     // File Viewer
     // ========================
 
-    closeFileViewer.onclick = () => {
-        fileViewerModal.classList.add('hidden');
-        fileViewerContent.innerHTML = '';
-        fileDownloadLink.innerHTML = '';
-    };
+    const hasFileViewerModal = Boolean(
+        fileViewerModal
+        && closeFileViewer
+        && fileViewerContent
+        && fileDownloadLink
+    );
+
+    if (hasFileViewerModal) {
+        closeFileViewer.onclick = () => {
+            fileViewerModal.classList.add('hidden');
+            fileViewerContent.innerHTML = '';
+            fileDownloadLink.innerHTML = '';
+        };
+    }
 
     function openFileViewer(base64, type) {
+        if (!hasFileViewerModal) {
+            if (typeof base64 === 'string' && base64.startsWith('data:')) {
+                window.open(base64, '_blank', 'noopener,noreferrer');
+                return;
+            }
+            showToast('Eroare', 'Vizualizarea fișierului nu este disponibilă momentan.', 'error');
+            return;
+        }
+
         fileViewerContent.innerHTML = '';
         fileDownloadLink.innerHTML = '';
 
