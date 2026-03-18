@@ -99,21 +99,28 @@
                 <!-- Step 1 -->
                 <div class="step-indicator flex items-center gap-2" id="stepIndicator1">
                     <div class="step-dot active" id="stepDot1">1</div>
-                    <span class="step-label text-sm font-semibold text-brand-300 hidden sm:inline">Alege Medic si Data</span>
+                    <span class="step-label font-semibold text-brand-300 text-[10px] sm:text-sm leading-tight">
+                        <span class="sm:hidden">Medic &amp; Data</span>
+                        <span class="hidden sm:inline">Alege Medic si Data</span>
+                    </span>
                 </div>
                 <div class="step-line" id="stepLine1"></div>
                 <!-- Step 2 -->
                 <div class="step-indicator flex items-center gap-2" id="stepIndicator2">
                     <div class="step-dot" id="stepDot2">2</div>
-                    <span class="step-label text-sm font-semibold text-brand-400/50 hidden sm:inline" id="stepLabel2">Alege
-                        Ora</span>
+                    <span class="step-label font-semibold text-brand-400/50 text-[10px] sm:text-sm leading-tight" id="stepLabel2">
+                        <span class="sm:hidden">Ora</span>
+                        <span class="hidden sm:inline">Alege Ora</span>
+                    </span>
                 </div>
                 <div class="step-line" id="stepLine2"></div>
                 <!-- Step 3 -->
                 <div class="step-indicator flex items-center gap-2" id="stepIndicator3">
                     <div class="step-dot" id="stepDot3">3</div>
-                    <span class="step-label text-sm font-semibold text-brand-400/50 hidden sm:inline" id="stepLabel3">Date
-                        Personale</span>
+                    <span class="step-label font-semibold text-brand-400/50 text-[10px] sm:text-sm leading-tight" id="stepLabel3">
+                        <span class="sm:hidden">Date</span>
+                        <span class="hidden sm:inline">Date Personale</span>
+                    </span>
                 </div>
             </div>
         </div>
@@ -384,7 +391,7 @@
     <!-- Admin Login Modal REMOVED - Using account role instead -->
 
     <!-- Notification Toast -->
-    <div id="toast"
+    <div id="toast" role="alert" aria-live="polite" aria-atomic="true"
         class="fixed bottom-5 right-5 bg-brand-800 shadow-xl rounded-xl p-5 transform translate-y-20 opacity-0 transition-all duration-300 max-w-sm z-50 border-l-4 border border-brand-600/20">
         <h4 id="toastTitle" class="font-bold text-brand-100"></h4>
         <p id="toastMessage" class="text-sm text-brand-300 mt-1"></p>

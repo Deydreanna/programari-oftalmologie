@@ -361,6 +361,12 @@ textarea:focus-visible {
     transform: scale(0.95);
 }
 
+.nav-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 /* --- Calendar Days --- */
 .calendar-day {
     position: relative;
@@ -387,11 +393,10 @@ textarea:focus-visible {
 }
 
 .calendar-day.disabled-day {
-    color: var(--text-subtle);
-    background: rgb(var(--celadon-rgb) / 0.42);
+    color: rgb(var(--black-rgb) / 0.38);
+    background: rgb(var(--celadon-rgb) / 0.25);
     border-style: dashed;
-    border-color: rgb(var(--charcoal-rgb) / 0.18);
-    opacity: 0.8;
+    border-color: rgb(var(--charcoal-rgb) / 0.12);
     cursor: not-allowed;
 }
 

@@ -1,329 +1,91 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const byId = (id) => document.getElementById(id);
+    // ========================
+    // DOM Elements
+    // ========================
 
-    const stepCalendar = byId('step-calendar');
-    const stepSlots = byId('step-slots');
-    const stepForm = byId('step-form');
+    // Steps
+    const stepCalendar = document.getElementById('step-calendar');
+    const stepSlots = document.getElementById('step-slots');
+    const stepForm = document.getElementById('step-form');
+    const stepDot1 = document.getElementById('stepDot1');
+    const stepDot2 = document.getElementById('stepDot2');
+    const stepDot3 = document.getElementById('stepDot3');
+    const stepLine1 = document.getElementById('stepLine1');
+    const stepLine2 = document.getElementById('stepLine2');
+    const stepLabel2 = document.getElementById('stepLabel2');
+    const stepLabel3 = document.getElementById('stepLabel3');
 
-    if (!stepCalendar || !stepSlots || !stepForm) {
-        return;
-    }
+    // Calendar
+    const calendarGrid = document.getElementById('calendarGrid');
+    const currentMonthYear = document.getElementById('currentMonthYear');
+    const prevMonthBtn = document.getElementById('prevMonth');
+    const nextMonthBtn = document.getElementById('nextMonth');
 
-    const stepDot1 = byId('stepDot1');
-    const stepDot2 = byId('stepDot2');
-    const stepDot3 = byId('stepDot3');
-    const stepLine1 = byId('stepLine1');
-    const stepLine2 = byId('stepLine2');
-    const stepLabel2 = byId('stepLabel2');
-    const stepLabel3 = byId('stepLabel3');
+    // Slots
+    const slotsGrid = document.getElementById('slotsGrid');
+    const selectedDateDisplay = document.getElementById('selectedDateDisplay');
+    const noSlotsMessage = document.getElementById('noSlotsMessage');
+    const backToCalendar = document.getElementById('backToCalendar');
 
-    const calendarGrid = byId('calendarGrid');
-    const currentMonthYear = byId('currentMonthYear');
-    const prevMonthBtn = byId('prevMonth');
-    const nextMonthBtn = byId('nextMonth');
+    // Form
+    const bookingForm = document.getElementById('bookingForm');
+    const formDate = document.getElementById('formDate');
+    const formTime = document.getElementById('formTime');
+    const formSummaryDate = document.getElementById('formSummaryDate');
+    const formSummaryTime = document.getElementById('formSummaryTime');
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    const backToSlots = document.getElementById('backToSlots');
+    const gdprConsent = document.getElementById('gdprConsent');
 
-    const doctorSelect = byId('doctorSelect');
-    const doctorSelectHint = byId('doctorSelectHint');
-    const selectedDoctorDisplay = byId('selectedDoctorDisplay');
+    // Type selector
+    const typeSelector = document.getElementById('typeSelector');
+    const typeInput = document.getElementById('type');
+    const diagnosisSection = document.getElementById('diagnosisSection');
+    const hasDiagnosis = document.getElementById('hasDiagnosis');
+    const fileUploadContainer = document.getElementById('fileUploadContainer');
+    const diagnosticFileInput = document.getElementById('diagnosticFile');
+    const dropZone = document.getElementById('dropZone');
+    const filePreview = document.getElementById('filePreview');
+    const fileNameDisplay = document.getElementById('fileName');
+    const removeFileBtn = document.getElementById('removeFile');
 
-    const slotsGrid = byId('slotsGrid');
-    const selectedDateDisplay = byId('selectedDateDisplay');
-    const noSlotsMessage = byId('noSlotsMessage');
-    const backToCalendar = byId('backToCalendar');
+    // File Viewer
+    const fileViewerModal = document.getElementById('fileViewerModal');
+    const closeFileViewer = document.getElementById('closeFileViewer');
+    const fileViewerContent = document.getElementById('fileViewerContent');
+    const fileDownloadLink = document.getElementById('fileDownloadLink');
 
-    const bookingForm = byId('bookingForm');
-    const formDate = byId('formDate');
-    const formTime = byId('formTime');
-    const formDoctorId = byId('formDoctorId');
-    const formDoctorSlug = byId('formDoctorSlug');
-    const formSummaryDoctor = byId('formSummaryDoctor');
-    const formSummaryDate = byId('formSummaryDate');
-    const formSummaryTime = byId('formSummaryTime');
-    const loadingSpinner = byId('loadingSpinner');
-    const backToSlots = byId('backToSlots');
-    const gdprConsent = byId('gdprConsent');
-    const consentLink = byId('consentLink');
-    const consentModalOverlay = byId('consentModalOverlay');
-    const consentModal = byId('consentModal');
-    const consentModalClose = byId('consentModalClose');
-    const consentModalConfirm = byId('consentModalConfirm');
-    const consentError = byId('consentError');
+    // Toast
+    const toast = document.getElementById('toast');
+    const toastTitle = document.getElementById('toastTitle');
+    const toastMessage = document.getElementById('toastMessage');
 
-    const typeSelector = byId('typeSelector');
-    const typeInput = byId('type');
-    const diagnosisSection = byId('diagnosisSection');
-    const hasDiagnosis = byId('hasDiagnosis');
-    const fileUploadContainer = byId('fileUploadContainer');
-    const diagnosticFileInput = byId('diagnosticFile');
-    const dropZone = byId('dropZone');
-    const filePreview = byId('filePreview');
-    const fileNameDisplay = byId('fileName');
-    const removeFileBtn = byId('removeFile');
-
-    const toast = byId('toast');
-    const toastTitle = byId('toastTitle');
-    const toastMessage = byId('toastMessage');
-
+    // State
     let currentDate = new Date();
     let selectedDate = null;
-    let selectedDoctor = null;
-    let doctorList = [];
-    let lastConsentTrigger = null;
+    let selectedTime = null;
 
-    function clearNode(node) {
-        while (node.firstChild) {
-            node.removeChild(node.firstChild);
-        }
-    }
-
-    function setSingleMessage(container, text, className) {
-        clearNode(container);
-        const div = document.createElement('div');
-        div.className = className;
-        div.textContent = text;
-        container.appendChild(div);
-    }
-
-    function showToast(title, message, type = 'success') {
-        if (!toast || !toastTitle || !toastMessage) return;
-
-        toastTitle.textContent = title;
-        toastMessage.textContent = message;
-        toast.className = `fixed bottom-5 right-5 bg-brand-800 shadow-xl rounded-xl p-5 transform transition-all duration-300 max-w-sm z-50 border-l-4 border border-brand-600/30 ${type === 'success' ? 'toast-success' : 'toast-error'}`;
-        toastTitle.className = `font-bold ${type === 'success' ? 'toast-title-success' : 'toast-title-error'}`;
-        toastMessage.className = `text-sm mt-1 ${type === 'success' ? 'toast-message-success' : 'toast-message-error'}`;
-
-        setTimeout(() => {
-            toast.classList.remove('translate-y-20', 'opacity-0');
-        }, 10);
-        setTimeout(() => {
-            toast.classList.add('translate-y-20', 'opacity-0');
-        }, 12000);
-    }
-
-    function setConsentError(message = '') {
-        if (!consentError || !gdprConsent) return;
-
-        const hasError = !!String(message || '').trim();
-        consentError.textContent = hasError ? String(message) : '';
-        consentError.classList.toggle('hidden', !hasError);
-        gdprConsent.setAttribute('aria-invalid', hasError ? 'true' : 'false');
-    }
-
-    function clearConsentError() {
-        setConsentError('');
-    }
-
-    function isConsentModalOpen() {
-        return !!consentModalOverlay && !consentModalOverlay.classList.contains('hidden');
-    }
-
-    function openConsentModal() {
-        if (!consentModalOverlay) return;
-        lastConsentTrigger = document.activeElement;
-        consentModalOverlay.classList.remove('hidden');
-        consentModalOverlay.setAttribute('aria-hidden', 'false');
-        document.body.classList.add('consent-modal-open');
-
-        if (consentModalClose) {
-            requestAnimationFrame(() => {
-                consentModalClose.focus();
-            });
-        }
-    }
-
-    function closeConsentModal({ restoreFocus = true } = {}) {
-        if (!consentModalOverlay) return;
-        consentModalOverlay.classList.add('hidden');
-        consentModalOverlay.setAttribute('aria-hidden', 'true');
-        document.body.classList.remove('consent-modal-open');
-
-        if (!restoreFocus) return;
-        const focusTarget = (lastConsentTrigger && typeof lastConsentTrigger.focus === 'function')
-            ? lastConsentTrigger
-            : consentLink;
-        if (focusTarget && typeof focusTarget.focus === 'function') {
-            focusTarget.focus();
-        }
-    }
-
-    function bindConsentUx() {
-        if (!gdprConsent || !consentLink || !consentModalOverlay || !consentModal || !consentModalClose || !consentModalConfirm) {
-            return;
-        }
-        if (consentLink.dataset.bound === '1') {
-            return;
-        }
-        consentLink.dataset.bound = '1';
-
-        consentLink.addEventListener('click', () => {
-            openConsentModal();
-        });
-
-        consentModalClose.addEventListener('click', () => {
-            closeConsentModal();
-        });
-
-        consentModalOverlay.addEventListener('click', (event) => {
-            if (event.target === consentModalOverlay) {
-                closeConsentModal();
-            }
-        });
-
-        consentModal.addEventListener('click', (event) => {
-            event.stopPropagation();
-        });
-
-        consentModalConfirm.addEventListener('click', () => {
-            gdprConsent.checked = true;
-            gdprConsent.dispatchEvent(new Event('input', { bubbles: true }));
-            gdprConsent.dispatchEvent(new Event('change', { bubbles: true }));
-            clearConsentError();
-            closeConsentModal();
-        });
-
-        gdprConsent.addEventListener('change', () => {
-            if (gdprConsent.checked) {
-                clearConsentError();
-            }
-        });
-
-        document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape' && isConsentModalOpen()) {
-                closeConsentModal();
-            }
-        });
-    }
-
-    function toISODateLocal(date) {
-        const y = date.getFullYear();
-        const m = String(date.getMonth() + 1).padStart(2, '0');
-        const d = String(date.getDate()).padStart(2, '0');
-        return `${y}-${m}-${d}`;
-    }
-
-    function startOfDay(date) {
-        const out = new Date(date);
-        out.setHours(0, 0, 0, 0);
-        return out;
-    }
-
-    function normalizeCnp(value) {
-        return String(value || '').trim().replace(/[^\d]/g, '');
-    }
-
-    function validateRomanianCnp(value) {
-        const cnp = normalizeCnp(value);
-        if (!/^\d{13}$/.test(cnp)) {
-            return false;
-        }
-
-        const firstDigit = Number(cnp[0]);
-        if (!Number.isInteger(firstDigit) || firstDigit < 1 || firstDigit > 9) {
-            return false;
-        }
-
-        const control = '279146358279';
-        let sum = 0;
-        for (let index = 0; index < 12; index += 1) {
-            sum += Number(cnp[index]) * Number(control[index]);
-        }
-        let expected = sum % 11;
-        if (expected === 10) {
-            expected = 1;
-        }
-        return Number(cnp[12]) === expected;
-    }
-
-    function getDoctorMonthLimitDate() {
-        const today = startOfDay(new Date());
-        const monthsToShow = Number(selectedDoctor?.bookingSettings?.monthsToShow || 1);
-        const max = new Date(today);
-        max.setMonth(max.getMonth() + monthsToShow);
-        return max;
-    }
-
-    function isDateWithinDoctorRange(dateObj) {
-        if (!selectedDoctor) return false;
-        const day = startOfDay(dateObj);
-        const minDate = startOfDay(new Date());
-        const maxDate = startOfDay(getDoctorMonthLimitDate());
-        return day >= minDate && day <= maxDate;
-    }
-
-    function getDoctorDayConfigs(doctor) {
-        if (!doctor || !doctor.availabilityRules) return [];
-        const dayConfigs = Array.isArray(doctor.availabilityRules.dayConfigs)
-            ? doctor.availabilityRules.dayConfigs
-            : [];
-        if (dayConfigs.length > 0) {
-            return dayConfigs
-                .map((config) => ({
-                    weekday: Number(config.weekday),
-                    startTime: String(config.startTime || ''),
-                    endTime: String(config.endTime || ''),
-                    consultationDurationMinutes: Number(config.consultationDurationMinutes)
-                }))
-                .filter((config) => Number.isInteger(config.weekday) && config.weekday >= 0 && config.weekday <= 6);
-        }
-        const weekdays = Array.isArray(doctor.availabilityRules.weekdays) ? doctor.availabilityRules.weekdays : [];
-        return weekdays.map((weekday) => ({
-            weekday: Number(weekday),
-            startTime: String(doctor.bookingSettings?.workdayStart || ''),
-            endTime: String(doctor.bookingSettings?.workdayEnd || ''),
-            consultationDurationMinutes: Number(doctor.bookingSettings?.consultationDurationMinutes || 20)
-        }));
-    }
-
-    function isDoctorWeekdayAvailable(dateObj) {
-        if (!selectedDoctor) return false;
-        const weekdays = getDoctorDayConfigs(selectedDoctor).map((config) => config.weekday);
-        return weekdays.includes(dateObj.getDay());
-    }
-
-    function isDoctorDateBlocked(formattedDate) {
-        if (!selectedDoctor) return false;
-        const blockedDates = Array.isArray(selectedDoctor.blockedDates) ? selectedDoctor.blockedDates : [];
-        return blockedDates.includes(formattedDate);
-    }
-
-    function updateNavButtons() {
-        if (!selectedDoctor) {
-            prevMonthBtn.disabled = true;
-            nextMonthBtn.disabled = true;
-            return;
-        }
-
-        const today = startOfDay(new Date());
-        const minMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-        const maxDate = getDoctorMonthLimitDate();
-        const maxMonth = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
-        const currentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-
-        prevMonthBtn.disabled = currentMonth <= minMonth;
-        nextMonthBtn.disabled = currentMonth >= maxMonth;
-    }
+    // ========================
+    // Step Wizard
+    // ========================
 
     function goToStep(step) {
+        // Hide all steps
         stepCalendar.classList.add('hidden');
         stepSlots.classList.add('hidden');
         stepForm.classList.add('hidden');
 
-        [stepDot1, stepDot2, stepDot3].forEach((dot) => {
+        // Reset dots
+        [stepDot1, stepDot2, stepDot3].forEach(dot => {
             dot.classList.remove('active', 'completed');
         });
-        [stepLine1, stepLine2].forEach((line) => {
+        [stepLine1, stepLine2].forEach(line => {
             line.classList.remove('active');
         });
-
-        if (stepLabel2) {
-            stepLabel2.classList.remove('text-brand-300');
-            stepLabel2.classList.add('text-brand-400/50');
-        }
-        if (stepLabel3) {
-            stepLabel3.classList.remove('text-brand-300');
-            stepLabel3.classList.add('text-brand-400/50');
-        }
+        if (stepLabel2) stepLabel2.classList.remove('text-medical-600');
+        if (stepLabel2) stepLabel2.classList.add('text-gray-400');
+        if (stepLabel3) stepLabel3.classList.remove('text-medical-600');
+        if (stepLabel3) stepLabel3.classList.add('text-gray-400');
 
         if (step === 1) {
             stepCalendar.classList.remove('hidden');
@@ -334,8 +96,8 @@ document.addEventListener('DOMContentLoaded', () => {
             stepDot2.classList.add('active');
             stepLine1.classList.add('active');
             if (stepLabel2) {
-                stepLabel2.classList.remove('text-brand-400/50');
-                stepLabel2.classList.add('text-brand-300');
+                stepLabel2.classList.remove('text-gray-400');
+                stepLabel2.classList.add('text-medical-600');
             }
         } else if (step === 3) {
             stepForm.classList.remove('hidden');
@@ -345,21 +107,106 @@ document.addEventListener('DOMContentLoaded', () => {
             stepLine1.classList.add('active');
             stepLine2.classList.add('active');
             if (stepLabel2) {
-                stepLabel2.classList.remove('text-brand-400/50');
-                stepLabel2.classList.add('text-brand-300');
+                stepLabel2.classList.remove('text-gray-400');
+                stepLabel2.classList.add('text-medical-600');
             }
             if (stepLabel3) {
-                stepLabel3.classList.remove('text-brand-400/50');
-                stepLabel3.classList.add('text-brand-300');
+                stepLabel3.classList.remove('text-gray-400');
+                stepLabel3.classList.add('text-medical-600');
             }
         }
 
+        // Scroll to top
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    function renderCalendar(date) {
-        clearNode(calendarGrid);
+    // Navigation
+    backToCalendar.onclick = () => {
+        selectedDate = null;
+        goToStep(1);
+    };
 
+    backToSlots.onclick = () => {
+        selectedTime = null;
+        goToStep(2);
+    };
+
+    // ========================
+    // Toast
+    // ========================
+
+    function showToast(title, message, type = 'success') {
+        toastTitle.textContent = title;
+        toastMessage.textContent = message;
+        toast.className = `fixed bottom-5 right-5 bg-brand-800 shadow-xl rounded-xl p-5 transform transition-all duration-300 max-w-sm z-50 border-l-4 border border-brand-600/30 ${type === 'success' ? 'border-l-brand-400' : 'border-l-red-400'}`;
+        toastTitle.className = `font-bold ${type === 'success' ? 'text-brand-100' : 'text-red-300'}`;
+        toastMessage.className = `text-sm mt-1 ${type === 'success' ? 'text-brand-300' : 'text-red-200'}`;
+        setTimeout(() => {
+            toast.classList.remove('translate-y-20', 'opacity-0');
+        }, 10);
+        setTimeout(() => {
+            toast.classList.add('translate-y-20', 'opacity-0');
+        }, 12000);
+    }
+
+    // ========================
+    // File Processing
+    // ========================
+
+    async function processFile(file) {
+        if (!file) return null;
+        if (file.type === 'application/pdf') {
+            return { base64: await fileToBase64(file), type: file.type };
+        }
+        if (file.type.startsWith('image/')) {
+            const compressedBase64 = await compressImage(file);
+            return { base64: compressedBase64, type: 'image/jpeg' };
+        }
+        return null;
+    }
+
+    function fileToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    async function compressImage(file) {
+        const MAX_WIDTH = 1200;
+        const MAX_HEIGHT = 1200;
+        const QUALITY = 0.6;
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    let width = img.width;
+                    let height = img.height;
+                    const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height, 1);
+                    width *= ratio;
+                    height *= ratio;
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', QUALITY));
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    // ========================
+    // Calendar
+    // ========================
+
+    function renderCalendar(date) {
+        calendarGrid.innerHTML = '';
         const year = date.getFullYear();
         const month = date.getMonth();
 
@@ -369,31 +216,34 @@ document.addEventListener('DOMContentLoaded', () => {
         const firstDayIndex = new Date(year, month, 1).getDay();
         const lastDay = new Date(year, month + 1, 0).getDate();
 
-        for (let i = 0; i < firstDayIndex; i += 1) {
+        // Filler for days before 1st
+        for (let i = 0; i < firstDayIndex; i++) {
             const div = document.createElement('div');
             div.className = 'calendar-day empty';
             calendarGrid.appendChild(div);
         }
 
-        const today = startOfDay(new Date());
-
-        for (let day = 1; day <= lastDay; day += 1) {
+        for (let i = 1; i <= lastDay; i++) {
             const dayDiv = document.createElement('div');
-            dayDiv.textContent = day;
+            dayDiv.textContent = i;
 
-            const currentDayDate = new Date(year, month, day);
-            const normalizedDate = startOfDay(currentDayDate);
-            const formattedDate = toISODateLocal(normalizedDate);
+            const currentDayDate = new Date(year, month, i);
+            const y = currentDayDate.getFullYear();
+            const m = String(currentDayDate.getMonth() + 1).padStart(2, '0');
+            const d = String(currentDayDate.getDate()).padStart(2, '0');
+            const formattedDate = `${y}-${m}-${d}`;
 
-            const isPast = normalizedDate < today;
-            const isRangeOk = isDateWithinDoctorRange(normalizedDate);
-            const isWeekdayOk = isDoctorWeekdayAvailable(normalizedDate);
-            const isBlocked = isDoctorDateBlocked(formattedDate);
-            const isEnabled = selectedDoctor && !isPast && isRangeOk && isWeekdayOk && !isBlocked;
+            const isWednesday = currentDayDate.getDay() === 3;
+            const isValidMonth = year === 2026 && month >= 1 && month <= 3;
+            const isExcludedDate = formattedDate === '2026-04-08';
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const isPast = currentDayDate < today;
 
             dayDiv.className = 'calendar-day';
 
-            if (isEnabled) {
+            if (isWednesday && !isPast && isValidMonth && !isExcludedDate) {
                 dayDiv.classList.add('active-wednesday');
 
                 const dot = document.createElement('div');
@@ -411,140 +261,84 @@ document.addEventListener('DOMContentLoaded', () => {
 
             calendarGrid.appendChild(dayDiv);
         }
-
-        updateNavButtons();
     }
 
-    function updateDoctorUI() {
-        const doctorName = selectedDoctor?.displayName || '';
-        if (selectedDoctorDisplay) {
-            selectedDoctorDisplay.textContent = doctorName;
-        }
-        if (formSummaryDoctor) {
-            formSummaryDoctor.textContent = doctorName;
-        }
+    function selectDate(date, element) {
+        selectedDate = date;
+        const dateObj = new Date(date);
+        const dateStr = new Intl.DateTimeFormat('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' }).format(dateObj);
+        selectedDateDisplay.textContent = dateStr;
 
-        if (!doctorSelectHint) return;
-        if (!selectedDoctor) {
-            doctorSelectHint.textContent = 'Selecteaza un medic pentru a vedea disponibilitatea.';
-            return;
-        }
-
-        const settings = selectedDoctor.bookingSettings || {};
-        const dayConfigs = getDoctorDayConfigs(selectedDoctor);
-        const summary = dayConfigs.length
-            ? dayConfigs
-                .map((config) => `${['Du', 'Lu', 'Ma', 'Mi', 'Jo', 'Vi', 'Sa'][config.weekday]} ${config.startTime}-${config.endTime}/${config.consultationDurationMinutes}m`)
-                .join('; ')
-            : 'nedefinit';
-
-        doctorSelectHint.textContent = `Program pe zile: ${summary}; luni vizibile ${settings.monthsToShow || '-'}; fus orar ${settings.timezone || 'Europe/Bucharest'}`;
-    }
-
-    function resetAfterDoctorChange() {
-        selectedDate = null;
-        formDate.value = '';
-        formTime.value = '';
-        formDoctorId.value = selectedDoctor?._id || '';
-        formDoctorSlug.value = selectedDoctor?.slug || '';
-        selectedDateDisplay.textContent = '';
-        formSummaryDate.textContent = '';
-        formSummaryTime.textContent = '';
-        clearNode(slotsGrid);
-        noSlotsMessage.classList.add('hidden');
-    }
-
-    function selectDate(dateValue, element) {
-        if (!selectedDoctor) {
-            showToast('Atentie', 'Selecteaza mai intai un medic.', 'error');
-            return;
-        }
-
-        selectedDate = dateValue;
-        const dateObj = new Date(`${dateValue}T00:00:00`);
-        selectedDateDisplay.textContent = new Intl.DateTimeFormat('ro-RO', {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric'
-        }).format(dateObj);
-
-        document.querySelectorAll('.calendar-day').forEach((dayNode) => dayNode.classList.remove('selected'));
+        // Highlight
+        document.querySelectorAll('.calendar-day').forEach(d => d.classList.remove('selected'));
         element.classList.add('selected');
 
-        fetchSlots(dateValue);
+        // Go to step 2
+        fetchSlots(date);
         goToStep(2);
     }
 
-    async function fetchDoctors() {
-        if (!doctorSelect) return;
-
-        doctorSelect.disabled = true;
-        try {
-            const res = await fetch('/api/public/doctors', { method: 'GET' });
-            const payload = await res.json().catch(() => ({}));
-
-            if (!res.ok) {
-                throw new Error(payload.error || 'Nu s-a putut incarca lista medicilor.');
-            }
-
-            const doctors = Array.isArray(payload.doctors) ? payload.doctors : [];
-            doctorList = doctors;
-
-            clearNode(doctorSelect);
-            const emptyOpt = document.createElement('option');
-            emptyOpt.value = '';
-            emptyOpt.textContent = doctors.length ? 'Selecteaza un medic...' : 'Nu exista medici activi';
-            doctorSelect.appendChild(emptyOpt);
-
-            doctors.forEach((doctor) => {
-                const option = document.createElement('option');
-                option.value = doctor._id;
-                option.textContent = `${doctor.displayName} (${doctor.specialty || 'Specialitate'})`;
-                doctorSelect.appendChild(option);
-            });
-
-            doctorSelect.disabled = doctors.length === 0;
-            updateDoctorUI();
-        } catch (error) {
-            doctorSelect.disabled = true;
-            doctorSelectHint.textContent = String(error?.message || 'Eroare la incarcarea medicilor.');
-            showToast('Eroare', 'Nu s-a putut incarca lista medicilor activi.', 'error');
+    prevMonthBtn.onclick = () => {
+        const testDate = new Date(currentDate);
+        testDate.setMonth(testDate.getMonth() - 1);
+        if (testDate.getFullYear() === 2026 && testDate.getMonth() >= 1) {
+            currentDate.setMonth(currentDate.getMonth() - 1);
+            renderCalendar(currentDate);
         }
-    }
+    };
 
-    async function fetchSlots(dateValue) {
-        if (!selectedDoctor) {
-            setSingleMessage(slotsGrid, 'Selecteaza un medic.', 'col-span-full text-center py-8 ui-message-muted font-medium');
-            return;
+    nextMonthBtn.onclick = () => {
+        const testDate = new Date(currentDate);
+        testDate.setMonth(testDate.getMonth() + 1);
+        if (testDate.getFullYear() === 2026 && testDate.getMonth() <= 3) {
+            currentDate.setMonth(currentDate.getMonth() + 1);
+            renderCalendar(currentDate);
         }
+    };
 
-        setSingleMessage(slotsGrid, 'Se incarca intervalele...', 'col-span-full text-center py-8 ui-message-muted font-medium');
+    renderCalendar(currentDate);
+
+    // ========================
+    // Slots
+    // ========================
+
+    async function fetchSlots(date) {
+        slotsGrid.innerHTML = '<div class="col-span-full text-center py-8 text-brand-400/60 font-medium">Se încarcă intervalele...</div>';
         noSlotsMessage.classList.add('hidden');
 
         try {
-            const query = new URLSearchParams({
-                doctor: selectedDoctor.slug,
-                date: dateValue
-            });
-            const res = await fetch(`/api/slots?${query.toString()}`);
-            const payload = await res.json().catch(() => ({}));
+            const res = await fetch(`/api/slots?date=${date}`);
+            const slots = await res.json();
 
-            if (!res.ok) {
-                setSingleMessage(slotsGrid, String(payload?.error || 'Eroare.'), 'col-span-full text-center ui-message-error');
+            if (res.status !== 200) {
+                showSlotError(slots.error || 'Eroare la încărcarea orelor.', date);
                 return;
             }
-
-            const slots = Array.isArray(payload?.slots) ? payload.slots : [];
-            renderSlots(slots, dateValue);
-        } catch (error) {
-            console.error(error);
-            setSingleMessage(slotsGrid, 'Eroare de conexiune.', 'col-span-full text-center ui-message-error');
+            renderSlots(slots, date);
+        } catch (err) {
+            console.error(err);
+            showSlotError('Eroare de conexiune. Verificați conexiunea la internet.', date);
         }
     }
 
-    function renderSlots(slots, dateValue) {
-        clearNode(slotsGrid);
-        const availableSlots = slots.filter((slot) => slot.available);
+    function showSlotError(message, date) {
+        slotsGrid.innerHTML = `
+            <div class="col-span-full text-center py-10">
+                <svg class="w-12 h-12 mx-auto mb-3 text-red-400/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                </svg>
+                <p class="text-red-400 font-medium mb-4">${message}</p>
+                <button id="retrySlots" class="px-5 py-2 rounded-xl border border-brand-600/30 bg-brand-700 text-brand-100 font-semibold hover:bg-brand-600/40 transition-all text-sm">
+                    Încearcă din nou
+                </button>
+            </div>
+        `;
+        document.getElementById('retrySlots').onclick = () => fetchSlots(date);
+    }
+
+    function renderSlots(slots, date) {
+        slotsGrid.innerHTML = '';
+        const availableSlots = slots.filter(s => s.available);
 
         if (availableSlots.length === 0) {
             noSlotsMessage.classList.remove('hidden');
@@ -560,19 +354,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (slot.available) {
                 btn.onclick = () => {
-                    formDate.value = dateValue;
+                    selectedTime = slot.time;
+                    formDate.value = date;
                     formTime.value = slot.time;
-                    formDoctorId.value = selectedDoctor?._id || '';
-                    formDoctorSlug.value = selectedDoctor?.slug || '';
 
-                    const dateObj = new Date(`${dateValue}T00:00:00`);
-                    formSummaryDate.textContent = new Intl.DateTimeFormat('ro-RO', {
-                        day: 'numeric',
-                        month: 'long',
-                        year: 'numeric'
-                    }).format(dateObj);
+                    const dateObj = new Date(date);
+                    formSummaryDate.textContent = new Intl.DateTimeFormat('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' }).format(dateObj);
                     formSummaryTime.textContent = slot.time;
-                    formSummaryDoctor.textContent = selectedDoctor?.displayName || '';
 
                     goToStep(3);
                 };
@@ -582,109 +370,56 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    doctorSelect.addEventListener('change', (event) => {
-        const doctorId = String(event.target.value || '');
-        selectedDoctor = doctorList.find((doctor) => String(doctor._id) === doctorId) || null;
+    // ========================
+    // Type Selector
+    // ========================
 
-        resetAfterDoctorChange();
-        updateDoctorUI();
-        renderCalendar(currentDate);
-        goToStep(1);
-    });
-
-    prevMonthBtn.onclick = () => {
-        if (!selectedDoctor) {
-            showToast('Atentie', 'Selecteaza un medic inainte sa navighezi in calendar.', 'error');
-            return;
-        }
-
-        const testDate = new Date(currentDate);
-        testDate.setMonth(testDate.getMonth() - 1);
-
-        const today = startOfDay(new Date());
-        const minMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-        const testMonth = new Date(testDate.getFullYear(), testDate.getMonth(), 1);
-
-        if (testMonth >= minMonth) {
-            currentDate = testDate;
-            renderCalendar(currentDate);
-        }
-    };
-
-    nextMonthBtn.onclick = () => {
-        if (!selectedDoctor) {
-            showToast('Atentie', 'Selecteaza un medic inainte sa navighezi in calendar.', 'error');
-            return;
-        }
-
-        const testDate = new Date(currentDate);
-        testDate.setMonth(testDate.getMonth() + 1);
-
-        const maxDate = getDoctorMonthLimitDate();
-        const maxMonth = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
-        const testMonth = new Date(testDate.getFullYear(), testDate.getMonth(), 1);
-
-        if (testMonth <= maxMonth) {
-            currentDate = testDate;
-            renderCalendar(currentDate);
-        }
-    };
-
-    backToCalendar.onclick = () => {
-        selectedDate = null;
-        goToStep(1);
-    };
-
-    backToSlots.onclick = () => {
-        goToStep(2);
-    };
-
-    typeSelector.addEventListener('click', (event) => {
-        const btn = event.target.closest('.type-btn');
+    typeSelector.addEventListener('click', (e) => {
+        const btn = e.target.closest('.type-btn');
         if (!btn) return;
 
-        typeSelector.querySelectorAll('.type-btn').forEach((node) => node.classList.remove('selected'));
+        typeSelector.querySelectorAll('.type-btn').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
         typeInput.value = btn.dataset.value;
 
-        if (btn.dataset.value === 'Prima Consultatie') {
+        if (btn.dataset.value === 'Prima Consultație') {
             diagnosisSection.classList.remove('hidden');
-            return;
+        } else {
+            diagnosisSection.classList.add('hidden');
+            hasDiagnosis.checked = false;
+            fileUploadContainer.classList.add('hidden');
+            if (diagnosticFileInput) diagnosticFileInput.value = '';
+            filePreview.classList.add('hidden');
         }
-
-        diagnosisSection.classList.add('hidden');
-        hasDiagnosis.checked = false;
-        fileUploadContainer.classList.add('hidden');
-        diagnosticFileInput.value = '';
-        filePreview.classList.add('hidden');
-        dropZone.classList.remove('hidden');
     });
 
     hasDiagnosis.addEventListener('change', () => {
         if (hasDiagnosis.checked) {
             fileUploadContainer.classList.remove('hidden');
-            return;
+        } else {
+            fileUploadContainer.classList.add('hidden');
+            if (diagnosticFileInput) diagnosticFileInput.value = '';
+            filePreview.classList.add('hidden');
         }
-
-        fileUploadContainer.classList.add('hidden');
-        diagnosticFileInput.value = '';
-        filePreview.classList.add('hidden');
-        dropZone.classList.remove('hidden');
     });
+
+    // ========================
+    // Drag-and-Drop Upload
+    // ========================
 
     function handleFileSelection(file) {
         if (!file) return;
-
-        const maxSize = 5 * 1024 * 1024;
+        const maxSize = 5 * 1024 * 1024; // 5MB
         if (file.size > maxSize) {
-            showToast('Eroare', 'Fisierul este prea mare (max 5MB).', 'error');
+            showToast('Eroare', 'Fișierul este prea mare (max 5MB).', 'error');
             return;
         }
+        // Update file input
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        diagnosticFileInput.files = dt.files;
 
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
-        diagnosticFileInput.files = dataTransfer.files;
-
+        // Show preview
         fileNameDisplay.textContent = file.name;
         filePreview.classList.remove('hidden');
         dropZone.classList.add('hidden');
@@ -692,8 +427,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     dropZone.addEventListener('click', () => diagnosticFileInput.click());
 
-    dropZone.addEventListener('dragover', (event) => {
-        event.preventDefault();
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
         dropZone.classList.add('drag-over');
     });
 
@@ -701,11 +436,11 @@ document.addEventListener('DOMContentLoaded', () => {
         dropZone.classList.remove('drag-over');
     });
 
-    dropZone.addEventListener('drop', (event) => {
-        event.preventDefault();
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
         dropZone.classList.remove('drag-over');
-        if (event.dataTransfer.files.length > 0) {
-            handleFileSelection(event.dataTransfer.files[0]);
+        if (e.dataTransfer.files.length > 0) {
+            handleFileSelection(e.dataTransfer.files[0]);
         }
     });
 
@@ -721,108 +456,515 @@ document.addEventListener('DOMContentLoaded', () => {
         dropZone.classList.remove('hidden');
     });
 
-    bindConsentUx();
+    // ========================
+    // File Viewer
+    // ========================
 
-    bookingForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
+    closeFileViewer.onclick = () => {
+        fileViewerModal.classList.add('hidden');
+        fileViewerContent.innerHTML = '';
+        fileDownloadLink.innerHTML = '';
+    };
 
-        if (!selectedDoctor) {
-            showToast('Atentie', 'Selecteaza un medic.', 'error');
-            goToStep(1);
-            return;
+    function openFileViewer(base64, type) {
+        fileViewerContent.innerHTML = '';
+        fileDownloadLink.innerHTML = '';
+
+        if (type === 'application/pdf') {
+            fileViewerContent.innerHTML = `
+                <div class="text-center p-10">
+                    <svg class="w-16 h-16 text-red-500 mx-auto mb-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9 2a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V6l-4-4H9z"></path>
+                    </svg>
+                    <p class="text-lg font-medium text-gray-900">Document PDF</p>
+                </div>
+            `;
+            fileDownloadLink.innerHTML = `
+                <a href="${base64}" download="diagnostic.pdf"
+                   class="inline-block bg-medical-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-medical-700 transition-colors">
+                   Descarcă PDF
+                </a>
+            `;
+        } else {
+            fileViewerContent.innerHTML = `<img src="${base64}" class="max-w-full h-auto rounded-xl shadow-lg">`;
         }
 
+        fileViewerModal.classList.remove('hidden');
+    }
+
+    // ========================
+    // Booking Form Submission
+    // ========================
+
+    bookingForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        // GDPR check
         if (!gdprConsent.checked) {
-            setConsentError('Pentru a continua, trebuie sa confirmati consimtamantul pentru prelucrarea datelor.');
-            showToast('Atentie', 'Trebuie sa acceptati prelucrarea datelor personale (GDPR).', 'error');
+            showToast('Atenție', 'Trebuie să acceptați prelucrarea datelor personale (GDPR).', 'error');
             return;
         }
-        clearConsentError();
 
-        const firstName = byId('firstName').value.trim();
-        const lastName = byId('lastName').value.trim();
-        const name = `${lastName} ${firstName}`.trim();
-        const phone = byId('phone').value.trim();
-        const email = byId('email').value.trim();
-        const cnp = normalizeCnp(byId('cnp').value);
+        const firstName = document.getElementById('firstName').value;
+        const lastName = document.getElementById('lastName').value;
+        const name = `${lastName} ${firstName}`;
+        const phone = document.getElementById('phone').value;
+        const cnp = document.getElementById('cnp').value;
+        const email = document.getElementById('email').value;
         const type = typeInput.value;
-        const dateValue = formDate.value;
-        const timeValue = formTime.value;
+        const date = formDate.value;
+        const time = formTime.value;
 
-        if (!dateValue || !timeValue) {
-            showToast('Eroare', 'Selecteaza data si ora programarii.', 'error');
-            return;
-        }
-
+        // Diagnostic File
+        let fileData = null;
         if (hasDiagnosis.checked && diagnosticFileInput.files[0]) {
-            showToast('Info', 'Incarcarea documentelor este temporar indisponibila online. Va rugam aduceti documentele la consultatie.', 'error');
-            return;
+            fileData = await processFile(diagnosticFileInput.files[0]);
         }
 
         if (phone.length < 10) {
-            showToast('Eroare', 'Numarul de telefon pare invalid.', 'error');
+            showToast('Eroare', 'Numărul de telefon pare invalid.', 'error');
             return;
         }
 
-        if (!validateRomanianCnp(cnp)) {
-            showToast('Eroare', 'CNP invalid. Verificati cele 13 cifre.', 'error');
+        if (!/^\d{13}$/.test(cnp)) {
+            showToast('Eroare', 'CNP-ul trebuie să aibă exact 13 cifre.', 'error');
             return;
         }
 
-        const submitBtn = byId('submitBtn');
-        submitBtn.disabled = true;
-        loadingSpinner.classList.remove('hidden');
+        setFormLocked(true);
 
         try {
-            const res = await AUTH.apiFetch('/api/book', {
+            const res = await fetch('/api/book', {
                 method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    firstName,
-                    lastName,
-                    name,
-                    phone,
-                    email,
-                    cnp,
-                    type,
-                    date: dateValue,
-                    time: timeValue,
+                    name, phone, email, cnp, type, date, time,
                     hasDiagnosis: hasDiagnosis.checked,
-                    doctorId: selectedDoctor._id,
-                    doctorSlug: selectedDoctor.slug
+                    diagnosticFile: fileData ? fileData.base64 : null,
+                    fileType: fileData ? fileData.type : null
                 })
             });
 
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                showToast('Eroare', data.error || 'A aparut o eroare.', 'error');
-                return;
+            const data = await res.json();
+
+            if (res.ok) {
+                showToast('Succes!', 'Confirmarea și invitația pentru calendar au fost trimise pe adresa dumneavoastră de e-mail.');
+                bookingForm.reset();
+                // Reset type selector
+                typeSelector.querySelectorAll('.type-btn').forEach(b => b.classList.remove('selected'));
+                typeSelector.querySelector('[data-value="Control"]').classList.add('selected');
+                typeInput.value = 'Control';
+                diagnosisSection.classList.add('hidden');
+                fileUploadContainer.classList.add('hidden');
+                filePreview.classList.add('hidden');
+                dropZone.classList.remove('hidden');
+                // Go back to step 1
+                selectedDate = null;
+                selectedTime = null;
+                goToStep(1);
+                renderCalendar(currentDate);
+            } else {
+                showToast('Eroare', data.error || 'A apărut o eroare.', 'error');
             }
-
-            showToast('Succes!', 'Confirmarea si invitatia pentru calendar au fost trimise pe adresa dumneavoastra de e-mail.');
-            bookingForm.reset();
-            typeSelector.querySelectorAll('.type-btn').forEach((node) => node.classList.remove('selected'));
-            typeSelector.querySelector('[data-value="Control"]').classList.add('selected');
-            typeInput.value = 'Control';
-            diagnosisSection.classList.add('hidden');
-            fileUploadContainer.classList.add('hidden');
-            filePreview.classList.add('hidden');
-            dropZone.classList.remove('hidden');
-            clearConsentError();
-
-            selectedDate = null;
-            formDate.value = '';
-            formTime.value = '';
-            renderCalendar(currentDate);
-            goToStep(1);
-        } catch (_) {
+        } catch (err) {
             showToast('Eroare', 'Eroare de conexiune server.', 'error');
         } finally {
-            submitBtn.disabled = false;
-            loadingSpinner.classList.add('hidden');
+            setFormLocked(false);
         }
     });
 
-    renderCalendar(currentDate);
-    updateDoctorUI();
-    fetchDoctors();
+    function setFormLocked(locked) {
+        bookingForm.querySelectorAll('input, select, textarea, button').forEach(el => {
+            el.disabled = locked;
+        });
+        loadingSpinner.classList.toggle('hidden', !locked);
+    }
+
+    // ========================
+    // Admin Logic (Role-Based)
+    // ========================
+
+    const adminLoginBtn = document.getElementById('adminLoginBtn');
+    const adminDashboard = document.getElementById('adminDashboard');
+    const closeDashboard = document.getElementById('closeDashboard');
+    const exportExcelBtn = document.getElementById('exportExcelBtn');
+    const timelineGrid = document.getElementById('timelineGrid');
+    const currentAdminDateDisplay = document.getElementById('currentAdminDateDisplay');
+    const prevAdminDate = document.getElementById('prevAdminDate');
+    const nextAdminDate = document.getElementById('nextAdminDate');
+    const timelineHeaderCount = document.getElementById('timelineHeaderCount');
+    const manageUsersBtn = document.getElementById('manageUsersBtn');
+    const userManagerContainer = document.getElementById('userManagerContainer');
+    const timelineContainer = document.getElementById('timelineContainer');
+    const backToTimeline = document.getElementById('backToTimeline');
+    const userTableBody = document.getElementById('userTableBody');
+
+    let adminActiveDate = new Date();
+    adminActiveDate.setHours(0, 0, 0, 0);
+    while (adminActiveDate.getDay() !== 3) {
+        adminActiveDate.setDate(adminActiveDate.getDate() + 1);
+    }
+
+    adminLoginBtn.addEventListener('click', () => {
+        const user = AUTH.getUser();
+        const isSuperEmail = user && user.email && user.email.toLowerCase() === 'alexynho2009@gmail.com';
+        const isAdmin = user && (user.role === 'admin' || user.role === 'superadmin' || isSuperEmail);
+
+        if (isAdmin) {
+            openDashboard();
+        } else {
+            showToast('Acces interzis', 'Nu aveți drepturi de administrator.', 'error');
+        }
+    });
+
+    function openDashboard() {
+        adminDashboard.classList.remove('hidden');
+        updateAdminDateDisplay();
+        setupAdminSearch();
+        fetchAdminAppointments();
+        fetchAdminStats();
+
+        // Show Manage Users button for superadmin OR the dedicated email
+        const user = AUTH.getUser();
+        const isSuper = user && (user.role === 'superadmin' || (user.email && user.email.toLowerCase() === 'alexynho2009@gmail.com'));
+        if (isSuper) {
+            manageUsersBtn.classList.remove('hidden');
+        }
+    }
+
+    function setupAdminSearch() {
+        // Find or create search input
+        let searchInput = document.getElementById('adminSearchInput');
+        if (!searchInput) {
+            const headerActions = document.querySelector('#adminDashboard div.flex.flex-wrap.gap-2');
+            searchInput = document.createElement('input');
+            searchInput.id = 'adminSearchInput';
+            searchInput.type = 'text';
+            searchInput.placeholder = 'Caută nume, telefon sau email...';
+            searchInput.className = 'px-4 py-2 rounded-xl bg-brand-800 border border-brand-600/30 text-brand-100 placeholder-brand-400/50 text-sm focus:outline-none focus:border-brand-400 transition-all w-full md:w-64 order-first md:order-none';
+            headerActions.prepend(searchInput);
+
+            searchInput.addEventListener('input', () => {
+                fetchAdminAppointments(searchInput.value.toLowerCase());
+            });
+        }
+    }
+
+    function updateAdminDateDisplay() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const isToday = adminActiveDate.getTime() === today.getTime();
+        const dateStr = new Intl.DateTimeFormat('ro-RO', { day: 'numeric', month: 'long' }).format(adminActiveDate);
+        currentAdminDateDisplay.textContent = (isToday ? 'Azi, ' : '') + dateStr;
+    }
+
+    function getAdminActiveDateISO() {
+        const y = adminActiveDate.getFullYear();
+        const m = String(adminActiveDate.getMonth() + 1).padStart(2, '0');
+        const d = String(adminActiveDate.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+
+    prevAdminDate.onclick = () => {
+        adminActiveDate.setDate(adminActiveDate.getDate() - 7);
+        updateAdminDateDisplay();
+        fetchAdminAppointments();
+    };
+
+    nextAdminDate.onclick = () => {
+        adminActiveDate.setDate(adminActiveDate.getDate() + 7);
+        updateAdminDateDisplay();
+        fetchAdminAppointments();
+    };
+
+    async function fetchAdminStats() {
+        const storageIndicator = document.getElementById('storage-indicator');
+        const storageBar = document.getElementById('storage-bar');
+        const storageText = document.getElementById('storage-text');
+
+        try {
+            const res = await fetch('/api/admin/stats', {
+                headers: AUTH.getHeaders()
+            });
+            const data = await res.json();
+
+            if (res.ok) {
+                storageIndicator.classList.remove('hidden');
+                storageBar.style.width = `${Math.min(data.percentUsed, 100)}%`;
+                storageText.textContent = `${data.usedSizeMB} MB / ${data.totalSizeMB} MB (${data.percentUsed}%)`;
+
+                if (data.percentUsed > 80) {
+                    storageBar.classList.replace('bg-medical-500', 'bg-red-500');
+                }
+            }
+        } catch (err) {
+            console.error('Error fetching stats:', err);
+        }
+    }
+
+    async function fetchAdminAppointments(filterTerm = '') {
+        timelineGrid.innerHTML = '<div class="p-10 text-center text-gray-400 font-medium font-inter">Se încarcă programările...</div>';
+
+        try {
+            const res = await fetch('/api/admin/appointments', {
+                headers: AUTH.getHeaders()
+            });
+
+            const appointments = await res.json().catch(() => null);
+
+            if (!res.ok) {
+                throw new Error(appointments?.error || `Server error: ${res.status}`);
+            }
+
+            const y = adminActiveDate.getFullYear();
+            const m = String(adminActiveDate.getMonth() + 1).padStart(2, '0');
+            const d = String(adminActiveDate.getDate()).padStart(2, '0');
+            const formattedActiveDate = `${y}-${m}-${d}`;
+
+            const filtered = appointments.filter(app => {
+                const isDateMatch = app.date === formattedActiveDate;
+                if (!isDateMatch) return false;
+                if (!filterTerm) return true;
+
+                return app.name.toLowerCase().includes(filterTerm) ||
+                    app.phone.includes(filterTerm) ||
+                    (app.email && app.email.toLowerCase().includes(filterTerm)) ||
+                    app.cnp.includes(filterTerm);
+            });
+            renderTimeline(filtered);
+            timelineHeaderCount.textContent = `(${filtered.length}) Programări`;
+        } catch (err) {
+            console.error('Admin Fetch Error:', err);
+            timelineGrid.innerHTML = `<div class="p-10 text-center text-red-500 font-medium">
+                Eroare la încărcare.<br>
+                <span class="text-xs text-brand-400/50">${err.message}</span>
+            </div>`;
+        }
+    }
+
+    function renderTimeline(appointments) {
+        timelineGrid.innerHTML = '';
+
+        const clinicHours = [];
+        for (let hour = 9; hour < 14; hour++) {
+            for (let min = 0; min < 60; min += 20) {
+                if (hour === 13 && min > 40) break;
+                const hh = String(hour).padStart(2, '0');
+                const mm = String(min).padStart(2, '0');
+                clinicHours.push(`${hh}:${mm}`);
+            }
+        }
+
+        clinicHours.forEach(time => {
+            const row = document.createElement('div');
+            row.className = 'timeline-row';
+
+            const hourLabel = document.createElement('div');
+            hourLabel.className = 'timeline-hour';
+            hourLabel.textContent = time;
+
+            const slotsArea = document.createElement('div');
+            slotsArea.className = 'timeline-slots';
+
+            const appsInSlot = appointments.filter(a => a.time === time);
+
+            appsInSlot.forEach((app) => {
+                const card = document.createElement('div');
+                card.className = `appointment-card ${app.type === 'Control' ? 'app-type-control' : 'app-type-prima'}`;
+
+                card.innerHTML = `
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <span class="font-bold text-brand-100">${app.name}</span>
+                        ${app.type === 'Prima Consultație' ? '<span class="app-new-badge">NOU</span>' : ''}
+                        <span class="text-brand-600/30">|</span>
+                        <span class="text-brand-300"><strong class="font-inter text-[11px] uppercase text-brand-400/50">Email:</strong> ${app.email || '—'}</span>
+                        <span class="text-brand-600/30">|</span>
+                        <span class="text-brand-300"><strong class="font-inter text-[11px] uppercase text-brand-400/50">Tel:</strong> ${app.phone}</span>
+                        <span class="text-brand-600/30">|</span>
+                        <span class="text-brand-300"><strong class="font-inter text-[11px] uppercase text-brand-400/50">CNP:</strong> ${app.cnp}</span>
+                        <span class="text-brand-600/30">|</span>
+                        <span class="text-brand-300"><strong class="font-inter text-[11px] uppercase text-brand-400/50">Tip:</strong> ${app.type}</span>
+                        <span class="text-brand-600/30">|</span>
+                        <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-lg ${app.emailSent ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}" title="${app.emailSent ? 'Invitație expediată' : 'Eroare trimitere sau în procesare'}">
+                            <span class="text-[10px] font-bold uppercase">${app.emailSent ? 'Trimis' : 'Netrimis'}</span>
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                ${app.emailSent ?
+                        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />' :
+                        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12" />'}
+                            </svg>
+                        </div>
+                        <button class="resend-email-btn bg-brand-400/10 hover:bg-brand-400/20 text-brand-400 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1" data-id="${app._id}">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                            Trimite Manual
+                        </button>
+                        <button class="cancel-appointment-btn bg-red-500/10 hover:bg-red-500/20 text-red-300 px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1" data-id="${app._id}">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                            Anuleaza
+                        </button>
+                        ${app.diagnosticFile ? `
+                            <button class="ml-auto view-file-link bg-brand-600/20 px-3 py-1 rounded-lg text-xs font-bold text-brand-300 hover:bg-brand-600/40 transition-all">VEZI DOC</button>
+                        ` : ''}
+                    </div>
+                `;
+
+                if (app.diagnosticFile) {
+                    card.querySelector('.view-file-link').onclick = (e) => {
+                        e.stopPropagation();
+                        openFileViewer(app.diagnosticFile, app.fileType);
+                    };
+                }
+
+                card.querySelector('.resend-email-btn').onclick = async (e) => {
+                    e.stopPropagation();
+                    const btn = e.currentTarget;
+                    const originalText = btn.innerHTML;
+                    btn.disabled = true;
+                    btn.innerHTML = '<span class="animate-pulse">Se trimite...</span>';
+
+                    try {
+                        const res = await fetch(`/api/admin/resend-email/${app._id}`, {
+                            method: 'POST',
+                            headers: AUTH.getHeaders()
+                        });
+                        const data = await res.json();
+                        if (res.ok) {
+                            showToast('Succes', data.message);
+                            // Refresh timeline to show updated status
+                            if (typeof fetchAdminAppointments === 'function') {
+                                setTimeout(() => fetchAdminAppointments(''), 2000);
+                            }
+                        } else {
+                            const errorMsg = data.details ? `${data.error}: ${data.details}` : (data.error || 'Eroare server');
+                            showToast('Eroare', errorMsg, 'error');
+                        }
+                    } catch (err) {
+                        showToast('Eroare', 'Eroare de conexiune.', 'error');
+                    } finally {
+                        btn.disabled = false;
+                        btn.innerHTML = originalText;
+                    }
+                };
+
+                slotsArea.appendChild(card);
+            });
+
+            row.appendChild(hourLabel);
+            row.appendChild(slotsArea);
+            timelineGrid.appendChild(row);
+        });
+    }
+
+    // User Management (SuperAdmin)
+    manageUsersBtn.addEventListener('click', () => {
+        timelineContainer.classList.add('hidden');
+        userManagerContainer.classList.remove('hidden');
+        fetchUsers();
+    });
+
+    backToTimeline.addEventListener('click', () => {
+        userManagerContainer.classList.add('hidden');
+        timelineContainer.classList.remove('hidden');
+    });
+
+    async function fetchUsers() {
+        userTableBody.innerHTML = '<tr><td colspan="4" class="p-10 text-center text-brand-400">Se încarcă lista de utilizatori...</td></tr>';
+        try {
+            const res = await fetch('/api/admin/users', {
+                headers: AUTH.getHeaders()
+            });
+            const users = await res.json();
+            if (res.ok) {
+                renderUsers(users);
+            } else {
+                showToast('Eroare', users.error || 'Eroare la preluare utilizatori.', 'error');
+            }
+        } catch (err) {
+            showToast('Eroare', 'Eroare de conexiune server.', 'error');
+        }
+    }
+
+    function renderUsers(users) {
+        userTableBody.innerHTML = '';
+        users.forEach(user => {
+            const row = document.createElement('tr');
+            row.className = 'border-b border-brand-600/10 hover:bg-brand-600/5 transition-colors';
+
+            const isSelf = user.email === AUTH.getUser().email;
+            const isSuperAdmin = user.role === 'superadmin';
+
+            row.innerHTML = `
+                <td class="py-4 font-medium">${user.displayName}</td>
+                <td class="py-4 text-brand-400">${user.email}</td>
+                <td class="py-4 text-brand-400">${user.phone}</td>
+                <td class="py-4 text-center">
+                    <button class="role-toggle-btn w-12 h-6 rounded-full relative transition-all duration-300 ${user.role === 'admin' ? 'bg-brand-400' : (isSuperAdmin ? 'bg-medical-500' : 'bg-brand-700')}" 
+                            ${(isSelf || isSuperAdmin) ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}>
+                        <div class="w-4 h-4 bg-brand-900 rounded-full absolute top-1 transition-all duration-300 ${user.role === 'admin' ? 'left-7' : 'left-1'}"></div>
+                    </button>
+                    ${isSuperAdmin ? '<span class="block text-[10px] uppercase font-bold text-medical-500 mt-1">Super Admin</span>' : ''}
+                </td>
+            `;
+
+            if (!isSelf && !isSuperAdmin) {
+                row.querySelector('.role-toggle-btn').onclick = () => {
+                    const newRole = user.role === 'admin' ? 'user' : 'admin';
+                    toggleUserRole(user._id, newRole);
+                };
+            }
+
+            userTableBody.appendChild(row);
+        });
+    }
+
+    async function toggleUserRole(userId, role) {
+        try {
+            const res = await fetch('/api/admin/users/role', {
+                method: 'POST',
+                headers: AUTH.getHeaders(),
+                body: JSON.stringify({ userId, role })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showToast('Succes', data.message);
+                fetchUsers();
+            } else {
+                showToast('Eroare', data.error, 'error');
+            }
+        } catch (err) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        }
+    }
+
+    const resetDatabaseBtn = document.getElementById('resetDatabaseBtn');
+    resetDatabaseBtn.addEventListener('click', async () => {
+        const confirm1 = confirm("Ești sigur că vrei să ștergi TOATE programările?");
+        if (!confirm1) return;
+        const confirm2 = confirm("CONFIRMARE FINALĂ: Toate datele vor fi șterse definitiv. Continuăm?");
+        if (!confirm2) return;
+
+        try {
+            const res = await fetch('/api/admin/reset', {
+                method: 'POST',
+                headers: AUTH.getHeaders()
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showToast('Succes', 'Baza de date a fost resetată.');
+                fetchAdminAppointments();
+                fetchAdminStats();
+            } else {
+                showToast('Eroare', data.error || 'Nu s-a putut reseta.', 'error');
+            }
+        } catch (err) {
+            showToast('Eroare', 'Eroare de conexiune.', 'error');
+        }
+    });
+
+    exportExcelBtn.addEventListener('click', () => {
+        window.location.href = `/api/admin/export?token=${AUTH.getToken()}`;
+    });
+
+    closeDashboard.addEventListener('click', () => {
+        adminDashboard.classList.add('hidden');
+    });
 });
