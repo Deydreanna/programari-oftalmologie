@@ -612,8 +612,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     firstName, lastName, phone, email, cnp, type, date, time,
                     hasDiagnosis: hasDiagnosis.checked,
                     diagnosticFile: fileData ? fileData.base64 : null,
-                    fileType: fileData ? fileData.type : null,
-                    doctorId: selectedDoctor?._id,
                     doctorSlug: selectedDoctor?.slug
                 })
             });
