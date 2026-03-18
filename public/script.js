@@ -64,6 +64,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentDate = new Date();
     let selectedDate = null;
     let selectedTime = null;
+    let selectedDoctor = null;
+    let doctorsList = [];
 
     // ========================
     // Step Wizard
@@ -223,6 +225,16 @@ document.addEventListener('DOMContentLoaded', () => {
             calendarGrid.appendChild(div);
         }
 
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const availableWeekdays = selectedDoctor
+            ? new Set(selectedDoctor.availabilityRules.weekdays)
+            : new Set();
+        const monthsToShow = selectedDoctor?.bookingSettings?.monthsToShow || 2;
+        const maxDate = new Date(today);
+        maxDate.setMonth(maxDate.getMonth() + monthsToShow);
+
         for (let i = 1; i <= lastDay; i++) {
             const dayDiv = document.createElement('div');
             dayDiv.textContent = i;
@@ -233,17 +245,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const d = String(currentDayDate.getDate()).padStart(2, '0');
             const formattedDate = `${y}-${m}-${d}`;
 
-            const isWednesday = currentDayDate.getDay() === 3;
-            const isValidMonth = year === 2026 && month >= 1 && month <= 3;
-            const isExcludedDate = formattedDate === '2026-04-08';
-
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
             const isPast = currentDayDate < today;
+            const isAfterMax = currentDayDate > maxDate;
+            const isAvailableWeekday = availableWeekdays.has(currentDayDate.getDay());
 
             dayDiv.className = 'calendar-day';
 
-            if (isWednesday && !isPast && isValidMonth && !isExcludedDate) {
+            if (selectedDoctor && !isPast && !isAfterMax && isAvailableWeekday) {
                 dayDiv.classList.add('active-wednesday');
 
                 const dot = document.createElement('div');
@@ -268,6 +276,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const dateObj = new Date(date);
         const dateStr = new Intl.DateTimeFormat('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' }).format(dateObj);
         selectedDateDisplay.textContent = dateStr;
+        if (selectedDoctorDisplay) selectedDoctorDisplay.textContent = selectedDoctor?.displayName || '';
 
         // Highlight
         document.querySelectorAll('.calendar-day').forEach(d => d.classList.remove('selected'));
@@ -279,24 +288,81 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     prevMonthBtn.onclick = () => {
+        const today = new Date();
+        const minYear = today.getFullYear();
+        const minMonth = today.getMonth();
         const testDate = new Date(currentDate);
         testDate.setMonth(testDate.getMonth() - 1);
-        if (testDate.getFullYear() === 2026 && testDate.getMonth() >= 1) {
+        if (testDate.getFullYear() > minYear ||
+            (testDate.getFullYear() === minYear && testDate.getMonth() >= minMonth)) {
             currentDate.setMonth(currentDate.getMonth() - 1);
             renderCalendar(currentDate);
         }
     };
 
     nextMonthBtn.onclick = () => {
+        const monthsToShow = selectedDoctor?.bookingSettings?.monthsToShow || 2;
+        const today = new Date();
+        const maxDate = new Date(today);
+        maxDate.setMonth(maxDate.getMonth() + monthsToShow);
         const testDate = new Date(currentDate);
         testDate.setMonth(testDate.getMonth() + 1);
-        if (testDate.getFullYear() === 2026 && testDate.getMonth() <= 3) {
+        if (testDate <= maxDate) {
             currentDate.setMonth(currentDate.getMonth() + 1);
             renderCalendar(currentDate);
         }
     };
 
     renderCalendar(currentDate);
+
+    // ========================
+    // Doctor Selection
+    // ========================
+
+    const doctorSelect = document.getElementById('doctorSelect');
+    const doctorSelectHint = document.getElementById('doctorSelectHint');
+    const selectedDoctorDisplay = document.getElementById('selectedDoctorDisplay');
+    const formSummaryDoctor = document.getElementById('formSummaryDoctor');
+
+    async function loadDoctors() {
+        try {
+            const res = await fetch('/api/public/doctors');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Eroare server');
+
+            doctorsList = data.doctors || [];
+            doctorSelect.innerHTML = '<option value="">Selecteaza un medic...</option>';
+            doctorsList.forEach(d => {
+                const opt = document.createElement('option');
+                opt.value = d.slug;
+                opt.textContent = d.displayName + (d.specialty ? ' — ' + d.specialty : '');
+                doctorSelect.appendChild(opt);
+            });
+
+            if (doctorsList.length === 0) {
+                doctorSelectHint.textContent = 'Niciun medic activ momentan.';
+            } else if (doctorsList.length === 1) {
+                doctorSelectHint.textContent = '1 medic disponibil';
+                doctorSelect.value = doctorsList[0].slug;
+                selectedDoctor = doctorsList[0];
+                renderCalendar(currentDate);
+            } else {
+                doctorSelectHint.textContent = `${doctorsList.length} medici disponibili`;
+            }
+        } catch (err) {
+            console.error('loadDoctors error:', err);
+            doctorSelectHint.textContent = 'Eroare la încărcarea listei de medici.';
+        }
+    }
+
+    doctorSelect.addEventListener('change', () => {
+        const slug = doctorSelect.value;
+        selectedDoctor = doctorsList.find(d => d.slug === slug) || null;
+        selectedDate = null;
+        renderCalendar(currentDate);
+    });
+
+    loadDoctors();
 
     // ========================
     // Slots
@@ -306,15 +372,20 @@ document.addEventListener('DOMContentLoaded', () => {
         slotsGrid.innerHTML = '<div class="col-span-full text-center py-8 text-brand-400/60 font-medium">Se încarcă intervalele...</div>';
         noSlotsMessage.classList.add('hidden');
 
+        if (!selectedDoctor) {
+            showSlotError('Selectați un medic înainte de a alege ora.', date);
+            return;
+        }
+
         try {
-            const res = await fetch(`/api/slots?date=${date}`);
-            const slots = await res.json();
+            const res = await fetch(`/api/slots?date=${date}&doctor=${encodeURIComponent(selectedDoctor.slug)}`);
+            const data = await res.json();
 
             if (res.status !== 200) {
-                showSlotError(slots.error || 'Eroare la încărcarea orelor.', date);
+                showSlotError(data.error || 'Eroare la încărcarea orelor.', date);
                 return;
             }
-            renderSlots(slots, date);
+            renderSlots(data.slots, date);
         } catch (err) {
             console.error(err);
             showSlotError('Eroare de conexiune. Verificați conexiunea la internet.', date);
@@ -507,13 +578,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const firstName = document.getElementById('firstName').value;
         const lastName = document.getElementById('lastName').value;
-        const name = `${lastName} ${firstName}`;
         const phone = document.getElementById('phone').value;
         const cnp = document.getElementById('cnp').value;
         const email = document.getElementById('email').value;
         const type = typeInput.value;
         const date = formDate.value;
         const time = formTime.value;
+        if (formSummaryDoctor) formSummaryDoctor.textContent = selectedDoctor?.displayName || '';
 
         // Diagnostic File
         let fileData = null;
@@ -538,10 +609,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    name, phone, email, cnp, type, date, time,
+                    firstName, lastName, phone, email, cnp, type, date, time,
                     hasDiagnosis: hasDiagnosis.checked,
                     diagnosticFile: fileData ? fileData.base64 : null,
-                    fileType: fileData ? fileData.type : null
+                    fileType: fileData ? fileData.type : null,
+                    doctorId: selectedDoctor?._id,
+                    doctorSlug: selectedDoctor?.slug
                 })
             });
 
@@ -605,7 +678,7 @@ document.addEventListener('DOMContentLoaded', () => {
         adminActiveDate.setDate(adminActiveDate.getDate() + 1);
     }
 
-    adminLoginBtn.addEventListener('click', () => {
+    adminLoginBtn?.addEventListener('click', () => {
         const user = AUTH.getUser();
         const isSuperEmail = user && user.email && user.email.toLowerCase() === 'alexynho2009@gmail.com';
         const isAdmin = user && (user.role === 'admin' || user.role === 'superadmin' || isSuperEmail);
@@ -665,13 +738,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${y}-${m}-${d}`;
     }
 
-    prevAdminDate.onclick = () => {
+    if (prevAdminDate) prevAdminDate.onclick = () => {
         adminActiveDate.setDate(adminActiveDate.getDate() - 7);
         updateAdminDateDisplay();
         fetchAdminAppointments();
     };
 
-    nextAdminDate.onclick = () => {
+    if (nextAdminDate) nextAdminDate.onclick = () => {
         adminActiveDate.setDate(adminActiveDate.getDate() + 7);
         updateAdminDateDisplay();
         fetchAdminAppointments();
@@ -855,13 +928,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // User Management (SuperAdmin)
-    manageUsersBtn.addEventListener('click', () => {
+    manageUsersBtn?.addEventListener('click', () => {
         timelineContainer.classList.add('hidden');
         userManagerContainer.classList.remove('hidden');
         fetchUsers();
     });
 
-    backToTimeline.addEventListener('click', () => {
+    backToTimeline?.addEventListener('click', () => {
         userManagerContainer.classList.add('hidden');
         timelineContainer.classList.remove('hidden');
     });
@@ -936,7 +1009,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const resetDatabaseBtn = document.getElementById('resetDatabaseBtn');
-    resetDatabaseBtn.addEventListener('click', async () => {
+    resetDatabaseBtn?.addEventListener('click', async () => {
         const confirm1 = confirm("Ești sigur că vrei să ștergi TOATE programările?");
         if (!confirm1) return;
         const confirm2 = confirm("CONFIRMARE FINALĂ: Toate datele vor fi șterse definitiv. Continuăm?");
@@ -960,11 +1033,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    exportExcelBtn.addEventListener('click', () => {
+    exportExcelBtn?.addEventListener('click', () => {
         window.location.href = `/api/admin/export?token=${AUTH.getToken()}`;
     });
 
-    closeDashboard.addEventListener('click', () => {
+    closeDashboard?.addEventListener('click', () => {
         adminDashboard.classList.add('hidden');
     });
 });
