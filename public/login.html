@@ -234,7 +234,7 @@
         &copy; 2026 INSTITUTUL CLINIC DE URGENTE OFTALMOLOGICE "PROF. DR. MIRCEA OLTEANU" - Toate drepturile rezervate
     </footer>
 
-    <script src="auth.js"></script>
+    <script src="auth.js?v=2.1"></script>
     <script>
         // Redirect if already logged in
         (async () => {
@@ -286,11 +286,19 @@
                 }
             }
 
+            const fallbackHeaders = {
+                'Content-Type': 'application/json'
+            };
+            const csrfToken = (window.AUTH && typeof AUTH.getCsrfToken === 'function')
+                ? AUTH.getCsrfToken()
+                : '';
+            if (csrfToken) {
+                fallbackHeaders['X-CSRF-Token'] = csrfToken;
+            }
+
             return fetch('/api/auth/login', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: fallbackHeaders,
                 credentials: 'include',
                 body: JSON.stringify(payload)
             });

@@ -151,6 +151,45 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 12000);
     }
 
+    function getCookieValue(name) {
+        const key = String(name || '').trim();
+        if (!key) return '';
+        const cookies = document.cookie ? document.cookie.split('; ') : [];
+        for (const cookie of cookies) {
+            const idx = cookie.indexOf('=');
+            if (idx < 0) continue;
+            const cookieName = cookie.slice(0, idx);
+            if (cookieName !== key) continue;
+            return decodeURIComponent(cookie.slice(idx + 1));
+        }
+        return '';
+    }
+
+    async function secureApiFetch(url, options = {}) {
+        if (window.AUTH && typeof AUTH.apiFetch === 'function') {
+            return AUTH.apiFetch(url, options);
+        }
+
+        const method = String(options.method || 'GET').toUpperCase();
+        const headers = new Headers(options.headers || {});
+        if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
+            headers.set('Content-Type', 'application/json');
+        }
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+            const csrfToken = getCookieValue('__Host-csrf');
+            if (csrfToken) {
+                headers.set('X-CSRF-Token', csrfToken);
+            }
+        }
+
+        return fetch(url, {
+            ...options,
+            method,
+            headers,
+            credentials: 'include'
+        });
+    }
+
     // ========================
     // File Processing
     // ========================
@@ -326,7 +365,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function loadDoctors() {
         try {
-            const res = await fetch('/api/public/doctors');
+            const res = await secureApiFetch('/api/public/doctors');
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Eroare server');
 
@@ -378,7 +417,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
-            const res = await fetch(`/api/slots?date=${date}&doctor=${encodeURIComponent(selectedDoctor.slug)}`);
+            const res = await secureApiFetch(`/api/slots?date=${date}&doctor=${encodeURIComponent(selectedDoctor.slug)}`);
             const data = await res.json();
 
             if (res.status !== 200) {
@@ -605,9 +644,8 @@ document.addEventListener('DOMContentLoaded', () => {
         setFormLocked(true);
 
         try {
-            const res = await fetch('/api/book', {
+            const res = await secureApiFetch('/api/book', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     firstName, lastName, phone, email, cnp, type, date, time,
                     hasDiagnosis: hasDiagnosis.checked,
@@ -754,9 +792,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const storageText = document.getElementById('storage-text');
 
         try {
-            const res = await fetch('/api/admin/stats', {
-                headers: AUTH.getHeaders()
-            });
+            const res = await secureApiFetch('/api/admin/stats');
             const data = await res.json();
 
             if (res.ok) {
@@ -777,9 +813,7 @@ document.addEventListener('DOMContentLoaded', () => {
         timelineGrid.innerHTML = '<div class="p-10 text-center text-gray-400 font-medium font-inter">Se încarcă programările...</div>';
 
         try {
-            const res = await fetch('/api/admin/appointments', {
-                headers: AUTH.getHeaders()
-            });
+            const res = await secureApiFetch('/api/admin/appointments');
 
             const appointments = await res.json().catch(() => null);
 
@@ -893,9 +927,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     btn.innerHTML = '<span class="animate-pulse">Se trimite...</span>';
 
                     try {
-                        const res = await fetch(`/api/admin/resend-email/${app._id}`, {
-                            method: 'POST',
-                            headers: AUTH.getHeaders()
+                        const res = await secureApiFetch(`/api/admin/resend-email/${app._id}`, {
+                            method: 'POST'
                         });
                         const data = await res.json();
                         if (res.ok) {
@@ -940,9 +973,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchUsers() {
         userTableBody.innerHTML = '<tr><td colspan="4" class="p-10 text-center text-brand-400">Se încarcă lista de utilizatori...</td></tr>';
         try {
-            const res = await fetch('/api/admin/users', {
-                headers: AUTH.getHeaders()
-            });
+            const res = await secureApiFetch('/api/admin/users');
             const users = await res.json();
             if (res.ok) {
                 renderUsers(users);
@@ -989,9 +1020,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function toggleUserRole(userId, role) {
         try {
-            const res = await fetch('/api/admin/users/role', {
+            const res = await secureApiFetch('/api/admin/users/role', {
                 method: 'POST',
-                headers: AUTH.getHeaders(),
                 body: JSON.stringify({ userId, role })
             });
             const data = await res.json();
@@ -1014,9 +1044,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!confirm2) return;
 
         try {
-            const res = await fetch('/api/admin/reset', {
-                method: 'POST',
-                headers: AUTH.getHeaders()
+            const res = await secureApiFetch('/api/admin/reset', {
+                method: 'POST'
             });
             const data = await res.json();
             if (res.ok) {
@@ -1031,8 +1060,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    exportExcelBtn?.addEventListener('click', () => {
-        window.location.href = `/api/admin/export?token=${AUTH.getToken()}`;
+    exportExcelBtn?.addEventListener('click', async () => {
+        showToast('Atentie', 'Exportul necesita confirmare step-up in noul panou de administrare.', 'error');
     });
 
     closeDashboard?.addEventListener('click', () => {
